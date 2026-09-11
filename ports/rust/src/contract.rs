@@ -165,13 +165,15 @@ pub fn validate(p: &Packet) -> Vec<Violation> {
         for (i, e) in es.iter().enumerate() {
             validate_evidence(&mut v, p.outcome.as_str(), i, e);
         }
-        if p.outcome == "complete" && es.is_empty() {
-            v.push(Violation {
-                rule: "evidence",
-                field: "evidence".into(),
-                message: "complete packet requires at least one evidence entry",
-            });
-        }
+    }
+    // The reference runs this even when the field is absent or null
+    // (internal/contract/contract.go:351-353).
+    if p.outcome == "complete" && p.evidence.as_ref().map_or(true, |es| es.is_empty()) {
+        v.push(Violation {
+            rule: "evidence",
+            field: "evidence".into(),
+            message: "complete packet requires at least one evidence entry",
+        });
     }
     if [
         "failed_verification",

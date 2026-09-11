@@ -193,21 +193,27 @@ pub fn decodePacket(allocator: std.mem.Allocator, root: json.Value) !Packet {
         if (item != .string) return error.WrongType;
         degradations[i] = item.string;
     }
+    const freshness = Freshness{
+        .head_commit = try optionalText(f, "head_commit"), .head_anchor = try optionalText(f, "head_anchor"), .status = try optionalText(f, "status"),
+        .current = try boolean(f, "current"), .is_current = try boolean(f, "is_current"), .checked_at = try optionalText(f, "checked_at"),
+    };
+    const budget = Budget{ .max_evidence = try integer(b, "max_evidence"), .used_evidence = try integer(b, "used_evidence"), .max_bytes = try integer(b, "max_bytes"), .used_bytes = try integer(b, "used_bytes") };
     return .{
         .packet_id = try text(root, "packet_id"), .schema_version = try text(root, "schema_version"), .repo_root = try text(root, "repo_root"),
         .head_commit = try text(root, "head_commit"), .request_id = try text(root, "request_id"), .issued_at = try text(root, "issued_at"),
-        .outcome = try text(root, "outcome"), .freshness = .{
-            .head_commit = try optionalText(f, "head_commit"), .head_anchor = try optionalText(f, "head_anchor"), .status = try optionalText(f, "status"),
-            .current = try boolean(f, "current"), .is_current = try boolean(f, "is_current"), .checked_at = try optionalText(f, "checked_at"),
-        }, .authorization = .{ .level = try text(a, "level"), .reason = try optionalText(a, "reason") },
-        .budget = .{ .max_evidence = try integer(b, "max_evidence"), .used_evidence = try integer(b, "used_evidence"), .max_bytes = try integer(b, "max_bytes"), .used_bytes = try integer(b, "used_bytes") },
+        .outcome = try text(root, "outcome"), .freshness = freshness,
+        .authorization = .{ .level = try text(a, "level"), .reason = try optionalText(a, "reason") },
+        .budget = budget,
         .evidence = evidence, .degradations = degradations, .provenance = .{ .collector = try optionalText(p, "collector"), .tool = try optionalText(p, "tool"), .version = try optionalText(p, "version"), .tool_version = try optionalText(p, "tool_version") },
         .packet_hash = try text(root, "packet_hash"),
-        .freshness_present = field(root, "freshness") != null,
+        // The reference keys required-field presence off emptiness for structs and
+        // nil-ness for slices, so an explicit null is absent but [] is present
+        // (internal/contract/contract.go:217-231).
+        .freshness_present = !emptyFreshness(freshness),
         .authorization_present = hasText(a, "level"),
-        .budget_present = field(root, "budget") != null,
-        .evidence_present = field(root, "evidence") != null,
-        .degradations_present = field(root, "degradations") != null,
+        .budget_present = !emptyBudget(budget),
+        .evidence_present = !(ev_field == null or ev_field.? == .null),
+        .degradations_present = !(dg_field == null or dg_field.? == .null),
         .provenance_present = hasText(p, "collector") or hasText(p, "tool") or hasText(p, "version") or hasText(p, "tool_version"),
     };
 }

@@ -270,9 +270,10 @@ function validatePacket(p: AnyObj): Violation[] {
     p.degradations.forEach((x: string, i: number) => { if (!x.trim()) add("degradations",`degradations[${i}]`,"degradation must not be empty"); });
     if (p.outcome === "complete" && p.degradations.length) add("degradations","degradations","complete packet cannot contain degradations");
   }
-  if (Array.isArray(p.evidence)) {
-    for (let i=0;i<p.evidence.length;i++) {
-      const e=p.evidence[i], f=`evidence[${i}]`;
+  {
+    const evidenceList = Array.isArray(p.evidence) ? p.evidence : [];
+    for (let i=0;i<evidenceList.length;i++) {
+      const e=evidenceList[i], f=`evidence[${i}]`;
       for (const k of ["evidence_id","kind","path","commit","source","content_hash","collected_at","verifier_status"])
         if (!String(e[k] ?? "").trim()) add("malformed_evidence",`${f}.${k}`,"required evidence field is missing");
       if (e.line_start < 1) add("malformed_evidence",`${f}.line_start`,"line_start must be at least 1");
@@ -281,7 +282,7 @@ function validatePacket(p: AnyObj): Violation[] {
       if (!["verified","unverified","failed","unavailable","pending"].includes(e.verifier_status)) add("malformed_evidence",`${f}.verifier_status`,"unknown verifier status");
       if (p.outcome === "complete" && e.verifier_status !== "verified") add("evidence",`${f}.verifier_status`,"complete packet requires verified evidence");
     }
-    if (p.outcome === "complete" && p.evidence.length === 0) add("evidence","evidence","complete packet requires at least one evidence entry");
+    if (p.outcome === "complete" && evidenceList.length === 0) add("evidence","evidence","complete packet requires at least one evidence entry");
   }
   if (["autonomous","autonomous_proceed","autonomous-proceed"].includes(String(auth.level || "").trim().toLowerCase()) &&
       ["failed_verification","blocked","unavailable","budget_exhausted"].includes(p.outcome))
