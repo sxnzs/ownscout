@@ -1,0 +1,356 @@
+{
+  "cases": [
+    {
+      "args": [
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-root",
+      "stdout": "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-contract",
+      "stdout": "Usage: ownscout contract validate --packet \u003cfile\u003e [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-evidence",
+      "stdout": "Usage: ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-node",
+      "stdout": "Usage: ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.\n"
+    },
+    {
+      "args": [
+        "version"
+      ],
+      "exitCode": 0,
+      "name": "version",
+      "stdout": "ownscout 0.1.0\n"
+    },
+    {
+      "args": [
+        "doctor"
+      ],
+      "exitCode": 0,
+      "name": "doctor",
+      "stdout": "OwnScout doctor: ok\n\nChecks:\n  ✓ CLI is available\n  ✓ local-only mode\n  ✓ repository mutation disabled\n\nNext action: run a contract validation or evidence verification.\n"
+    },
+    {
+      "args": [],
+      "exitCode": 2,
+      "name": "no-command",
+      "stdout": "error: a command is required\n\nOwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n\nNext action: run 'ownscout --help'.\n"
+    },
+    {
+      "args": [
+        "nope"
+      ],
+      "exitCode": 2,
+      "name": "unknown-command",
+      "stdout": "error: unknown command 'nope'\nNext action: run 'ownscout --help'.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-valid.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-valid-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-valid-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-invalid.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-invalid-human",
+      "stdout": "ERROR: packet is invalid (16 violation(s))\n  - required_field: schema_version: required field is missing\n  - required_field: repo_root: required field is missing\n  - required_field: head_commit: required field is missing\n  - required_field: request_id: required field is missing\n  - required_field: issued_at: required field is missing\n  - required_field: outcome: required field is missing\n  - required_field: packet_hash: required field is missing\n  - required_field: freshness: required field is missing\n  - required_field: authorization: required field is missing\n  - required_field: budget: required field is missing\n  - required_field: evidence: required field is missing\n  - required_field: degradations: required field is missing\n  - required_field: provenance: required field is missing\n  - schema_version: schema_version: must be v1\n  - outcome: outcome: unknown outcome\n  - budget: budget: budget must contain counters\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-invalid.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-invalid-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (16 violation(s))\",\"details\":[\"required_field: schema_version: required field is missing\",\"required_field: repo_root: required field is missing\",\"required_field: head_commit: required field is missing\",\"required_field: request_id: required field is missing\",\"required_field: issued_at: required field is missing\",\"required_field: outcome: required field is missing\",\"required_field: packet_hash: required field is missing\",\"required_field: freshness: required field is missing\",\"required_field: authorization: required field is missing\",\"required_field: budget: required field is missing\",\"required_field: evidence: required field is missing\",\"required_field: degradations: required field is missing\",\"required_field: provenance: required field is missing\",\"schema_version: schema_version: must be v1\",\"outcome: outcome: unknown outcome\",\"budget: budget: budget must contain counters\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-malformed.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-malformed-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/packet-malformed.json\" is not valid JSON\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-malformed.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-malformed-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/packet-malformed.json\\\" is not valid JSON\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/absent.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-missing-file",
+      "stdout": "ERROR: packet could not be loaded\n  - packet file \"fixtures/absent.json\" does not exist\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate"
+      ],
+      "exitCode": 2,
+      "name": "contract-missing-flag",
+      "stdout": "error: missing required --packet \u003cfile\u003e\nNext action: run 'ownscout contract validate --help'.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-valid-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-valid-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-stale.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-stale-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"notes.txt\"): content hash mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-stale.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-stale-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"notes.txt\\\"): content hash mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/absent",
+        "--packet",
+        "fixtures/packet-valid.json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-missing-repo",
+      "stdout": "ERROR: repository could not be checked\n  - resolve repository root \"fixtures/absent\": lstat {{DIR}}/fixtures/absent: no such file or directory\nNext action: Provide a readable repository directory with --repo \u003cdir\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 0,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "node-valid-human",
+      "stdout": "OK: all nodes are evidence_current\n  - node \"build\": evidence_current\nNext action: The node envelope is recorded and ready for its declared workflow.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "node-valid-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":true,\"summary\":\"all nodes are evidence_current\",\"details\":[\"node \\\"build\\\": evidence_current\"],\"next_action\":\"The node envelope is recorded and ready for its declared workflow.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-invalid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-invalid-envelope-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-invalid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-invalid-envelope-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-invalid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-invalid-packet-human",
+      "stdout": "ERROR: packet contract failed (16 violation(s))\n  - required_field: schema_version: required field is missing\n  - required_field: repo_root: required field is missing\n  - required_field: head_commit: required field is missing\n  - required_field: request_id: required field is missing\n  - required_field: issued_at: required field is missing\n  - required_field: outcome: required field is missing\n  - required_field: packet_hash: required field is missing\n  - required_field: freshness: required field is missing\n  - required_field: authorization: required field is missing\n  - required_field: budget: required field is missing\n  - required_field: evidence: required field is missing\n  - required_field: degradations: required field is missing\n  - required_field: provenance: required field is missing\n  - schema_version: schema_version: must be v1\n  - outcome: outcome: unknown outcome\n  - budget: budget: budget must contain counters\nNext action: Fix the packet contract, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-invalid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-invalid-packet-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet contract failed (16 violation(s))\",\"details\":[\"required_field: schema_version: required field is missing\",\"required_field: repo_root: required field is missing\",\"required_field: head_commit: required field is missing\",\"required_field: request_id: required field is missing\",\"required_field: issued_at: required field is missing\",\"required_field: outcome: required field is missing\",\"required_field: packet_hash: required field is missing\",\"required_field: freshness: required field is missing\",\"required_field: authorization: required field is missing\",\"required_field: budget: required field is missing\",\"required_field: evidence: required field is missing\",\"required_field: degradations: required field is missing\",\"required_field: provenance: required field is missing\",\"schema_version: schema_version: must be v1\",\"outcome: outcome: unknown outcome\",\"budget: budget: budget must contain counters\"],\"next_action\":\"Fix the packet contract, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json"
+      ],
+      "exitCode": 2,
+      "name": "node-missing-ledger",
+      "stdout": "error: missing required --ledger value\nNext action: run 'ownscout node verify --help'.\n"
+    }
+  ],
+  "note": "Recorded from the Go reference. {{DIR}} is the spec/parity directory, {{REPO}} is its fixtures/repo child.",
+  "version": 1
+}
