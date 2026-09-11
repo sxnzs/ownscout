@@ -2,12 +2,12 @@
 # Compact status for every OwnScout port. Always exits 0.
 #
 # Lane sessions (for continuing a port with droid exec -s):
-#   ts   gpt-5.6-luna      a5330512-8176-4335-9350-d28688bb3720
-#   zig  gemini-3.8-flash  17338945-ff87-4c6c-947e-cfbe29955d11
-#   rust glm-5.3-flash     884c8593-620b-474d-9bd5-8db093e4b082
-# Superseded by the staged relaunch (the first attempt was killed by a harness
-# restart before writing anything):
-#   ts dace82b5-...  zig ac05b385-...  rust dc83088e-...
+#   ts   gpt-5.6-luna  a5330512-8176-4335-9350-d28688bb3720  (done: 28/28, 81/81)
+#   zig  gpt-5.6-luna  7cbb340e-8fae-4c5c-8e50-b934b51e2ec8
+#   rust gpt-5.6-luna  9b93b98f-67ee-4c10-a062-3fbc9e0cb03b
+# Superseded: first attempt (harness restart, no writes) ts dace82b5-... zig
+# ac05b385-... rust dc83088e-...; second attempt (over-analysis, stub only) zig
+# 17338945-... rust 884c8593-...
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
