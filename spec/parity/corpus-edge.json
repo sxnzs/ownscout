@@ -1,0 +1,851 @@
+{
+  "cases": [
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-budget.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-budget-human",
+      "stdout": "ERROR: packet is invalid (2 violation(s))\n  - budget: budget.used_evidence: used evidence exceeds max_evidence\n  - budget: budget.used_bytes: used bytes exceeds max_bytes\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-budget.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-budget-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (2 violation(s))\",\"details\":[\"budget: budget.used_evidence: used evidence exceeds max_evidence\",\"budget: budget.used_bytes: used bytes exceeds max_bytes\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-degradations.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-degradations-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - degradations: degradations: complete packet cannot contain degradations\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-degradations.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-degradations-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"degradations: degradations: complete packet cannot contain degradations\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-evidence.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-evidence-human",
+      "stdout": "ERROR: packet is invalid (3 violation(s))\n  - malformed_evidence: evidence[0].evidence_id: required evidence field is missing\n  - malformed_evidence: evidence[0]: line_end must be greater than or equal to line_start\n  - malformed_evidence: evidence[0].verifier_status: unknown verifier status\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-evidence.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-evidence-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (3 violation(s))\",\"details\":[\"malformed_evidence: evidence[0].evidence_id: required evidence field is missing\",\"malformed_evidence: evidence[0]: line_end must be greater than or equal to line_start\",\"malformed_evidence: evidence[0].verifier_status: unknown verifier status\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-forbidden-autonomy.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-forbidden-autonomy-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - authorization: authorization.level: autonomous authorization is forbidden for this outcome\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-forbidden-autonomy.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-forbidden-autonomy-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"authorization: authorization.level: autonomous authorization is forbidden for this outcome\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-freshness.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-freshness-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - freshness: freshness.head_commit: freshness head anchor does not match packet head_commit\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-freshness.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-freshness-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"freshness: freshness.head_commit: freshness head anchor does not match packet head_commit\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-missing-required.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-missing-required-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - required_field: packet_hash: required field is missing\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-missing-required.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-missing-required-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"required_field: packet_hash: required field is missing\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-outcome.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-outcome-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - outcome: outcome: unknown outcome\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-outcome.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-outcome-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"outcome: outcome: unknown outcome\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-schema.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-schema-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - schema_version: schema_version: must be v1\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-schema.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-schema-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"schema_version: schema_version: must be v1\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-unverified-evidence.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-unverified-evidence-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - evidence: evidence[0].verifier_status: complete packet requires verified evidence\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-unverified-evidence.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-unverified-evidence-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"evidence: evidence[0].verifier_status: complete packet requires verified evidence\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-valid.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-valid-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-valid.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-valid-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "contract"
+      ],
+      "exitCode": 2,
+      "name": "contract-no-subcommand",
+      "stdout": "error: a contract subcommand is required\nNext action: run 'ownscout contract --help'.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "bogus"
+      ],
+      "exitCode": 2,
+      "name": "contract-unknown-subcommand",
+      "stdout": "error: unknown contract subcommand 'bogus'\nNext action: run 'ownscout contract --help'.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet"
+      ],
+      "exitCode": 2,
+      "name": "contract-validate-no-value",
+      "stdout": "error: --packet requires a value\nNext action: run 'ownscout contract validate --help'.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-valid.json",
+        "extra"
+      ],
+      "exitCode": 2,
+      "name": "contract-validate-extra-arg",
+      "stdout": "error: unknown flag or argument 'extra'\nNext action: run 'ownscout contract validate --help'.\n"
+    },
+    {
+      "args": [
+        "evidence"
+      ],
+      "exitCode": 2,
+      "name": "evidence-no-subcommand",
+      "stdout": "error: an evidence subcommand is required\nNext action: run 'ownscout evidence --help'.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "bogus"
+      ],
+      "exitCode": 2,
+      "name": "evidence-unknown-subcommand",
+      "stdout": "error: unknown evidence subcommand 'bogus'\nNext action: run 'ownscout evidence --help'.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo"
+      ],
+      "exitCode": 2,
+      "name": "evidence-missing-packet",
+      "stdout": "error: both --repo \u003cdir\u003e and --packet \u003cfile\u003e are required\nNext action: run 'ownscout evidence verify --help'.\n"
+    },
+    {
+      "args": [
+        "node"
+      ],
+      "exitCode": 2,
+      "name": "node-no-subcommand",
+      "stdout": "error: a node subcommand is required\nNext action: run 'ownscout node --help'.\n"
+    },
+    {
+      "args": [
+        "node",
+        "bogus"
+      ],
+      "exitCode": 2,
+      "name": "node-unknown-subcommand",
+      "stdout": "error: unknown node subcommand 'bogus'\nNext action: run 'ownscout node --help'.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-duplicate-id.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-duplicate-id-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-duplicate-id.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-duplicate-id-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-missing-dependency.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-missing-dependency-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-missing-dependency.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-missing-dependency-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-self-dependency.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-self-dependency-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-self-dependency.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-self-dependency-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-cycle.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-cycle-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-cycle.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-cycle-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-empty-nodes.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-empty-nodes-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-empty-nodes.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-empty-nodes-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-verifier.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-verifier-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-verifier.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-verifier-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-evidence.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-evidence-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-evidence.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-evidence-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-binding.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-binding-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-binding.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-binding-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-schema.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-schema-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-schema.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-schema-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-packet-id.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-packet-id-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-wrong-packet-id.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-wrong-packet-id-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-field.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-field-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-unknown-field.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-field-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-duplicate-key.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-duplicate-key-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-duplicate-key.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-duplicate-key-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-trailing-json.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-trailing-json-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-trailing-json.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-trailing-json-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-stale.json",
+        "--envelope",
+        "fixtures/edge/envelope-stale-evidence.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"93fb4f66b99266af232b7f5b9f2a4990528f88222a0702549f4d4f439cf86570\",\"envelope_sha256\":\"3fd0720a467d8d703a0f21719b904a94bd3de06f0da3602084222ea5f392ca36\",\"packet_binding_sha256\":\"6388241add28c6bcf26d1a146a67d47331076fc1acbbc4a5c56701527db2c337\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-stale-evidence-human",
+      "stdout": "ERROR: node evaluation failed\n  - node \"a\": failed (evidence \"evidence-1\" is missing or not verified)\n  - node \"b\": blocked (dependency \"a\" is not evidence_current)\nNext action: Refresh or correct the failed evidence, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-stale.json",
+        "--envelope",
+        "fixtures/edge/envelope-stale-evidence.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"93fb4f66b99266af232b7f5b9f2a4990528f88222a0702549f4d4f439cf86570\",\"envelope_sha256\":\"3fd0720a467d8d703a0f21719b904a94bd3de06f0da3602084222ea5f392ca36\",\"packet_binding_sha256\":\"6388241add28c6bcf26d1a146a67d47331076fc1acbbc4a5c56701527db2c337\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-stale-evidence-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"node evaluation failed\",\"details\":[\"node \\\"a\\\": failed (evidence \\\"evidence-1\\\" is missing or not verified)\",\"node \\\"b\\\": blocked (dependency \\\"a\\\" is not evidence_current)\"],\"next_action\":\"Refresh or correct the failed evidence, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/repo/ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-in-repo-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/repo/ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-in-repo-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    }
+  ],
+  "note": "Edge cases recorded from the Go reference. Same placeholders as corpus.json.",
+  "version": 1
+}

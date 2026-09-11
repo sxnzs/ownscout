@@ -42,6 +42,24 @@ must be exactly one line (one trailing `\n`) with exactly five fields:
 `command`, `ok`, `summary`, `details`, `next_action`. Human mode keeps the
 recorded wording and "Next action:" line.
 
+## JSON encoder details
+
+JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
+`&` inside strings as `\u003c`, `\u003e` and `\u0026` (see the recorded
+`details` values in `corpus-edge.json`). Field order is fixed:
+`command`, `ok`, `summary`, `details`, `next_action`. Reproduce both exactly.
+
+## Edge corpus
+
+`corpus-edge.json` (59 cases) is a hardening set: every contract-testdata
+fixture, the subcommand surface, synthesized node-envelope graph failures, raw
+JSON parse failures, a graph whose evidence verification fails (exit 1, with a
+ledger), and an in-repository ledger rejection. Run it with the same harness:
+
+```
+python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
+```
+
 ## Behavior to preserve (read the Go source)
 
 - **packet-v1 strict decoding** (`internal/nodepacket/decode.go`): exactly one
