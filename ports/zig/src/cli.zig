@@ -613,3 +613,124 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     try output.appendSlice(allocator, final.items);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } });
 }
+
+test "evidence verification hashes selected lines and normalizes CRLF" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "source.txt", .data = "one\r\ntwo\r\nthree\n" });
+
+    var digest: [32]u8 = undefined;
+    Sha256.hash("two\n", &digest, .{});
+    const hash = std.fmt.bytesToHex(digest, .lower);
+    const item = contract.Evidence{
+        .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h",
+        .line_start = 2, .line_end = 2, .source = "test", .content_hash = &hash,
+        .collected_at = "now", .verifier_status = "verified",
+    };
+    try std.testing.expect(try verifyEvidence(arena.allocator(), ".", tmp.dir, item));
+    try std.testing.expectError(VerifyError.HashMismatch, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 2, .line_end = 2, .source = "test", .content_hash = &([_]u8{'0'} ** 64), .collected_at = "now", .verifier_status = "verified" }));
+}
+
+test "evidence verification rejects unsafe paths and invalid ranges" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "source.txt", .data = "one\n" });
+    const base = contract.Evidence{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 1, .line_end = 1, .source = "test", .content_hash = "", .collected_at = "now", .verifier_status = "verified" };
+    try std.testing.expectError(VerifyError.InvalidPath, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = "../source.txt", .commit = base.commit, .line_start = base.line_start, .line_end = base.line_end, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }));
+    try std.testing.expectError(VerifyError.BadRange, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = base.path, .commit = base.commit, .line_start = 3, .line_end = 3, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }));
+}
+
+test "envelope validation rejects duplicate nodes and cycles" {
+    const evidence = contract.Evidence{ .evidence_id = "e", .kind = "source", .path = "x", .commit = "h", .line_start = 1, .line_end = 1, .source = "t", .content_hash = "h", .collected_at = "n", .verifier_status = "verified" };
+    var evidence_items = [_]contract.Evidence{evidence};
+    const packet = contract.Packet{
+        .packet_id = "p", .schema_version = "v1", .repo_root = ".", .head_commit = "h", .request_id = "r", .issued_at = "n", .outcome = "partial",
+        .freshness = .{ .head_commit = "", .head_anchor = "", .status = "", .current = false, .is_current = false, .checked_at = "" },
+        .authorization = .{ .level = "", .reason = "" }, .budget = .{ .max_evidence = 1, .used_evidence = 1, .max_bytes = 1, .used_bytes = 1 },
+        .evidence = evidence_items[0..], .degradations = &.{}, .provenance = .{ .collector = "", .tool = "", .version = "", .tool_version = "" }, .packet_hash = "x",
+        .freshness_present = true, .authorization_present = true, .budget_present = true, .evidence_present = true, .degradations_present = true, .provenance_present = true,
+    };
+    const binding = [_]u8{'b'} ** 64;
+    const deps = [_][]const u8{"a"};
+    const ids = [_][]const u8{"e"};
+    var duplicate = [_]Node{
+        .{ .node_id = "a", .depends_on = &.{}, .verifier = "evidence.current", .evidence_ids = &ids },
+        .{ .node_id = "a", .depends_on = &.{}, .verifier = "evidence.current", .evidence_ids = &ids },
+    };
+    try std.testing.expectError(error.InvalidEnvelope, validateEnvelope(.{ .schema_version = "node-envelope-v1", .envelope_id = "e", .packet_id = "p", .packet_binding_sha256 = &binding, .nodes = &duplicate }, packet, binding));
+    const cycle = [_]Node{
+        .{ .node_id = "a", .depends_on = &deps, .verifier = "evidence.current", .evidence_ids = &ids },
+        .{ .node_id = "b", .depends_on = &.{ "a" }, .verifier = "evidence.current", .evidence_ids = &ids },
+    };
+    const cycle_deps = [_][]const u8{"b"};
+    var cycle_nodes = [_]Node{
+        .{ .node_id = "a", .depends_on = &cycle_deps, .verifier = "evidence.current", .evidence_ids = &ids },
+        cycle[1],
+    };
+    try std.testing.expectError(error.InvalidEnvelope, validateEnvelope(.{ .schema_version = "node-envelope-v1", .envelope_id = "e", .packet_id = "p", .packet_binding_sha256 = &binding, .nodes = &cycle_nodes }, packet, binding));
+}
+
+test "ledger append chains sequence and previous hash" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fmt.allocPrint(arena.allocator(), ".zig-cache/tmp/{s}/ledger.jsonl", .{tmp.sub_path});
+    const envelope_hash = [_]u8{'a'} ** 64;
+    const binding = [_]u8{'b'} ** 64;
+    const details = [_][]const u8{"node \"n1\": evidence_current"};
+    try appendLedger(arena.allocator(), path, envelope_hash, binding, &details);
+    try appendLedger(arena.allocator(), path, envelope_hash, binding, &details);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, arena.allocator(), .limited(1 << 20));
+    var lines = std.mem.splitScalar(u8, data, '\n');
+    const first = try json.Parser.parse(arena.allocator(), lines.next().?);
+    const second = try json.Parser.parse(arena.allocator(), lines.next().?);
+    try std.testing.expectEqualStrings("1", first.objectField("seq").?.number);
+    try std.testing.expectEqualStrings("2", second.objectField("seq").?.number);
+    try std.testing.expectEqualStrings(first.objectField("record_hash").?.string, second.objectField("prev_record_hash").?.string);
+}
+
+test "CLI exposes stable help and version output" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const help = try run(arena.allocator(), &.{ "--help" });
+    try std.testing.expectEqual(@as(u8, 0), help.code);
+    try std.testing.expect(std.mem.indexOf(u8, help.output, "Usage:") != null);
+    const version = try run(arena.allocator(), &.{ "version" });
+    try std.testing.expectEqual(@as(u8, 0), version.code);
+    try std.testing.expectEqualStrings("ownscout 0.1.0\n", version.output);
+}
+
+test "CLI returns usage errors with the documented exit code" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const missing = try run(arena.allocator(), &.{});
+    try std.testing.expectEqual(@as(u8, 2), missing.code);
+    try std.testing.expect(std.mem.indexOf(u8, missing.output, "a command is required") != null);
+    const unknown = try run(arena.allocator(), &.{ "unknown" });
+    try std.testing.expectEqual(@as(u8, 2), unknown.code);
+    try std.testing.expect(std.mem.indexOf(u8, unknown.output, "unknown command") != null);
+}
+
+test "CLI JSON errors preserve machine-readable output shape" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const response = try run(arena.allocator(), &.{ "contract", "validate", "--json" });
+    try std.testing.expectEqual(@as(u8, 2), response.code);
+    const value = try json.Parser.parse(arena.allocator(), response.output);
+    try std.testing.expectEqualStrings("usage", value.objectField("command").?.string);
+    try std.testing.expectEqual(false, value.objectField("ok").?.boolean);
+    try std.testing.expect(value.objectField("details").?.array.len == 1);
+}
+
+test "CLI doctor rejects extra arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const response = try run(arena.allocator(), &.{ "doctor", "extra" });
+    try std.testing.expectEqual(@as(u8, 2), response.code);
+    try std.testing.expect(std.mem.indexOf(u8, response.output, "does not accept arguments") != null);
+}

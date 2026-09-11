@@ -213,3 +213,28 @@ pub const Parser = struct {
         return false;
     }
 };
+
+test "parser rejects duplicate keys and trailing data" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.DuplicateKey, Parser.parse(arena.allocator(), "{\"a\":1,\"a\":2}"));
+    try std.testing.expectError(Error.TrailingData, Parser.parse(arena.allocator(), "true false"));
+}
+
+test "parser decodes unicode escapes and rejects malformed escapes" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const value = try Parser.parse(arena.allocator(), "{\"message\":\"\\uD83D\\uDE00\"}");
+    try std.testing.expectEqualStrings("😀", value.objectField("message").?.string);
+    try std.testing.expectError(Error.InvalidJson, Parser.parse(arena.allocator(), "\"\\uD800\""));
+}
+
+test "parser enforces JSON number boundaries" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.TrailingData, Parser.parse(arena.allocator(), "01"));
+    try std.testing.expectError(Error.InvalidJson, Parser.parse(arena.allocator(), "1."));
+    try std.testing.expectError(Error.InvalidJson, Parser.parse(arena.allocator(), "1e"));
+    const value = try Parser.parse(arena.allocator(), "-9223372036854775808");
+    try std.testing.expectEqualStrings("-9223372036854775808", value.number);
+}

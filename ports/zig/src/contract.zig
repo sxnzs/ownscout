@@ -207,3 +207,60 @@ pub fn action(outcome: []const u8) ?[]const u8 {
     for (pairs) |pair| if (std.mem.eql(u8, outcome, pair[0])) return pair[1];
     return null;
 }
+
+test "default actions cover every supported outcome" {
+    const cases = [_][2][]const u8{
+        .{ "complete", "autonomous_proceed" },
+        .{ "partial", "bounded_more_evidence" },
+        .{ "stale", "bounded_refresh" },
+        .{ "unavailable", "blocked" },
+        .{ "failed_verification", "quarantine" },
+        .{ "budget_exhausted", "human_approval" },
+    };
+    for (cases) |item| try std.testing.expectEqualStrings(item[1], action(item[0]).?);
+    try std.testing.expect(action("unknown") == null);
+}
+
+test "complete packets require current evidence and freshness" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const packet = Packet{
+        .packet_id = "p", .schema_version = "v1", .repo_root = ".", .head_commit = "h",
+        .request_id = "r", .issued_at = "now", .outcome = "complete",
+        .freshness = .{ .head_commit = "", .head_anchor = "", .status = "", .current = false, .is_current = false, .checked_at = "" },
+        .authorization = .{ .level = "bounded", .reason = "" },
+        .budget = .{ .max_evidence = 1, .used_evidence = 0, .max_bytes = 1, .used_bytes = 0 },
+        .evidence = &.{}, .degradations = &.{}, .provenance = .{ .collector = "", .tool = "", .version = "", .tool_version = "" },
+        .packet_hash = "hash", .freshness_present = true, .authorization_present = true,
+        .budget_present = true, .evidence_present = true, .degradations_present = true,
+        .provenance_present = true,
+    };
+    const violations = try validate(arena.allocator(), packet);
+    try std.testing.expect(violations.len >= 2);
+}
+
+test "validation rejects negative and over-budget counters" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const packet = Packet{
+        .packet_id = "p", .schema_version = "v1", .repo_root = ".", .head_commit = "h",
+        .request_id = "r", .issued_at = "now", .outcome = "partial",
+        .freshness = .{ .head_commit = "", .head_anchor = "", .status = "", .current = false, .is_current = false, .checked_at = "" },
+        .authorization = .{ .level = "bounded", .reason = "" },
+        .budget = .{ .max_evidence = 1, .used_evidence = 2, .max_bytes = -1, .used_bytes = 0 },
+        .evidence = &.{}, .degradations = &.{}, .provenance = .{ .collector = "", .tool = "", .version = "", .tool_version = "" },
+        .packet_hash = "hash", .freshness_present = true, .authorization_present = true,
+        .budget_present = true, .evidence_present = true, .degradations_present = true,
+        .provenance_present = true,
+    };
+    const violations = try validate(arena.allocator(), packet);
+    try std.testing.expect(violations.len >= 2);
+}
+
+test "decoder rejects wrong nested types" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const root = try json.Parser.parse(arena.allocator(),
+        "{\"freshness\":[],\"authorization\":{},\"budget\":{},\"provenance\":{},\"evidence\":[],\"degradations\":[]}");
+    try std.testing.expectError(error.WrongType, decodePacket(arena.allocator(), root));
+}

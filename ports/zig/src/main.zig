@@ -15,6 +15,8 @@ pub fn main(init: std.process.Init) !void {
     if (run.code != 0) std.process.exit(run.code);
 }
 
-test "scaffold builds" {
-    try std.testing.expect(true);
+test {
+    _ = @import("json.zig");
+    _ = @import("contract.zig");
+    _ = @import("cli.zig");
 }

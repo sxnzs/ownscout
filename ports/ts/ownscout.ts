@@ -232,15 +232,25 @@ function packetCanonical(p: AnyObj): AnyObj {
 function loadPacket(pth: string): AnyObj {
   if (!fs.existsSync(pth)) throw new Error(`packet file "${pth}" does not exist`);
   const data=fs.readFileSync(pth), trimmed=data.toString().trim();
-  if (!trimmed || trimmed[0] !== "{" || !jsonValid(trimmed)) throw new Error(`packet "${pth}" is not valid JSON`);
+  if (!trimmed) throw new Error(`packet "${pth}" is not valid JSON`);
   try {
-    // The CLI's historical loader is permissive about case and duplicate keys.
-    const p=JSON.parse(trimmed); if (!p || Array.isArray(p) || typeof p !== "object") throw new Error();
-    if ("evidence" in p && p.evidence !== null && !Array.isArray(p.evidence))
-      throw new Error(`json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence`);
+    const p=decodePacket(data);
+    if (!p || Array.isArray(p) || typeof p !== "object") throw new Error("must contain a JSON object");
     return p;
   } catch (e:any) {
-    if (String(e.message).startsWith("json:")) throw new Error(`packet "${pth}" is not valid JSON: ${e.message}`);
+    if (jsonValid(trimmed)) {
+      try {
+        const raw=JSON.parse(trimmed);
+        if (raw && typeof raw === "object" && !Array.isArray(raw) &&
+            "evidence" in raw && raw.evidence !== null && !Array.isArray(raw.evidence))
+          throw new Error(`packet "${pth}" is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence`);
+      } catch (inner:any) {
+        if (String(inner.message).startsWith(`packet "${pth}"`)) throw inner;
+      }
+    }
+    if (e.message === "unknown field") throw new Error(`packet "${pth}" contains unknown JSON field`);
+    if (e.message === "duplicate key") throw new Error(`packet "${pth}" contains duplicate JSON object key`);
+    if (e.message === "expected object") throw new Error(`packet "${pth}" must contain a JSON object`);
     throw new Error(`packet "${pth}" is not valid JSON`);
   }
 }
