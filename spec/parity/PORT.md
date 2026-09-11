@@ -9,6 +9,14 @@ oracle. Read the Go source — it is the specification.
 A native implementation of the OwnScout CLI under `ports/<lang>/`, producing a
 binary with the same commands, the same stdout, and the same exit codes.
 
+| Port | Binary (exact path) | Build | Tests |
+|---|---|---|---|
+| TypeScript | `ports/ts/bin/ownscout` | executable wrapper; Node 24 runs `.ts` directly | `cd ports/ts && node --test` |
+| Zig | `ports/zig/zig-out/bin/ownscout` | `cd ports/zig && zig build` | `cd ports/zig && zig build test` |
+| Rust | `ports/rust/target/release/ownscout` | `cd ports/rust && cargo build --release` | `cd ports/rust && cargo test` |
+
+`spec/parity/verify-all.sh` expects exactly these paths and commands.
+
 Commands:
 
 - `ownscout doctor`
@@ -102,6 +110,14 @@ than vacuous.
 2. `python3 spec/parity/harness.py --bin <binary>` reports 28/28.
 3. The Go unit tests under `internal/*/*_test.go` are ported for your language
    (at minimum every case they cover), so regressions fail locally.
+
+Then run the shared gates:
+
+```
+spec/parity/verify-port.sh <name> <binary> <test command...>
+spec/parity/verify-all.sh
+python3 spec/parity/fuzz.py --candidate <binary>   # needs a reference build
+```
 
 ## Divergences
 
