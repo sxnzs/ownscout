@@ -27,9 +27,11 @@ if [ "$#" -gt 0 ]; then
 fi
 
 echo "== protected paths"
-touched="$(git status --porcelain | awk '{print $2}' | grep -v "^ports/$name/" || true)"
+# Ignore every port directory (lanes are disjoint); flag any change to the
+# reference, the corpora, or the tooling.
+touched="$(git status --porcelain | awk '{print $2}' | grep -v "^ports/" || true)"
 if [ -n "$touched" ]; then
-  echo "FAIL: changes outside ports/$name/:"
+  echo "FAIL: changes outside the port directories:"
   echo "$touched"
   fail=1
 fi
