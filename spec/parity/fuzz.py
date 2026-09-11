@@ -120,6 +120,14 @@ def mutate(data, rng):
     return mutate_bytes(data, rng)
 
 
+def first_difference(expected, actual):
+    limit = min(len(expected), len(actual))
+    index = next((i for i in range(limit) if expected[i] != actual[i]), limit)
+    start = max(0, index - 30)
+    return "at {}:\n    expected ...{!r}\n    actual   ...{!r}".format(
+        index, expected[start:index + 50], actual[start:index + 50])
+
+
 def normalize(text, workdir, repo, binary):
     for needle, replacement in (
         (os.path.realpath(repo), "{{REPO}}"),
@@ -184,9 +192,9 @@ def main():
                     elif (code, text) != expected:
                         divergences += 1
                         print("DIVERGENCE iteration={} case={}".format(iteration, " ".join(case)))
-                        print("  expected: {} {!r}".format(expected[0], expected[1][:200]))
-                        print("  actual:   {} {!r}".format(code, text[:200]))
-                        print("  input:    {!r}".format(data[:200]))
+                        print("  exit:     {} != {}".format(code, expected[0]))
+                        print("  " + first_difference(expected[1], text))
+                        print("  input:    {!r}".format(data[:120]))
                 if divergences >= 10:
                     print("fuzz: stopping after 10 divergences")
                     print("fuzz: DIVERGENCES FOUND ({} cases)".format(divergences))
