@@ -88,16 +88,9 @@ fn contract_command(args: &[String]) -> (String, i32) {
             2,
         );
     };
-    let bytes = match fs::read(&path) {
+    let p = match load_packet(&path) {
         Ok(v) => v,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return load_error(json, &format!("packet file {:?} does not exist", path))
-        }
-        Err(e) => return load_error(json, &format!("read packet {:?}: {}", path, e)),
-    };
-    let p = match packet::decode(&bytes) {
-        Ok(v) => v,
-        Err(_) => return load_error(json, &format!("packet {:?} is not valid JSON", path)),
+        Err(e) => return load_error(json, &e),
     };
     let violations = contract::validate(&p);
     if !violations.is_empty() {
@@ -148,6 +141,74 @@ fn load_error(json: bool, detail: &str) -> (String, i32) {
         json,
         2,
     ))
+}
+
+fn load_packet(path: &str) -> Result<packet::Packet, String> {
+    let data = fs::read(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("packet file {:?} does not exist", path)
+        } else {
+            format!("read packet {:?}: {}", path, e)
+        }
+    })?;
+    let trimmed = trim_json_space(&data);
+    let value =
+        crate::json::parse(trimmed).map_err(|_| format!("packet {:?} is not valid JSON", path))?;
+    if !matches!(value, crate::json::Value::Object(_)) {
+        return Err(format!("packet {:?} must contain a JSON object", path));
+    }
+    packet::decode(trimmed).map_err(|e| format!("packet {:?} {}", path, packet_decode_error(&e)))
+}
+
+fn trim_json_space(data: &[u8]) -> &[u8] {
+    let start = data
+        .iter()
+        .position(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+        .unwrap_or(data.len());
+    let end = data
+        .iter()
+        .rposition(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+        .map_or(start, |i| i + 1);
+    &data[start..end]
+}
+
+fn packet_decode_error(error: &str) -> String {
+    if let Some(name) = error.strip_prefix("unknown field ") {
+        return format!(
+            "contains an unknown JSON field: json: unknown field {}",
+            name
+        );
+    }
+    if let Some(details) = error.strip_prefix("type mismatch|") {
+        let mut parts = details.split('|');
+        let path = parts.next().unwrap_or("");
+        let expected = parts.next().unwrap_or("");
+        let actual = match parts.next().unwrap_or("") {
+            "array" => "array",
+            "object" => "object",
+            "string" => "string",
+            "number" => "number",
+            "bool" => "bool",
+            _ => "null",
+        };
+        let evidence_item = path
+            .strip_prefix("Packet.evidence.")
+            .and_then(|index| index.parse::<usize>().ok())
+            .is_some();
+        let detail = if evidence_item {
+            format!(
+                "json: cannot unmarshal {} into {} of type {}",
+                actual, path, expected
+            )
+        } else {
+            format!(
+                "json: cannot unmarshal {} into Go struct field {} of type {}",
+                actual, path, expected
+            )
+        };
+        return format!("is not valid JSON: {}", detail);
+    }
+    format!("is not valid JSON: {}", error)
 }
 fn result(v: (String, i32)) -> (String, i32) {
     v
@@ -210,20 +271,9 @@ fn evidence_command(args: &[String]) -> (String, i32) {
             2,
         );
     };
-    let bytes = match fs::read(&path) {
+    let p = match load_packet(&path) {
         Ok(v) => v,
-        Err(e) => return load_evidence_error(json, &format!("packet {:?}: {}", path, e)),
-    };
-    let p = match packet::decode(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            let detail = if e == "evidence. expected array" {
-                format!("packet {:?} is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence",path)
-            } else {
-                format!("packet {:?} is not valid JSON: {}", path, e)
-            };
-            return load_evidence_error(json, &detail);
-        }
+        Err(e) => return load_evidence_error(json, &e),
     };
     let violations = contract::validate(&p);
     if !violations.is_empty() {
@@ -416,25 +466,13 @@ fn node_command(args: &[String]) -> (String, i32) {
             )
         }
     };
-    let pb = match fs::read(&packet_path) {
+    let p = match load_packet(&packet_path) {
         Ok(v) => v,
-        Err(_) => {
+        Err(e) => {
             return node_error(
                 json,
                 "packet could not be loaded",
-                &format!("packet {:?} is not valid JSON", packet_path),
-                2,
-                "Fix the packet contract, then run node verification again.",
-            )
-        }
-    };
-    let p = match packet::decode(&pb) {
-        Ok(v) => v,
-        Err(_) => {
-            return node_error(
-                json,
-                "packet could not be loaded",
-                &format!("packet {:?} is not valid JSON", packet_path),
+                &e,
                 2,
                 "Fix the packet contract, then run node verification again.",
             )

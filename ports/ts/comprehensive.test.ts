@@ -150,7 +150,7 @@ test("strict packet boundaries reject malformed roots and trailing data", () => 
   const cases: Array<[string, string, string]> = [
     ["empty", "", "not valid JSON"],
     ["whitespace", " \n\t", "not valid JSON"],
-    ["null root", "null", "not valid JSON"],
+    ["null root", "null", "must contain a JSON object"],
     ["array root", "[]", "must contain a JSON object"],
     ["string root", JSON.stringify("DO_NOT_PRINT"), "must contain a JSON object"],
     ["number root", "1", "must contain a JSON object"],
@@ -158,8 +158,7 @@ test("strict packet boundaries reject malformed roots and trailing data", () => 
     ["trailing object", `${valid}{}`, "not valid JSON"],
     ["trailing null", `${valid} null`, "not valid JSON"],
     ["trailing comment", `${valid} // comment`, "not valid JSON"],
-    ["unknown field", valid.replace('"packet_id":', '"unexpected_secret":"DO_NOT_PRINT","packet_id":'), "unknown JSON field"],
-    ["duplicate field", valid.replace('"packet_id":', '"packet_id":"other","packet_id":'), "duplicate JSON object key"],
+    ["unknown field", valid.replace('"packet_id":', '"unexpected_secret":"DO_NOT_PRINT","packet_id":'), 'contains an unknown JSON field: json: unknown field "unexpected_secret"'],
   ];
   for (const [name, input, message] of cases) {
     test(name, () => {
@@ -170,7 +169,7 @@ test("strict packet boundaries reject malformed roots and trailing data", () => 
       assert.equal(result.code, 2, result.stdout);
       const value = assertJsonResult(result.stdout, "contract validate", false);
       assert.ok(`${value.summary}\n${value.details.join("\n")}`.includes(message));
-      assert.doesNotMatch(result.stdout, /DO_NOT_PRINT|unexpected_secret/);
+      assert.doesNotMatch(result.stdout, /DO_NOT_PRINT/);
     });
   }
 });
@@ -411,7 +410,9 @@ test("CLI JSON output is stable and does not leak packet contents", () => {
   assert.equal(result.code, 2);
   const value = assertJsonResult(result.stdout, "contract validate", false);
   assert.equal(value.ok, false);
-  assert.doesNotMatch(result.stdout, /DO_NOT_PRINT|untrusted/);
+  assert.doesNotMatch(result.stdout, /DO_NOT_PRINT/);
+  assert.match(result.stdout, /json: unknown field/);
+  assert.match(result.stdout, /untrusted/);
 });
 
 test("node invalid packet and envelope never create a ledger", () => {

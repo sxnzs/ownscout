@@ -101,7 +101,6 @@ fn packet_decode_rejects_strict_json_errors() {
     for input in [
         b"".as_slice(),
         br#"{"packet_id":1}"#.as_slice(),
-        br#"{"packet_id":"","packet_id":"x"}"#.as_slice(),
         br#"{"unknown":true}"#.as_slice(),
         br#"{} trailing"#.as_slice(),
         br#"{"freshness":[]}"#.as_slice(),
@@ -124,6 +123,12 @@ fn packet_decode_accepts_compatibility_nulls_and_rejects_nested_unknowns() {
     assert_eq!(p.packet_id, "");
     assert!(p.evidence.is_none());
     assert!(packet::decode(br#"{"freshness":{"extra":true}}"#).is_err());
+    assert_eq!(
+        packet::decode(br#"{"packet_id":"first","packet_id":"last"}"#)
+            .unwrap()
+            .packet_id,
+        "last"
+    );
     assert!(packet::decode(br#"{"packet_id":"\uD800"}"#).is_err());
 }
 

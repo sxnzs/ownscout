@@ -35,20 +35,57 @@ function utf8(data: Buffer): string {
 class StrictParser {
   private i = 0;
   private readonly s: string;
-  constructor(s: string) { this.s = s; }
+  private readonly rejectDuplicates: boolean;
+  private readonly goErrors: boolean;
+  private readonly defaultNulls: boolean;
+  constructor(s: string, rejectDuplicates = true, goErrors = false, defaultNulls = false) {
+    this.s = s; this.rejectDuplicates = rejectDuplicates; this.goErrors = goErrors; this.defaultNulls = defaultNulls;
+  }
   private ws() { while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++; }
   private fail(msg = "invalid JSON"): never { throw new Error(msg); }
+  private wireType(): string {
+    if (this.s.startsWith("null", this.i)) return "null";
+    if (this.s[this.i] === "{") return "object";
+    if (this.s[this.i] === "[") return "array";
+    if (this.s[this.i] === '"') return "string";
+    if (this.s.startsWith("true", this.i) || this.s.startsWith("false", this.i)) return "boolean";
+    return "number";
+  }
+  private requireType(schema: any, fieldPath: string, goType: string): void {
+    if (!this.goErrors || this.s.startsWith("null", this.i)) return;
+    const actual = this.wireType();
+    const expected = schema?.array ? "array" : schema && typeof schema === "object" ? "object" :
+      schema === "string" ? "string" : schema === "boolean" ? "boolean" : "number";
+    if (actual !== expected) {
+      this.fail(this.goTypeError(actual, fieldPath, goType));
+    }
+  }
+  private goTypeError(actual: string, fieldPath: string, goType: string): string {
+    const target = /^Packet\.evidence\.\d+$/.test(fieldPath) ? fieldPath :
+      `Go struct field ${fieldPath}`;
+    return `json: cannot unmarshal ${actual} into ${target} of type ${goType}`;
+  }
   parse(schema: any): any {
     this.ws();
-    const v = this.value(schema);
+    const v = this.value(schema, "Packet", "contract.Packet");
     this.ws();
     if (this.i !== this.s.length) this.fail("unexpected data after packet");
     return v;
   }
-  private value(schema: any): any {
+  private value(schema: any, fieldPath = "Packet", goType = ""): any {
     this.ws();
     if (this.i >= this.s.length) this.fail();
-    if (this.s.startsWith("null", this.i)) { this.i += 4; return null; }
+    this.requireType(schema, fieldPath, goType);
+    if (this.s.startsWith("null", this.i)) {
+      this.i += 4;
+      if (!this.defaultNulls) return null;
+      if (schema?.array) return null;
+      if (schema && typeof schema === "object") return {};
+      if (schema === "string") return "";
+      if (schema === "boolean") return false;
+      if (schema === "int" || schema === "int64") return 0;
+      return null;
+    }
     if (schema === "string") return this.string();
     if (schema === "boolean") {
       if (this.s.startsWith("true", this.i)) { this.i += 4; return true; }
@@ -58,9 +95,15 @@ class StrictParser {
     if (schema === "int" || schema === "int64") {
       const raw = this.numberRaw();
       let n: bigint;
-      try { n = BigInt(raw); } catch { this.fail("expected integer"); }
+      try { n = BigInt(raw); } catch {
+        if (this.goErrors) this.fail(this.goTypeError("number", fieldPath, goType));
+        this.fail("expected integer");
+      }
       const min = BigInt("-9223372036854775808"), max = BigInt("9223372036854775807");
-      if (raw.includes(".") || /e/i.test(raw) || n < min || n > max) this.fail("integer is out of range or not integral");
+      if (raw.includes(".") || /e/i.test(raw) || n < min || n > max) {
+        if (this.goErrors) this.fail(this.goTypeError("number", fieldPath, goType));
+        this.fail("integer is out of range or not integral");
+      }
       return Number(n);
     }
     if (schema?.array) {
@@ -68,7 +111,9 @@ class StrictParser {
       const out: any[] = []; this.ws();
       if (this.s[this.i] === "]") { this.i++; return out; }
       while (true) {
-        out.push(this.value(schema.array)); this.ws();
+        const itemType = goType === "[]contract.Evidence" ? "contract.Evidence" :
+          goType === "[]string" ? "string" : "";
+        out.push(this.value(schema.array, `${fieldPath}.${out.length}`, itemType)); this.ws();
         if (this.s[this.i] === "]") { this.i++; return out; }
         if (this.s[this.i++] !== ",") this.fail();
       }
@@ -79,12 +124,13 @@ class StrictParser {
       if (this.s[this.i] === "}") { this.i++; return out; }
       while (true) {
         const key = this.string(); this.ws();
-        if (seen.has(key)) this.fail("duplicate key");
+        if (seen.has(key) && this.rejectDuplicates) this.fail("duplicate key");
         seen.add(key);
-        if (!(key in schema)) this.fail("unknown field");
+        if (!(key in schema)) this.fail(`unknown field ${JSON.stringify(key)}`);
         this.ws();
         if (this.s[this.i++] !== ":") this.fail();
-        out[key] = this.value(schema[key]); this.ws();
+        const childPath = `${fieldPath}.${key}`;
+        out[key] = this.value(schema[key], childPath, goFieldType(schema, key)); this.ws();
         if (this.s[this.i] === "}") { this.i++; return out; }
         if (this.s[this.i++] !== ",") this.fail();
         this.ws();
@@ -128,11 +174,30 @@ const packetSchema = {
   provenance: { collector: "string", tool: "string", version: "string", tool_version: "string" },
   packet_hash: "string"
 };
-function decodePacket(data: Buffer): AnyObj {
+function goFieldType(schema: any, key: string): string {
+  if (schema === packetSchema) {
+    const types: AnyObj = {
+      packet_id: "string", schema_version: "string", repo_root: "string", head_commit: "string",
+      request_id: "string", issued_at: "string", outcome: "string", packet_hash: "string",
+      freshness: "contract.Freshness", authorization: "contract.Authorization",
+      budget: "contract.Budget", evidence: "[]contract.Evidence", degradations: "[]string",
+      provenance: "contract.Provenance"
+    };
+    return types[key] || "";
+  }
+  if (schema === evidenceSchema) {
+    return key === "line_start" || key === "line_end" ? "int" : "string";
+  }
+  if (key === "current" || key === "is_current") return "bool";
+  if (key === "max_evidence" || key === "used_evidence") return "int";
+  if (key === "max_bytes" || key === "used_bytes") return "int64";
+  return "string";
+}
+function decodePacket(data: Buffer, rejectDuplicates = true, strictUtf8 = true): AnyObj {
   if (data.length > MAX_INPUT) throw new Error("input exceeds 1 MiB");
-  const text = utf8(data);
+  const text = strictUtf8 ? utf8(data) : new TextDecoder("utf-8").decode(data);
   // Reject unpaired UTF-16 escapes, matching the Go decoder's preflight.
-  for (let i = 0; i < text.length - 1; i++) if (text[i] === "\\" && text[i + 1] === "u") {
+  for (let i = 0; strictUtf8 && i < text.length - 1; i++) if (text[i] === "\\" && text[i + 1] === "u") {
     const h = text.slice(i + 2, i + 6);
     if (!/^[0-9a-fA-F]{4}$/.test(h)) throw new Error("invalid Unicode escape");
     const n = parseInt(h, 16);
@@ -144,7 +209,7 @@ function decodePacket(data: Buffer): AnyObj {
       i += 6;
     }
   }
-  return new StrictParser(text).parse(packetSchema);
+  return new StrictParser(text, rejectDuplicates, !rejectDuplicates, true).parse(packetSchema);
 }
 function decodePacketValid(data: Buffer): { packet: AnyObj; violations: Violation[] } {
   try {
@@ -160,18 +225,29 @@ const actions: AnyObj = {
   no_match: "autonomous_proceed", stale: "bounded_refresh", unavailable: "blocked", blocked: "blocked",
   needs_more_evidence: "bounded_more_evidence", failed_verification: "quarantine", budget_exhausted: "human_approval"
 };
+function freshnessEmpty(f: AnyObj): boolean {
+  return !String(f.head_commit || "").trim() && !String(f.head_anchor || "").trim() &&
+    !String(f.status || "").trim() && !f.current && !f.is_current && !String(f.checked_at || "").trim();
+}
+function budgetEmpty(b: AnyObj): boolean {
+  return !b.max_evidence && !b.used_evidence && !b.max_bytes && !b.used_bytes;
+}
+function provenanceEmpty(p: AnyObj): boolean {
+  return !String(p.collector || "").trim() && !String(p.tool || "").trim() &&
+    !String(p.version || "").trim() && !String(p.tool_version || "").trim();
+}
 function validatePacket(p: AnyObj): Violation[] {
   const v: Violation[] = [], add = (rule: string, field: string, message: string) => v.push({ rule, field, message });
   for (const [f, x] of [["packet_id",p.packet_id],["schema_version",p.schema_version],["repo_root",p.repo_root],
     ["head_commit",p.head_commit],["request_id",p.request_id],["issued_at",p.issued_at],["outcome",p.outcome],["packet_hash",p.packet_hash]])
     if (typeof x !== "string" || !x.trim()) add("required_field", f, "required field is missing");
   const fresh = p.freshness || {}, auth = p.authorization || {}, budget = p.budget || {}, prov = p.provenance || {};
-  if (Object.keys(fresh).length === 0) add("required_field","freshness","required field is missing");
+  if (freshnessEmpty(fresh)) add("required_field","freshness","required field is missing");
   if (!String(auth.level || "").trim()) add("required_field","authorization","required field is missing");
-  if (Object.keys(budget).length === 0) add("required_field","budget","required field is missing");
+  if (budgetEmpty(budget)) add("required_field","budget","required field is missing");
   if (!Array.isArray(p.evidence)) add("required_field","evidence","required field is missing");
   if (!Array.isArray(p.degradations)) add("required_field","degradations","required field is missing");
-  if (Object.keys(prov).length === 0) add("required_field","provenance","required field is missing");
+  if (provenanceEmpty(prov)) add("required_field","provenance","required field is missing");
   if (p.schema_version !== "v1") add("schema_version","schema_version","must be v1");
   if (typeof p.outcome !== "string" || !(p.outcome in actions)) add("outcome","outcome","unknown outcome");
   let anchor = String(fresh.head_commit || "").trim() || String(fresh.head_anchor || "").trim();
@@ -183,7 +259,7 @@ function validatePacket(p: AnyObj): Violation[] {
     if (!current) add("freshness","freshness.status","complete packet requires current freshness");
   }
   const b = budget;
-  if (Object.keys(b).length === 0) add("budget","budget","budget must contain counters");
+  if (budgetEmpty(b)) add("budget","budget","budget must contain counters");
   else {
     for (const [f, x] of [["max_evidence",b.max_evidence],["used_evidence",b.used_evidence],["max_bytes",b.max_bytes],["used_bytes",b.used_bytes]])
       if (x < 0) add("budget","budget."+f,"budget counter cannot be negative");
@@ -232,26 +308,15 @@ function packetCanonical(p: AnyObj): AnyObj {
 function loadPacket(pth: string): AnyObj {
   if (!fs.existsSync(pth)) throw new Error(`packet file "${pth}" does not exist`);
   const data=fs.readFileSync(pth), trimmed=data.toString().trim();
-  if (!trimmed) throw new Error(`packet "${pth}" is not valid JSON`);
+  if (!jsonValid(trimmed)) throw new Error(`packet "${pth}" is not valid JSON`);
+  if (!trimmed || trimmed[0] !== "{") throw new Error(`packet "${pth}" must contain a JSON object`);
   try {
-    const p=decodePacket(data);
-    if (!p || Array.isArray(p) || typeof p !== "object") throw new Error("must contain a JSON object");
-    return p;
+    return decodePacket(data, false, false);
   } catch (e:any) {
-    if (jsonValid(trimmed)) {
-      try {
-        const raw=JSON.parse(trimmed);
-        if (raw && typeof raw === "object" && !Array.isArray(raw) &&
-            "evidence" in raw && raw.evidence !== null && !Array.isArray(raw.evidence))
-          throw new Error(`packet "${pth}" is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence`);
-      } catch (inner:any) {
-        if (String(inner.message).startsWith(`packet "${pth}"`)) throw inner;
-      }
+    if (e.message.startsWith("unknown field ")) {
+      throw new Error(`packet "${pth}" contains an unknown JSON field: json: ${e.message}`);
     }
-    if (e.message === "unknown field") throw new Error(`packet "${pth}" contains unknown JSON field`);
-    if (e.message === "duplicate key") throw new Error(`packet "${pth}" contains duplicate JSON object key`);
-    if (e.message === "expected object") throw new Error(`packet "${pth}" must contain a JSON object`);
-    throw new Error(`packet "${pth}" is not valid JSON`);
+    throw new Error(`packet "${pth}" is not valid JSON: ${e.message}`);
   }
 }
 function jsonValid(s:string):boolean { try { JSON.parse(s); return true; } catch { return false; } }

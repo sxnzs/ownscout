@@ -24,8 +24,10 @@ pub const Value = union(enum) {
 
     pub fn objectField(self: Value, key: []const u8) ?Value {
         if (self != .object) return null;
-        for (self.object) |field| {
-            if (std.mem.eql(u8, field.key, key)) return field.value;
+        var i = self.object.len;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, self.object[i].key, key)) return self.object[i].value;
         }
         return null;
     }
@@ -34,12 +36,21 @@ pub const Value = union(enum) {
 pub const Parser = struct {
     allocator: std.mem.Allocator,
     data: []const u8,
+    allow_duplicate_keys: bool = false,
     index: usize = 0,
 
     pub fn parse(allocator: std.mem.Allocator, data: []const u8) Error!Value {
+        return parseWithOptions(allocator, data, false);
+    }
+
+    pub fn parseAllowDuplicateKeys(allocator: std.mem.Allocator, data: []const u8) Error!Value {
+        return parseWithOptions(allocator, data, true);
+    }
+
+    fn parseWithOptions(allocator: std.mem.Allocator, data: []const u8, allow_duplicate_keys: bool) Error!Value {
         if (data.len > (1 << 20)) return Error.LimitExceeded;
         if (!std.unicode.utf8ValidateSlice(data)) return Error.InvalidUtf8;
-        var parser = Parser{ .allocator = allocator, .data = data };
+        var parser = Parser{ .allocator = allocator, .data = data, .allow_duplicate_keys = allow_duplicate_keys };
         const parsed = try parser.value();
         parser.space();
         if (parser.index != data.len) return Error.TrailingData;
@@ -82,8 +93,10 @@ pub const Parser = struct {
             self.space();
             if (!self.take(':')) return Error.InvalidJson;
             const child = try self.value();
-            for (fields.items) |field| {
-                if (std.mem.eql(u8, field.key, key)) return Error.DuplicateKey;
+            if (!self.allow_duplicate_keys) {
+                for (fields.items) |field| {
+                    if (std.mem.eql(u8, field.key, key)) return Error.DuplicateKey;
+                }
             }
             try fields.append(self.allocator, .{ .key = key, .value = child });
             self.space();

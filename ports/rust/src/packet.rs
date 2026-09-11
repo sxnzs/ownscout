@@ -1,4 +1,4 @@
-use crate::json::{object, unique_object, Value};
+use crate::json::{object, object_map, Value};
 
 #[derive(Clone, Default)]
 pub struct Packet {
@@ -64,7 +64,7 @@ fn fields<'a>(
     allowed: &[&str],
 ) -> Result<std::collections::BTreeMap<&'a str, &'a Value>, String> {
     let fields = object(value)?;
-    let map = unique_object(fields)?;
+    let map = object_map(fields);
     for key in map.keys() {
         if !allowed.contains(key) {
             return Err(format!("unknown field {:?}", key));
@@ -73,32 +73,61 @@ fn fields<'a>(
     Ok(map)
 }
 fn string(map: &std::collections::BTreeMap<&str, &Value>, key: &str) -> Result<String, String> {
+    string_at(map, key, &format!("Packet.{}", key))
+}
+fn string_at(
+    map: &std::collections::BTreeMap<&str, &Value>,
+    key: &str,
+    path: &str,
+) -> Result<String, String> {
     match map.get(key) {
         None => Ok(String::new()),
         Some(Value::String(v)) => Ok(v.clone()),
         Some(Value::Null) => Ok(String::new()),
-        Some(_) => Err(format!("{}. expected string", key)),
+        Some(v) => Err(type_error(path, "string", v)),
     }
 }
-fn integer(map: &std::collections::BTreeMap<&str, &Value>, key: &str) -> Result<i64, String> {
+fn integer_at(
+    map: &std::collections::BTreeMap<&str, &Value>,
+    key: &str,
+    path: &str,
+) -> Result<i64, String> {
+    let expected = if path.ends_with("max_bytes") || path.ends_with("used_bytes") {
+        "int64"
+    } else {
+        "int"
+    };
     match map.get(key) {
         None => Ok(0),
-        Some(Value::Number(v)) => v.parse().map_err(|_| format!("{}. expected integer", key)),
+        Some(Value::Number(v)) => v
+            .parse()
+            .map_err(|_| type_error(path, expected, &Value::Number(v.clone()))),
         Some(Value::Null) => Ok(0),
-        Some(_) => Err(format!("{}. expected integer", key)),
+        Some(v) => Err(type_error(path, expected, v)),
     }
 }
-fn boolean(map: &std::collections::BTreeMap<&str, &Value>, key: &str) -> Result<bool, String> {
+fn boolean_at(
+    map: &std::collections::BTreeMap<&str, &Value>,
+    key: &str,
+    path: &str,
+) -> Result<bool, String> {
     match map.get(key) {
         None => Ok(false),
         Some(Value::Bool(v)) => Ok(*v),
         Some(Value::Null) => Ok(false),
-        Some(_) => Err(format!("{}. expected boolean", key)),
+        Some(v) => Err(type_error(path, "bool", v)),
     }
 }
 fn strings(
     map: &std::collections::BTreeMap<&str, &Value>,
     key: &str,
+) -> Result<Option<Vec<String>>, String> {
+    strings_at(map, key, &format!("Packet.{}", key))
+}
+fn strings_at(
+    map: &std::collections::BTreeMap<&str, &Value>,
+    key: &str,
+    path: &str,
 ) -> Result<Option<Vec<String>>, String> {
     match map.get(key) {
         None => Ok(None),
@@ -106,12 +135,39 @@ fn strings(
             .iter()
             .map(|v| match v {
                 Value::String(s) => Ok(s.clone()),
-                _ => Err(format!("{}. expected string", key)),
+                v => Err(type_error(path, "string", v)),
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Some),
         Some(Value::Null) => Ok(None),
-        Some(_) => Err(format!("{}. expected array", key)),
+        Some(v) => Err(type_error(path, "[]string", v)),
+    }
+}
+fn type_error(path: &str, expected: &str, value: &Value) -> String {
+    format!(
+        "type mismatch|{}|{}|{}",
+        path,
+        expected,
+        match value {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    )
+}
+fn nested_fields<'a>(
+    value: &'a Value,
+    allowed: &[&str],
+    path: &str,
+    expected: &str,
+) -> Result<std::collections::BTreeMap<&'a str, &'a Value>, String> {
+    match value {
+        Value::Null => Ok(std::collections::BTreeMap::new()),
+        Value::Object(_) => fields(value, allowed),
+        _ => Err(type_error(path, expected, value)),
     }
 }
 pub fn decode(data: &[u8]) -> Result<Packet, String> {
@@ -119,25 +175,35 @@ pub fn decode(data: &[u8]) -> Result<Packet, String> {
         return Err("nodepacket: packet: input exceeds 1 MiB".into());
     }
     let value = crate::json::parse(data).map_err(|e| format!("nodepacket: packet: {}", e))?;
-    let map = fields(
-        &value,
-        &[
-            "packet_id",
-            "schema_version",
-            "repo_root",
-            "head_commit",
-            "request_id",
-            "issued_at",
-            "outcome",
-            "freshness",
-            "authorization",
-            "budget",
-            "evidence",
-            "degradations",
-            "provenance",
-            "packet_hash",
-        ],
-    )?;
+    let raw_fields = object(&value)?;
+    let map = object_map(raw_fields);
+    for (key, value) in raw_fields {
+        match key.as_str() {
+            "packet_id" | "schema_version" | "repo_root" | "head_commit" | "request_id"
+            | "issued_at" | "outcome" | "packet_hash" => {
+                string_at(&map, key, &format!("Packet.{}", key))?;
+            }
+            "freshness" => {
+                parse_freshness(value)?;
+            }
+            "authorization" => {
+                parse_authorization(value)?;
+            }
+            "budget" => {
+                parse_budget(value)?;
+            }
+            "evidence" => {
+                parse_evidence(value)?;
+            }
+            "degradations" => {
+                strings_at(&map, key, "Packet.degradations")?;
+            }
+            "provenance" => {
+                parse_provenance(value)?;
+            }
+            _ => return Err(format!("unknown field {:?}", key)),
+        }
+    }
     let freshness = match map.get("freshness") {
         Some(v) => parse_freshness(v)?,
         None => Freshness::default(),
@@ -177,7 +243,7 @@ pub fn decode(data: &[u8]) -> Result<Packet, String> {
     })
 }
 fn parse_freshness(v: &Value) -> Result<Freshness, String> {
-    let m = fields(
+    let m = nested_fields(
         v,
         &[
             "head_commit",
@@ -187,78 +253,108 @@ fn parse_freshness(v: &Value) -> Result<Freshness, String> {
             "is_current",
             "checked_at",
         ],
+        "Packet.freshness",
+        "contract.Freshness",
     )?;
     Ok(Freshness {
-        head_commit: string(&m, "head_commit")?,
-        head_anchor: string(&m, "head_anchor")?,
-        status: string(&m, "status")?,
-        current: boolean(&m, "current")?,
-        is_current: boolean(&m, "is_current")?,
-        checked_at: string(&m, "checked_at")?,
+        head_commit: string_at(&m, "head_commit", "Packet.freshness.head_commit")?,
+        head_anchor: string_at(&m, "head_anchor", "Packet.freshness.head_anchor")?,
+        status: string_at(&m, "status", "Packet.freshness.status")?,
+        current: boolean_at(&m, "current", "Packet.freshness.current")?,
+        is_current: boolean_at(&m, "is_current", "Packet.freshness.is_current")?,
+        checked_at: string_at(&m, "checked_at", "Packet.freshness.checked_at")?,
     })
 }
 fn parse_authorization(v: &Value) -> Result<Authorization, String> {
-    let m = fields(v, &["level", "reason"])?;
+    let m = nested_fields(
+        v,
+        &["level", "reason"],
+        "Packet.authorization",
+        "contract.Authorization",
+    )?;
     Ok(Authorization {
-        level: string(&m, "level")?,
-        reason: string(&m, "reason")?,
+        level: string_at(&m, "level", "Packet.authorization.level")?,
+        reason: string_at(&m, "reason", "Packet.authorization.reason")?,
     })
 }
 fn parse_budget(v: &Value) -> Result<Budget, String> {
-    let m = fields(
+    let m = nested_fields(
         v,
         &["max_evidence", "used_evidence", "max_bytes", "used_bytes"],
+        "Packet.budget",
+        "contract.Budget",
     )?;
     Ok(Budget {
-        max_evidence: integer(&m, "max_evidence")?,
-        used_evidence: integer(&m, "used_evidence")?,
-        max_bytes: integer(&m, "max_bytes")?,
-        used_bytes: integer(&m, "used_bytes")?,
+        max_evidence: integer_at(&m, "max_evidence", "Packet.budget.max_evidence")?,
+        used_evidence: integer_at(&m, "used_evidence", "Packet.budget.used_evidence")?,
+        max_bytes: integer_at(&m, "max_bytes", "Packet.budget.max_bytes")?,
+        used_bytes: integer_at(&m, "used_bytes", "Packet.budget.used_bytes")?,
     })
 }
 fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
     let items = match v {
         Value::Array(v) => v,
-        _ => return Err("evidence. expected array".into()),
+        Value::Null => return Ok(None),
+        _ => return Err(type_error("Packet.evidence", "[]contract.Evidence", v)),
     };
     let mut out = Vec::new();
-    for item in items {
-        let m = fields(
-            item,
-            &[
-                "evidence_id",
-                "kind",
-                "path",
-                "commit",
-                "line_start",
-                "line_end",
-                "source",
-                "content_hash",
-                "collected_at",
-                "verifier_status",
-            ],
-        )?;
+    for (index, item) in items.iter().enumerate() {
+        let path = format!("Packet.evidence.{}", index);
+        let m = match item {
+            Value::Null => std::collections::BTreeMap::new(),
+            Value::Object(fields) => {
+                let m = object_map(fields);
+                for (key, value) in fields {
+                    let field_path = format!("{}.{}", path, key);
+                    match key.as_str() {
+                        "evidence_id" | "kind" | "path" | "commit" | "source" | "content_hash"
+                        | "collected_at" | "verifier_status" => {
+                            if !matches!(value, Value::String(_) | Value::Null) {
+                                return Err(type_error(&field_path, "string", value));
+                            }
+                        }
+                        "line_start" | "line_end" => {
+                            if !matches!(value, Value::Number(_) | Value::Null) {
+                                return Err(type_error(&field_path, "int", value));
+                            }
+                        }
+                        _ => return Err(format!("unknown field {:?}", key)),
+                    }
+                }
+                m
+            }
+            _ => return Err(type_error(&path, "contract.Evidence", item)),
+        };
         out.push(Evidence {
-            evidence_id: string(&m, "evidence_id")?,
-            kind: string(&m, "kind")?,
-            path: string(&m, "path")?,
-            commit: string(&m, "commit")?,
-            line_start: integer(&m, "line_start")?,
-            line_end: integer(&m, "line_end")?,
-            source: string(&m, "source")?,
-            content_hash: string(&m, "content_hash")?,
-            collected_at: string(&m, "collected_at")?,
-            verifier_status: string(&m, "verifier_status")?,
+            evidence_id: string_at(&m, "evidence_id", &format!("{}.evidence_id", path))?,
+            kind: string_at(&m, "kind", &format!("{}.kind", path))?,
+            path: string_at(&m, "path", &format!("{}.path", path))?,
+            commit: string_at(&m, "commit", &format!("{}.commit", path))?,
+            line_start: integer_at(&m, "line_start", &format!("{}.line_start", path))?,
+            line_end: integer_at(&m, "line_end", &format!("{}.line_end", path))?,
+            source: string_at(&m, "source", &format!("{}.source", path))?,
+            content_hash: string_at(&m, "content_hash", &format!("{}.content_hash", path))?,
+            collected_at: string_at(&m, "collected_at", &format!("{}.collected_at", path))?,
+            verifier_status: string_at(
+                &m,
+                "verifier_status",
+                &format!("{}.verifier_status", path),
+            )?,
         });
     }
     Ok(Some(out))
 }
 fn parse_provenance(v: &Value) -> Result<Provenance, String> {
-    let m = fields(v, &["collector", "tool", "version", "tool_version"])?;
+    let m = nested_fields(
+        v,
+        &["collector", "tool", "version", "tool_version"],
+        "Packet.provenance",
+        "contract.Provenance",
+    )?;
     Ok(Provenance {
-        collector: string(&m, "collector")?,
-        tool: string(&m, "tool")?,
-        version: string(&m, "version")?,
-        tool_version: string(&m, "tool_version")?,
+        collector: string_at(&m, "collector", "Packet.provenance.collector")?,
+        tool: string_at(&m, "tool", "Packet.provenance.tool")?,
+        version: string_at(&m, "version", "Packet.provenance.version")?,
+        tool_version: string_at(&m, "tool_version", "Packet.provenance.tool_version")?,
     })
 }

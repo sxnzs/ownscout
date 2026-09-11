@@ -83,26 +83,280 @@ fn subcommand(allocator: std.mem.Allocator, args: []const []const u8, name: []co
     return nodeVerify(allocator, args[1..], json_output);
 }
 
-const LoadError = error{NotFound, ReadFailed, InvalidJson, WrongType};
+const LoadError = error{NotFound, ReadFailed, InvalidJson, ObjectRequired, UnknownField, WrongType};
+
+fn knownField(name: []const u8, fields: []const []const u8) bool {
+    for (fields) |field| {
+        if (std.mem.eql(u8, name, field)) return true;
+    }
+    return false;
+}
+
+fn normalizeJsonUtf8(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
+    if (std.unicode.utf8ValidateSlice(data)) return data;
+    var normalized: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < data.len) {
+        const length = std.unicode.utf8ByteSequenceLength(data[i]) catch 1;
+        if (length <= data.len - i and std.unicode.utf8ValidateSlice(data[i .. i + length])) {
+            try normalized.appendSlice(allocator, data[i .. i + length]);
+            i += length;
+        } else {
+            try normalized.appendSlice(allocator, "\xef\xbf\xbd");
+            i += 1;
+        }
+    }
+    return try normalized.toOwnedSlice(allocator);
+}
+
+fn unknownPacketField(root: json.Value) ?[]const u8 {
+    if (root != .object) return null;
+    const packet_fields = [_][]const u8{
+        "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome",
+        "freshness", "authorization", "budget", "evidence", "degradations", "provenance", "packet_hash",
+    };
+    for (root.object) |field| {
+        if (!knownField(field.key, &packet_fields)) return field.key;
+        const nested_fields: []const []const u8 = if (std.mem.eql(u8, field.key, "freshness"))
+            &[_][]const u8{ "head_commit", "head_anchor", "status", "current", "is_current", "checked_at" }
+        else if (std.mem.eql(u8, field.key, "authorization"))
+            &[_][]const u8{ "level", "reason" }
+        else if (std.mem.eql(u8, field.key, "budget"))
+            &[_][]const u8{ "max_evidence", "used_evidence", "max_bytes", "used_bytes" }
+        else if (std.mem.eql(u8, field.key, "provenance"))
+            &[_][]const u8{ "collector", "tool", "version", "tool_version" }
+        else
+            &[_][]const u8{};
+        if (field.value == .object) {
+            for (field.value.object) |nested| {
+                if (!knownField(nested.key, nested_fields)) return nested.key;
+            }
+        }
+        if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
+            const evidence_fields = [_][]const u8{
+                "evidence_id", "kind", "path", "commit", "line_start", "line_end", "source",
+                "content_hash", "collected_at", "verifier_status",
+            };
+            for (field.value.array) |item| {
+                if (item != .object) continue;
+                for (item.object) |nested| {
+                    if (!knownField(nested.key, &evidence_fields)) return nested.key;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+fn firstUnknownTopIndex(root: json.Value) ?usize {
+    if (root != .object) return null;
+    const packet_fields = [_][]const u8{
+        "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome",
+        "freshness", "authorization", "budget", "evidence", "degradations", "provenance", "packet_hash",
+    };
+    for (root.object, 0..) |field, i| {
+        if (!knownField(field.key, &packet_fields)) return i;
+        const nested_fields: []const []const u8 = if (std.mem.eql(u8, field.key, "freshness"))
+            &[_][]const u8{ "head_commit", "head_anchor", "status", "current", "is_current", "checked_at" }
+        else if (std.mem.eql(u8, field.key, "authorization"))
+            &[_][]const u8{ "level", "reason" }
+        else if (std.mem.eql(u8, field.key, "budget"))
+            &[_][]const u8{ "max_evidence", "used_evidence", "max_bytes", "used_bytes" }
+        else if (std.mem.eql(u8, field.key, "provenance"))
+            &[_][]const u8{ "collector", "tool", "version", "tool_version" }
+        else
+            &[_][]const u8{};
+        if (field.value == .object) {
+            for (field.value.object) |nested| {
+                if (!knownField(nested.key, nested_fields)) return i;
+            }
+        }
+        if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
+            const evidence_fields = [_][]const u8{
+                "evidence_id", "kind", "path", "commit", "line_start", "line_end", "source",
+                "content_hash", "collected_at", "verifier_status",
+            };
+            for (field.value.array) |item| {
+                if (item == .object) {
+                    for (item.object) |nested| {
+                        if (!knownField(nested.key, &evidence_fields)) return i;
+                    }
+                }
+            }
+        }
+    }
+    return null;
+}
+
+fn firstTypeErrorTopIndex(root: json.Value) ?usize {
+    if (root != .object) return null;
+    const string_fields = [_][]const u8{
+        "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome", "packet_hash",
+    };
+    for (root.object, 0..) |field, i| {
+        if (knownField(field.key, &string_fields) and field.value != .string and field.value != .null) return i;
+        if (std.mem.eql(u8, field.key, "evidence") and field.value != .array and field.value != .null) return i;
+        if (std.mem.eql(u8, field.key, "degradations") and field.value != .array and field.value != .null) return i;
+        if ((std.mem.eql(u8, field.key, "freshness") or std.mem.eql(u8, field.key, "authorization") or
+            std.mem.eql(u8, field.key, "budget") or std.mem.eql(u8, field.key, "provenance")) and
+            field.value != .object and field.value != .null) return i;
+        if (field.value == .object) {
+            const nested_fields: []const []const u8 = if (std.mem.eql(u8, field.key, "freshness"))
+                &[_][]const u8{ "head_commit", "head_anchor", "status", "current", "is_current", "checked_at" }
+            else if (std.mem.eql(u8, field.key, "authorization"))
+                &[_][]const u8{ "level", "reason" }
+            else if (std.mem.eql(u8, field.key, "budget"))
+                &[_][]const u8{ "max_evidence", "used_evidence", "max_bytes", "used_bytes" }
+            else if (std.mem.eql(u8, field.key, "provenance"))
+                &[_][]const u8{ "collector", "tool", "version", "tool_version" }
+            else
+                &[_][]const u8{};
+            for (field.value.object) |nested| {
+                if (!knownField(nested.key, nested_fields) or nested.value == .null) continue;
+                const is_bool = std.mem.eql(u8, field.key, "freshness") and
+                    (std.mem.eql(u8, nested.key, "current") or std.mem.eql(u8, nested.key, "is_current"));
+                const is_integer = std.mem.eql(u8, field.key, "budget");
+                if ((is_bool and nested.value != .boolean) or
+                    (is_integer and nested.value != .number) or
+                    (!is_bool and !is_integer and nested.value != .string)) return i;
+            }
+        }
+        if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
+            const evidence_fields = [_][]const u8{
+                "evidence_id", "kind", "path", "commit", "line_start", "line_end", "source",
+                "content_hash", "collected_at", "verifier_status",
+            };
+            for (field.value.array) |item| {
+                if (item == .null) continue;
+                if (item != .object) return i;
+                for (item.object) |nested| {
+                    if (!knownField(nested.key, &evidence_fields) or nested.value == .null) continue;
+                    const numeric = std.mem.eql(u8, nested.key, "line_start") or std.mem.eql(u8, nested.key, "line_end");
+                    if ((numeric and nested.value != .number) or (!numeric and nested.value != .string)) return i;
+                }
+            }
+        }
+        if (std.mem.eql(u8, field.key, "degradations") and field.value == .array) {
+            for (field.value.array) |item| if (item != .string and item != .null) return i;
+        }
+    }
+    return null;
+}
 
 fn loadPacket(allocator: std.mem.Allocator, path: []const u8) LoadError!contract.Packet {
     const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
         error.FileNotFound => return error.NotFound,
         else => return error.ReadFailed,
     };
-    const root = json.Parser.parse(allocator, data) catch return error.InvalidJson;
-    return contract.decodePacket(allocator, root) catch return error.WrongType;
+    const trimmed = std.mem.trim(u8, data, " \t\r\n");
+    const normalized = normalizeJsonUtf8(allocator, trimmed) catch return error.InvalidJson;
+    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch return error.InvalidJson;
+    if (trimmed.len == 0 or trimmed[0] != '{') return error.ObjectRequired;
+    const unknown_index = firstUnknownTopIndex(root);
+    const type_index = firstTypeErrorTopIndex(root);
+    if (unknown_index != null and (type_index == null or unknown_index.? < type_index.?)) return error.UnknownField;
+    if (type_index != null) return error.WrongType;
+    const packet = contract.decodePacket(allocator, root) catch return error.WrongType;
+    if (unknown_index != null) return error.UnknownField;
+    return packet;
 }
 
-fn packetHasObjectEvidence(allocator: std.mem.Allocator, path: []const u8) bool {
-    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch return false;
-    const key = std.mem.indexOf(u8, data, "\"evidence\"") orelse return false;
-    var i = key + "\"evidence\"".len;
-    while (i < data.len and std.ascii.isWhitespace(data[i])) : (i += 1) {}
-    if (i >= data.len or data[i] != ':') return false;
-    i += 1;
-    while (i < data.len and std.ascii.isWhitespace(data[i])) : (i += 1) {}
-    return i < data.len and data[i] == '{';
+fn unknownPacketFieldFromFile(allocator: std.mem.Allocator, path: []const u8) ?[]const u8 {
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch return null;
+    const trimmed = std.mem.trim(u8, data, " \t\r\n");
+    const normalized = normalizeJsonUtf8(allocator, trimmed) catch return null;
+    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch return null;
+    return unknownPacketField(root);
+}
+
+fn jsonTypeName(value: json.Value) []const u8 {
+    return switch (value) {
+        .null => "null",
+        .boolean => "bool",
+        .number => "number",
+        .string => "string",
+        .array => "array",
+        .object => "object",
+    };
+}
+
+fn decodeFailureMessage(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch
+        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
+    const trimmed = std.mem.trim(u8, data, " \t\r\n");
+    const normalized = normalizeJsonUtf8(allocator, trimmed) catch
+        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
+    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch
+        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
+    if (root == .object) {
+        const string_fields = [_][]const u8{
+            "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome", "packet_hash",
+        };
+        for (root.object) |field| {
+            if (knownField(field.key, &string_fields) and field.value != .string) {
+                if (field.value == .null) continue;
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type string", .{ path, jsonTypeName(field.value), field.key });
+            }
+            if (std.mem.eql(u8, field.key, "evidence") and field.value != .array) {
+                if (field.value == .null) continue;
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.evidence of type []contract.Evidence", .{ path, jsonTypeName(field.value) });
+            }
+            if (std.mem.eql(u8, field.key, "degradations") and field.value != .array) {
+                if (field.value == .null) continue;
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.degradations of type []string", .{ path, jsonTypeName(field.value) });
+            }
+            if ((std.mem.eql(u8, field.key, "freshness") or std.mem.eql(u8, field.key, "authorization") or
+                std.mem.eql(u8, field.key, "budget") or std.mem.eql(u8, field.key, "provenance")) and
+                field.value != .object and field.value != .null)
+            {
+                const type_name = if (std.mem.eql(u8, field.key, "freshness")) "contract.Freshness" else if (std.mem.eql(u8, field.key, "authorization")) "contract.Authorization" else if (std.mem.eql(u8, field.key, "budget")) "contract.Budget" else "contract.Provenance";
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type {s}", .{ path, jsonTypeName(field.value), field.key, type_name });
+            }
+            if (field.value == .object) {
+                for (field.value.object) |nested| {
+                    if (nested.value == .null) continue;
+                    const is_bool = (std.mem.eql(u8, field.key, "freshness") and
+                        (std.mem.eql(u8, nested.key, "current") or std.mem.eql(u8, nested.key, "is_current")));
+                    const is_integer = (std.mem.eql(u8, field.key, "budget"));
+                    if (is_bool and nested.value != .boolean) {
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type bool", .{ path, jsonTypeName(nested.value), field.key, nested.key });
+                    }
+                    if (is_integer and nested.value != .number) {
+                        const type_name = if (std.mem.eql(u8, nested.key, "max_bytes") or std.mem.eql(u8, nested.key, "used_bytes")) "int64" else "int";
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type {s}", .{ path, jsonTypeName(nested.value), field.key, nested.key, type_name });
+                    }
+                    if (!is_bool and !is_integer and nested.value != .string) {
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type string", .{ path, jsonTypeName(nested.value), field.key, nested.key });
+                    }
+                }
+            }
+            if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
+                for (field.value.array, 0..) |item, i| {
+                    if (item == .null) continue;
+                    if (item != .object) {
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.evidence.{d} of type contract.Evidence", .{ path, jsonTypeName(item), i });
+                    }
+                    for (item.object) |nested| {
+                        if (nested.value == .null) continue;
+                        const numeric = std.mem.eql(u8, nested.key, "line_start") or std.mem.eql(u8, nested.key, "line_end");
+                        if ((numeric and nested.value != .number) or (!numeric and nested.value != .string)) {
+                            const type_name = if (numeric) "int" else "string";
+                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.evidence.{d}.{s} of type {s}", .{ path, jsonTypeName(nested.value), i, nested.key, type_name });
+                        }
+                    }
+                }
+            }
+            if (std.mem.eql(u8, field.key, "degradations") and field.value == .array) {
+                for (field.value.array, 0..) |item, i| {
+                    if (item == .null) continue;
+                    if (item != .string) {
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.degradations.{d} of type string", .{ path, jsonTypeName(item), i });
+                    }
+                }
+            }
+        }
+    }
+    return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
 }
 
 fn parseValueFlag(args: []const []const u8, flag: []const u8) ?[]const u8 {
@@ -129,7 +383,13 @@ fn contractValidate(allocator: std.mem.Allocator, args: []const []const u8, json
     const packet = loadPacket(allocator, path) catch |err| {
         const detail = switch (err) {
             error.NotFound => try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{path}),
-            error.InvalidJson, error.WrongType => try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path}),
+            error.InvalidJson => try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path}),
+            error.ObjectRequired => try std.fmt.allocPrint(allocator, "packet \"{s}\" must contain a JSON object", .{path}),
+            error.UnknownField => blk: {
+                const field = unknownPacketFieldFromFile(allocator, path) orelse "unknown";
+                break :blk try std.fmt.allocPrint(allocator, "packet \"{s}\" contains an unknown JSON field: json: unknown field \"{s}\"", .{ path, field });
+            },
+            error.WrongType => try decodeFailureMessage(allocator, path),
             else => try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{path}),
         };
         const details = [_][]const u8{detail};
@@ -156,10 +416,14 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
     const packet = loadPacket(allocator, packet_path.?) catch |err| {
         const detail = switch (err) {
             error.NotFound => try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{packet_path.?}),
-            else => if (err == error.WrongType and packetHasObjectEvidence(allocator, packet_path.?))
-                try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence", .{packet_path.?})
-            else
-                try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{packet_path.?}),
+            error.InvalidJson => try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{packet_path.?}),
+            error.ObjectRequired => try std.fmt.allocPrint(allocator, "packet \"{s}\" must contain a JSON object", .{packet_path.?}),
+            error.UnknownField => blk: {
+                const field = unknownPacketFieldFromFile(allocator, packet_path.?) orelse "unknown";
+                break :blk try std.fmt.allocPrint(allocator, "packet \"{s}\" contains an unknown JSON field: json: unknown field \"{s}\"", .{ packet_path.?, field });
+            },
+            error.WrongType => try decodeFailureMessage(allocator, packet_path.?),
+            else => try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{packet_path.?}),
         };
         const details = [_][]const u8{detail};
         return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable JSON packet with --packet <file>." }, json_output), .code = 2 };
@@ -251,6 +515,9 @@ fn verifyEvidence(allocator: std.mem.Allocator, root: []const u8, dir: std.Io.Di
     var expected = item.content_hash;
     if (std.mem.startsWith(u8, expected, "sha256:")) expected = expected[7..];
     if (expected.len != 64) return error.BadHash;
+    for (expected) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) return error.BadHash;
+    }
     if (!std.ascii.eqlIgnoreCase(expected, &actual)) return error.HashMismatch;
     _ = path;
     return true;

@@ -11,9 +11,6 @@ pub enum Value {
 }
 
 pub fn parse(data: &[u8]) -> Result<Value, String> {
-    if std::str::from_utf8(data).is_err() {
-        return Err("input is not valid UTF-8".into());
-    }
     let mut p = Parser { data, pos: 0 };
     let value = p.value()?;
     p.ws();
@@ -38,6 +35,14 @@ pub fn unique_object(fields: &[(String, Value)]) -> Result<BTreeMap<&str, &Value
         }
     }
     Ok(result)
+}
+
+pub fn object_map(fields: &[(String, Value)]) -> BTreeMap<&str, &Value> {
+    let mut result = BTreeMap::new();
+    for (key, value) in fields {
+        result.insert(key.as_str(), value);
+    }
+    result
 }
 
 struct Parser<'a> {
@@ -136,8 +141,7 @@ impl<'a> Parser<'a> {
                     } else {
                         &self.data[start..self.pos]
                     };
-                    let text = std::str::from_utf8(bytes).map_err(|_| "invalid UTF-8")?;
-                    out.push_str(text);
+                    out.push_str(&String::from_utf8_lossy(bytes));
                 }
             }
         }

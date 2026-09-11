@@ -71,6 +71,9 @@ pub fn parse(data: &[u8]) -> Result<Envelope, String> {
     if data.len() > 1 << 20 {
         return Err("envelope exceeds 1048576 byte input limit".into());
     }
+    if std::str::from_utf8(data).is_err() {
+        return Err("parse envelope: input is not valid UTF-8".into());
+    }
     let v = crate::json::parse(data).map_err(|e| format!("parse envelope: {}", e))?;
     let m = map(
         &v,
