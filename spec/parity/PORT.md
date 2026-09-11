@@ -60,6 +60,19 @@ ledger), and an in-repository ledger rejection. Run it with the same harness:
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
 ```
 
+## Oracle validation
+
+The corpus was mutation-tested against two deliberately broken reference builds:
+
+| Mutation | Base corpus | Edge corpus |
+|---|---|---|
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 73/81 |
+| `next_action` renamed to `nextAction` | 20/28 | 45/81 |
+| unmutated reference | 28/28 | 81/81 |
+
+Both subtle divergences are caught, so a passing harness is meaningful rather
+than vacuous.
+
 ## Behavior to preserve (read the Go source)
 
 - **packet-v1 strict decoding** (`internal/nodepacket/decode.go`): exactly one
