@@ -7,6 +7,8 @@ mod node;
 mod packet;
 mod result;
 mod sha256;
+#[cfg(test)]
+mod tests;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

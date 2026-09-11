@@ -9,10 +9,7 @@ pub struct Verification {
     pub evidence_id: String,
     pub path: String,
     pub status: String,
-    pub expected_hash: String,
     pub actual_hash: String,
-    pub line_start: i64,
-    pub line_end: i64,
     pub message: String,
 }
 pub struct Report {
@@ -63,10 +60,7 @@ fn one(root: &Path, e: &Evidence) -> Verification {
         evidence_id: e.evidence_id.clone(),
         path: e.path.clone(),
         status: "failed".into(),
-        expected_hash: e.content_hash.clone(),
         actual_hash: String::new(),
-        line_start: e.line_start,
-        line_end: e.line_end,
         message: String::new(),
     };
     let path = match safe_path(root, &e.path) {

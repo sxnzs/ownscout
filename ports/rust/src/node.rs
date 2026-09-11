@@ -207,6 +207,7 @@ pub fn canonical_packet(p: &Packet) -> Vec<u8> {
     o.into_bytes()
 }
 pub fn validate(e: &Envelope, p: &Packet, b: &str) -> Result<Vec<usize>, String> {
+    let _envelope_id = &e.envelope_id;
     if e.schema_version != "node-envelope-v1" {
         return Err("schema_version must equal \"node-envelope-v1\"".into());
     }

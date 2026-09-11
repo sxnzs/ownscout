@@ -573,20 +573,6 @@ fn node_error(json: bool, summary: &str, detail: &str, code: i32, next: &str) ->
     ))
 }
 
-fn stub(args: &[String]) -> (String, i32) {
-    let json = args.iter().any(|a| a == "--json");
-    let command = args[0].clone();
-    let next = format!("ownscout {} --help", command);
-    let data = ResultData {
-        command: "usage".into(),
-        ok: false,
-        summary: "command implementation pending".into(),
-        details: vec![format!("usage: {}", next)],
-        next_action: format!("Run '{}'.", next),
-    };
-    render(&data, json, 2)
-}
-
 fn help(args: &[String]) -> (String, i32) {
     let mut text = ROOT_USAGE.to_string();
     if !args.is_empty() {
