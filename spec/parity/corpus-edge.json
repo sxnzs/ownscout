@@ -1134,6 +1134,47 @@
       "exitCode": 2,
       "name": "node-edge-ledger-in-repo-json",
       "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-seed.jsonl"
+      ],
+      "exitCode": 0,
+      "files": {
+        "fixtures/edge/ledger-seed.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":2,\"prev_record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"record_hash\":\"6d834578952400dfcf986f6e223c5412bff2f02a2bc55b5ac1806ba113c1a043\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "node-edge-ledger-append-human",
+      "stdout": "OK: all nodes are evidence_current\n  - node \"build\": evidence_current\nNext action: The node envelope is recorded and ready for its declared workflow.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-seed.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "files": {
+        "fixtures/edge/ledger-seed.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":2,\"prev_record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"record_hash\":\"6d834578952400dfcf986f6e223c5412bff2f02a2bc55b5ac1806ba113c1a043\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "node-edge-ledger-append-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":true,\"summary\":\"all nodes are evidence_current\",\"details\":[\"node \\\"build\\\": evidence_current\"],\"next_action\":\"The node envelope is recorded and ready for its declared workflow.\"}\n"
     }
   ],
   "note": "Edge cases recorded from the Go reference. Same placeholders as corpus.json.",

@@ -312,6 +312,61 @@ func run() error {
 		}
 		recorded = append(recorded, entry)
 	}
+
+	// Ledger append: the second record must chain to the first. The seed fixture
+	// is restored after recording so every harness run starts from one record.
+	seedPath := filepath.Join(edge, "ledger-seed.jsonl")
+	os.Remove(seedPath)
+	seedArgs := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+		"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-seed.jsonl"}
+	seedRun := exec.Command(bin, seedArgs...)
+	seedRun.Dir = dir
+	if out, err := seedRun.CombinedOutput(); err != nil {
+		return fmt.Errorf("ledger seed: %v: %s", err, out)
+	}
+	seed, err := os.ReadFile(seedPath)
+	if err != nil {
+		return err
+	}
+	for _, mode := range []struct {
+		name  string
+		extra []string
+	}{
+		{"node-edge-ledger-append-human", nil},
+		{"node-edge-ledger-append-json", []string{"--json"}},
+	} {
+		args := append(append([]string{}, seedArgs...), mode.extra...)
+		command := exec.Command(bin, args...)
+		command.Dir = dir
+		var out bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &out
+		exitCode := 0
+		if err := command.Run(); err != nil {
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				return fmt.Errorf("%s: %v", mode.name, err)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		content, err := os.ReadFile(seedPath)
+		if err != nil {
+			return err
+		}
+		recorded = append(recorded, map[string]any{
+			"name":     mode.name,
+			"args":     args,
+			"exitCode": exitCode,
+			"stdout":   normalize(out.String(), dir, repoDir, bin),
+			"files": map[string]any{
+				"fixtures/edge/ledger-seed.jsonl": normalize(string(content), dir, repoDir, bin),
+			},
+		})
+		if err := os.WriteFile(seedPath, seed, 0o644); err != nil {
+			return err
+		}
+	}
+
 	return writeJSON(filepath.Join(dir, "corpus-edge.json"), map[string]any{
 		"version": 1,
 		"note":    "Edge cases recorded from the Go reference. Same placeholders as corpus.json.",
