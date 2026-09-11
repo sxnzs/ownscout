@@ -7,7 +7,7 @@ all verified byte-for-byte against the same recorded oracle.
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 81/81 | 31 | none (Node built-ins only) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 81/81 | 106 | none (Node built-ins only) |
 | Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 81/81 | 16 | none (`.dependencies = .{}`) |
 | Rust | `ports/rust/target/release/ownscout` | 28/28 | 81/81 | 17 | none (empty `[dependencies]`) |
 

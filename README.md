@@ -4,6 +4,9 @@ OwnScout is a local-first CLI for validating evidence packets and checking their
 repository spans. It is standard-library-only, deterministic, and safe by
 default: it does not start a daemon, use the network, or mutate repositories.
 
+Beyond the Go reference, `ports/` contains independent TypeScript, Rust and Zig
+implementations of the same CLI. See [ports/README.md](ports/README.md).
+
 ## Packet format
 
 OwnScout accepts packet-v1 JSON only. Decoding is strict: unknown fields are
@@ -65,3 +68,19 @@ a failure; human output includes the concrete next action.
 - `1`: contract failure, evidence failure, or node graph failure after append
 - `2`: usage error, malformed node input, missing input file, repository/ledger
   I/O, or ledger append failure
+
+## Language ports
+
+Three standard-library-only ports reproduce this CLI byte-for-byte and are
+graded against the same recorded corpus:
+
+| Port | Binary | Build | Tests |
+|---|---|---|---|
+| TypeScript | `ports/ts/bin/ownscout` | none (Node 24 runs the source) | `cd ports/ts && node --test` |
+| Rust | `ports/rust/target/release/ownscout` | `cd ports/rust && cargo build --release` | `cd ports/rust && cargo test` |
+| Zig | `ports/zig/zig-out/bin/ownscout` | `cd ports/zig && zig build` | `cd ports/zig && zig build test` |
+
+Build the Rust and Zig binaries with `make ports`, then run every corpus and
+test suite with `spec/parity/verify-all.sh`. The port contract is
+`spec/parity/PORT.md` and the recorded status is `docs/PORTS.md`; see
+[ports/README.md](ports/README.md) for the full guide.
