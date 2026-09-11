@@ -1,4 +1,4 @@
-bin/
+/bin/
 coverage.out
 .DS_Store
 spec/parity/reference-ownscout
