@@ -1,0 +1,39 @@
+{
+  "packet_id": "packet-001",
+  "schema_version": "v1",
+  "repo_root": "/workspace/example",
+  "head_commit": "0123456789abcdef0123456789abcdef01234567",
+  "request_id": "request-001",
+  "issued_at": "2026-09-05T12:00:00Z",
+  "outcome": "complete",
+  "freshness": null,
+  "authorization": {
+    "level": "autonomous"
+  },
+  "budget": {
+    "max_evidence": 10,
+    "used_evidence": 1,
+    "max_bytes": 100000,
+    "used_bytes": 512
+  },
+  "evidence": [
+    {
+      "evidence_id": "evidence-001",
+      "kind": "source_span",
+      "path": "internal/example.go",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "line_start": 10,
+      "line_end": 14,
+      "source": "local_repository",
+      "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "collected_at": "2026-09-05T12:00:01Z",
+      "verifier_status": "verified"
+    }
+  ],
+  "degradations": [],
+  "provenance": {
+    "collector": "ownscout",
+    "version": "0"
+  },
+  "packet_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

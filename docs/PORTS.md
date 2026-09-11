@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded oracle.
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 81/81 | 106 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 81/81 | 16 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 81/81 | 17 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 93/93 | 106 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 93/93 | 16 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 93/93 | 17 | none (empty `[dependencies]`) |
 
 The Go reference itself is unchanged: 62 tests, `node` 98.7% / `nodepacket` 94.5%
 coverage, `go test -race` clean.
@@ -32,14 +32,17 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 81 cases (path escape, non-UTF8, graph cycles, ledger hash
-  chaining, in-repo ledger rejection, Go JSON HTML-escaping).
+- Edge corpus: 93 cases (path escape, non-UTF8, graph cycles, ledger hash
+  chaining, in-repo ledger rejection, Go JSON HTML-escaping, and null/empty
+  field shapes).
 - Oracle mutation test: two deliberately broken reference builds fail the
-  corpora (26/28 and 20/28 base; 73/81 and 45/81 edge), so a pass is meaningful.
+  corpora (26/28 and 20/28 base; 85/93 and 51/93 edge), so a pass is meaningful.
 - Fuzzing: no divergence in 200 iterations (seed 1) plus 300 iterations
-  (seed 7) per port after the fix below.
+  (seed 7) per port, and seed 11 found the null-handling defect recorded below.
 
-## The bug the fuzzer caught
+## Bugs the fuzzer caught
+
+### Unknown-field reporting (seed 1)
 
 All three ports initially passed both static corpora, but the fuzzer found the
 same real defect in each: JSON syntax errors were reported as
@@ -47,6 +50,21 @@ same real defect in each: JSON syntax errors were reported as
 was dropped. The reference runs `json.Valid` first, then decodes with
 `DisallowUnknownFields`, then checks for trailing data. Ports must reproduce
 that order and those exact strings. Fixed in all three.
+
+### Null versus empty fields (seed 11)
+
+A later run with a fresh seed found a second shared defect. The reference keys
+required-field presence off *emptiness* for structs (`freshness`, `budget`) and
+*nil-ness* for slices (`evidence`, `degradations`): an explicit JSON `null` is a
+missing required field, while `[]` is present but still triggers the
+"complete packet requires at least one evidence entry" rule. TypeScript and
+Rust skipped the evidence rule when the field was absent or null; Zig used
+key-presence for structs and treated null slices as present, even reporting
+`"degradations": null` as valid.
+
+Fixed in all three, and the shapes are now frozen into the edge corpus
+(`internal/contract/testdata/invalid-null-*.json` and
+`invalid-empty-*.json`), so the static gate catches them without the fuzzer.
 
 ## Port design
 

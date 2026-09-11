@@ -51,6 +51,52 @@
         "contract",
         "validate",
         "--packet",
+        "fixtures/edge/contract-invalid-empty-budget.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-empty-budget-human",
+      "stdout": "ERROR: packet is invalid (2 violation(s))\n  - required_field: budget: required field is missing\n  - budget: budget: budget must contain counters\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-empty-budget.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-empty-budget-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (2 violation(s))\",\"details\":[\"required_field: budget: required field is missing\",\"budget: budget: budget must contain counters\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-empty-freshness.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-empty-freshness-human",
+      "stdout": "ERROR: packet is invalid (3 violation(s))\n  - required_field: freshness: required field is missing\n  - freshness: freshness.head_commit: complete packet requires a freshness head anchor\n  - freshness: freshness.status: complete packet requires current freshness\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-empty-freshness.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-empty-freshness-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (3 violation(s))\",\"details\":[\"required_field: freshness: required field is missing\",\"freshness: freshness.head_commit: complete packet requires a freshness head anchor\",\"freshness: freshness.status: complete packet requires current freshness\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
         "fixtures/edge/contract-invalid-evidence.json"
       ],
       "exitCode": 1,
@@ -137,6 +183,98 @@
       "exitCode": 1,
       "name": "contract-edge-invalid-missing-required-json",
       "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"required_field: packet_hash: required field is missing\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-budget.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-budget-human",
+      "stdout": "ERROR: packet is invalid (2 violation(s))\n  - required_field: budget: required field is missing\n  - budget: budget: budget must contain counters\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-budget.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-budget-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (2 violation(s))\",\"details\":[\"required_field: budget: required field is missing\",\"budget: budget: budget must contain counters\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-degradations.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-degradations-human",
+      "stdout": "ERROR: packet is invalid (1 violation(s))\n  - required_field: degradations: required field is missing\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-degradations.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-degradations-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (1 violation(s))\",\"details\":[\"required_field: degradations: required field is missing\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-evidence.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-evidence-human",
+      "stdout": "ERROR: packet is invalid (2 violation(s))\n  - required_field: evidence: required field is missing\n  - evidence: evidence: complete packet requires at least one evidence entry\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-evidence.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-evidence-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (2 violation(s))\",\"details\":[\"required_field: evidence: required field is missing\",\"evidence: evidence: complete packet requires at least one evidence entry\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-freshness.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-freshness-human",
+      "stdout": "ERROR: packet is invalid (3 violation(s))\n  - required_field: freshness: required field is missing\n  - freshness: freshness.head_commit: complete packet requires a freshness head anchor\n  - freshness: freshness.status: complete packet requires current freshness\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/contract-invalid-null-freshness.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-invalid-null-freshness-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (3 violation(s))\",\"details\":[\"required_field: freshness: required field is missing\",\"freshness: freshness.head_commit: complete packet requires a freshness head anchor\",\"freshness: freshness.status: complete packet requires current freshness\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
     },
     {
       "args": [

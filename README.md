@@ -8,7 +8,7 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 81/81" src="https://img.shields.io/badge/parity-28%2F28%20%2B%2081%2F81-3ce6bf?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 93/93" src="https://img.shields.io/badge/parity-28%2F28%20%2B%2093%2F93-3ce6bf?style=flat-square"></a>
   <a href="#verification"><img alt="201 tests passing" src="https://img.shields.io/badge/tests-201%20passing-3ce6bf?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-5aa9ff?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-5aa9ff?style=flat-square"></a>
@@ -183,14 +183,15 @@ A port is only interesting if a passing grade means something. Here is how
 parity is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 81 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 93 edge cases" width="100%">
 </p>
 
 - **Recorded oracle.** The Go reference records 28 base cases and 81 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
-  ledger rejection, JSON HTML-escaping). Every port replays them byte-for-byte.
+  ledger rejection, JSON HTML-escaping, and the null/empty field shapes below).
+  Every port replays them byte-for-byte.
 - **Mutation-tested oracle.** Two deliberately broken reference builds fail the
-  corpora (26/28 and 20/28 base; 73/81 and 45/81 edge), so a pass is evidence,
+  corpora (26/28 and 20/28 base; 85/93 and 51/93 edge), so a pass is evidence,
   not a formality.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
   compares the reference against a candidate. It is what caught a real shared

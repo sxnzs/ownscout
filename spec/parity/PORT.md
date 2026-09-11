@@ -59,7 +59,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (59 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (93 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), and an in-repository ledger rejection. Run it with the same harness:
@@ -74,9 +74,9 @@ The corpus was mutation-tested against two deliberately broken reference builds:
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 73/81 |
-| `next_action` renamed to `nextAction` | 20/28 | 45/81 |
-| unmutated reference | 28/28 | 81/81 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 85/93 |
+| `next_action` renamed to `nextAction` | 20/28 | 51/93 |
+| unmutated reference | 28/28 | 93/93 |
 
 Both subtle divergences are caught, so a passing harness is meaningful rather
 than vacuous.

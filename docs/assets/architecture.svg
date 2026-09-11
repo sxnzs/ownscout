@@ -32,7 +32,7 @@
     <rect width="300" height="150" rx="18" fill="#101d33" stroke="#24406b" stroke-width="2.5"/>
     <text x="28" y="46" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#eef5ff">Recorded oracle</text>
     <text x="28" y="76" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#9fb3d1">spec/parity/corpus*.json</text>
-    <text x="28" y="104" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" fill="#c6d6ef">28 base + 81 edge cases</text>
+    <text x="28" y="104" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" fill="#c6d6ef">28 base + 93 edge cases</text>
     <text x="28" y="126" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" fill="#c6d6ef">exact stdout + exit codes</text>
   </g>
 
