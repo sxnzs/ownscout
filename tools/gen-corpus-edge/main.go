@@ -173,6 +173,8 @@ func run() error {
 		{"wrong-binding", func(env map[string]any) { env["packet_binding_sha256"] = strings.Repeat("0", 64) }},
 		{"wrong-schema", func(env map[string]any) { env["schema_version"] = "node-envelope-v2" }},
 		{"wrong-packet-id", func(env map[string]any) { env["packet_id"] = "packet-999" }},
+		{"nodes-not-array", func(env map[string]any) { env["nodes"] = "nope" }},
+		{"null-node-id", func(env map[string]any) { env["nodes"].([]any)[0].(map[string]any)["node_id"] = nil }},
 		{"unknown-field", func(env map[string]any) { env["extra"] = true }},
 		{"duplicate-key", func(env map[string]any) {}},
 		{"trailing-json", func(env map[string]any) {}},
@@ -202,6 +204,57 @@ func run() error {
 			spec{"node-edge-" + mutation.name + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
+
+	packetBase := map[string]any{}
+	if err := json.Unmarshal(packetValid, &packetBase); err != nil {
+		return err
+	}
+	evidenceVariants := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"escape", func(p map[string]any) {
+			p["evidence"].([]any)[0].(map[string]any)["path"] = "../outside.txt"
+		}},
+		{"missing", func(p map[string]any) {
+			p["evidence"].([]any)[0].(map[string]any)["path"] = "absent.txt"
+		}},
+		{"range", func(p map[string]any) {
+			item := p["evidence"].([]any)[0].(map[string]any)
+			item["line_start"] = 9000
+			item["line_end"] = 9001
+		}},
+		{"null-outcome", func(p map[string]any) { p["outcome"] = nil }},
+		{"evidence-object", func(p map[string]any) { p["evidence"] = map[string]any{} }},
+	}
+	for _, variant := range evidenceVariants {
+		payload := deepCopy(packetBase)
+		variant.mutate(payload)
+		if err := writeJSON(filepath.Join(edge, "packet-"+variant.name+".json"), payload); err != nil {
+			return err
+		}
+		args := []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-" + variant.name + ".json"}
+		cases = append(cases,
+			spec{"evidence-edge-" + variant.name + "-human", args},
+			spec{"evidence-edge-" + variant.name + "-json", append(append([]string{}, args...), "--json")},
+		)
+	}
+
+	nonUTF8 := bytes.Replace(packetValid, []byte("\"packet-001\""), []byte("\"packet-\xff01\""), 1)
+	if err := os.WriteFile(filepath.Join(edge, "packet-nonutf8.json"), nonUTF8, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(edge, "ledger-garbage.jsonl"), []byte("not a ledger record\n"), 0o644); err != nil {
+		return err
+	}
+	cases = append(cases,
+		spec{"contract-edge-nonutf8-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json"}},
+		spec{"contract-edge-nonutf8-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json", "--json"}},
+		spec{"evidence-edge-repo-is-file-human", []string{"evidence", "verify", "--repo", "fixtures/repo/notes.txt", "--packet", "fixtures/packet-valid.json"}},
+		spec{"evidence-edge-repo-is-file-json", []string{"evidence", "verify", "--repo", "fixtures/repo/notes.txt", "--packet", "fixtures/packet-valid.json", "--json"}},
+		spec{"node-edge-ledger-garbage-human", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-garbage.jsonl"}},
+		spec{"node-edge-ledger-garbage-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-garbage.jsonl", "--json"}},
+	)
 
 	staleID, staleBinding, err := bindingFor(packetStale)
 	if err != nil {

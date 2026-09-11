@@ -673,6 +673,76 @@
         "--packet",
         "fixtures/packet-valid.json",
         "--envelope",
+        "fixtures/edge/envelope-nodes-not-array.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-nodes-not-array-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-nodes-not-array.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-nodes-not-array-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-null-node-id.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-null-node-id-human",
+      "stdout": "ERROR: envelope could not be parsed\n  - strict envelope parsing failed\nNext action: Provide one valid node-envelope-v1 JSON object with --envelope \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-null-node-id.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-null-node-id-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
         "fixtures/edge/envelope-unknown-field.json",
         "--ledger",
         "ledger.jsonl"
@@ -768,6 +838,226 @@
       "exitCode": 2,
       "name": "node-edge-trailing-json-json",
       "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be parsed\",\"details\":[\"strict envelope parsing failed\"],\"next_action\":\"Provide one valid node-envelope-v1 JSON object with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-escape.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-escape-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"../outside.txt\"): evidence path \"../outside.txt\" contains a parent component\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-escape.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-escape-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"../outside.txt\\\"): evidence path \\\"../outside.txt\\\" contains a parent component\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-missing.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-missing-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"absent.txt\"): cannot access evidence path \"absent.txt\": lstat {{REPO}}/absent.txt: no such file or directory\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-missing.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-missing-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"absent.txt\\\"): cannot access evidence path \\\"absent.txt\\\": lstat {{REPO}}/absent.txt: no such file or directory\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-range.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-range-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"notes.txt\"): invalid line range 9000-9001 for 3 line(s)\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-range.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-range-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"notes.txt\\\"): invalid line range 9000-9001 for 3 line(s)\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-null-outcome.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-null-outcome-human",
+      "stdout": "ERROR: packet is invalid\n  - required_field: outcome: required field is missing\n  - outcome: outcome: unknown outcome\nNext action: Fix the packet contract, then verify evidence again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-null-outcome.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-null-outcome-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"packet is invalid\",\"details\":[\"required_field: outcome: required field is missing\",\"outcome: outcome: unknown outcome\"],\"next_action\":\"Fix the packet contract, then verify evidence again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-object.json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-edge-evidence-object-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-evidence-object.json\" is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-object.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-edge-evidence-object-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-evidence-object.json\\\" is not valid JSON: json: cannot unmarshal object into Go struct field Packet.evidence of type []contract.Evidence\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-nonutf8.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-nonutf8-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-nonutf8.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-nonutf8-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo/notes.txt",
+        "--packet",
+        "fixtures/packet-valid.json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-edge-repo-is-file-human",
+      "stdout": "ERROR: repository could not be checked\n  - repository \"fixtures/repo/notes.txt\" is not a directory\nNext action: Provide a readable repository directory with --repo \u003cdir\u003e.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo/notes.txt",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-edge-repo-is-file-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"repository could not be checked\",\"details\":[\"repository \\\"fixtures/repo/notes.txt\\\" is not a directory\"],\"next_action\":\"Provide a readable repository directory with --repo \\u003cdir\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-garbage.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-garbage-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-garbage.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-garbage-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
     },
     {
       "args": [
