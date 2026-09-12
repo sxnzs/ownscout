@@ -1,38 +1,57 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 360" width="1000" height="360" role="img" aria-label="OwnScout parity matrix: every port passes 28 base and 93 edge cases">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" role="img" aria-label="OwnScout parity matrix: every port replays 28 base and 93 edge cases byte-for-byte">
   <defs>
-    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#0e1830"/></linearGradient>
-    <linearGradient id="ok" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3ce6bf"/><stop offset="1" stop-color="#5aa9ff"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
   </defs>
-  <rect width="1000" height="360" rx="24" fill="url(#bg2)"/>
-  <text x="48" y="60" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#eef5ff">Parity matrix</text>
-  <text x="48" y="90" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="17" fill="#9fb3d1">Replayed against the recorded oracle; stdout and exit codes match exactly.</text>
-  <g font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" fill="#9fb3d1">
-    <text x="440" y="140" text-anchor="middle" font-weight="600">Base</text>
-    <text x="620" y="140" text-anchor="middle" font-weight="600">Edge</text>
-    <text x="780" y="140" text-anchor="middle" font-weight="600">Tests</text>
-    <text x="910" y="140" text-anchor="middle" font-weight="600">Deps</text>
+  <rect width="1000" height="400" fill="#0a0a0a"/>
+  <rect width="1000" height="400" fill="url(#grid)"/>
+  <rect x="20.5" y="20.5" width="959" height="359" fill="none" stroke="#7ee787" stroke-opacity="0.3"/>
+
+  <text x="48" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#7ee787" letter-spacing="3.4">PARITY MATRIX</text>
+  <line x1="48" y1="82" x2="952" y2="82" stroke="#7ee787" stroke-opacity="0.22" stroke-width="1"/>
+  <text x="48" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.6">replayed against the recorded oracle — stdout and exit codes match exactly</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#8fce97" letter-spacing="2.4">
+    <text x="48" y="144">PORT</text>
+    <text x="560" y="144" text-anchor="end">BASE</text>
+    <text x="690" y="144" text-anchor="end">EDGE</text>
+    <text x="820" y="144" text-anchor="end">TESTS</text>
+    <text x="952" y="144" text-anchor="end">DEPS</text>
   </g>
-  <g font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
-    <g transform="translate(48,160)">
-      <rect width="904" height="56" rx="12" fill="#101d33"/><circle cx="26" cy="28" r="7" fill="#3ce6bf"/><text x="46" y="34" font-size="18" font-weight="600" fill="#eef5ff">TypeScript</text>
-      <text x="392" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">28/28</text>
-      <text x="572" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">93/93</text>
-      <text x="732" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#d7e5fb">106</text>
-      <text x="862" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#8fa8c8">none</text>
+  <line x1="48" y1="156" x2="952" y2="156" stroke="#7ee787" stroke-opacity="0.16" stroke-width="1"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
+    <g>
+      <text x="48" y="194" fill="#e8e8e8">GO REFERENCE</text>
+      <text x="560" y="194" text-anchor="end" fill="#7ee787">28/28</text>
+      <text x="690" y="194" text-anchor="end" fill="#7ee787">93/93</text>
+      <text x="820" y="194" text-anchor="end" fill="#c8c8c8">62</text>
+      <text x="952" y="194" text-anchor="end" fill="#6f8f74">stdlib</text>
     </g>
-    <g transform="translate(48,224)">
-      <rect width="904" height="56" rx="12" fill="#101d33"/><circle cx="26" cy="28" r="7" fill="#ff9f68"/><text x="46" y="34" font-size="18" font-weight="600" fill="#eef5ff">Rust</text>
-      <text x="392" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">28/28</text>
-      <text x="572" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">93/93</text>
-      <text x="732" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#d7e5fb">17</text>
-      <text x="862" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#8fa8c8">none</text>
+    <g>
+      <text x="48" y="232" fill="#e8e8e8">TYPESCRIPT</text>
+      <text x="560" y="232" text-anchor="end" fill="#7ee787">28/28</text>
+      <text x="690" y="232" text-anchor="end" fill="#7ee787">93/93</text>
+      <text x="820" y="232" text-anchor="end" fill="#c8c8c8">106</text>
+      <text x="952" y="232" text-anchor="end" fill="#6f8f74">none</text>
     </g>
-    <g transform="translate(48,288)">
-      <rect width="904" height="56" rx="12" fill="#101d33"/><circle cx="26" cy="28" r="7" fill="#f0c33c"/><text x="46" y="34" font-size="18" font-weight="600" fill="#eef5ff">Zig</text>
-      <text x="392" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">28/28</text>
-      <text x="572" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#3ce6bf">93/93</text>
-      <text x="732" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#d7e5fb">16</text>
-      <text x="862" y="35" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#8fa8c8">none</text>
+    <g>
+      <text x="48" y="270" fill="#e8e8e8">RUST</text>
+      <text x="560" y="270" text-anchor="end" fill="#7ee787">28/28</text>
+      <text x="690" y="270" text-anchor="end" fill="#7ee787">93/93</text>
+      <text x="820" y="270" text-anchor="end" fill="#c8c8c8">17</text>
+      <text x="952" y="270" text-anchor="end" fill="#6f8f74">none</text>
+    </g>
+    <g>
+      <text x="48" y="308" fill="#e8e8e8">ZIG</text>
+      <text x="560" y="308" text-anchor="end" fill="#7ee787">28/28</text>
+      <text x="690" y="308" text-anchor="end" fill="#7ee787">93/93</text>
+      <text x="820" y="308" text-anchor="end" fill="#c8c8c8">16</text>
+      <text x="952" y="308" text-anchor="end" fill="#6f8f74">none</text>
     </g>
   </g>
+
+  <line x1="48" y1="336" x2="952" y2="336" stroke="#7ee787" stroke-opacity="0.22" stroke-width="1"/>
+  <text x="48" y="360" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.4">every case compared byte-for-byte · any divergence fails the gate</text>
 </svg>

@@ -8,10 +8,10 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 93/93" src="https://img.shields.io/badge/parity-28%2F28%20%2B%2093%2F93-3ce6bf?style=flat-square"></a>
-  <a href="#verification"><img alt="201 tests passing" src="https://img.shields.io/badge/tests-201%20passing-3ce6bf?style=flat-square"></a>
-  <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-5aa9ff?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-5aa9ff?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 93/93" src="https://img.shields.io/badge/parity-28%2F28%20%2B%2093%2F93-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="201 tests passing" src="https://img.shields.io/badge/tests-201%20passing-2ea043?style=flat-square"></a>
+  <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
 
 <h1 align="center">OwnScout</h1>
