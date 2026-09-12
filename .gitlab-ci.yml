@@ -1,0 +1,48 @@
+# GitLab CI for OwnScout.
+#
+# Mirrors .github/workflows/ci.yml. The Go reference is the specification; the
+# TypeScript, Rust and Zig ports must reproduce its stdout, exit codes and
+# ledger bytes exactly, so this pipeline builds all three and replays the
+# recorded corpora.
+#
+# Status: authored but not yet exercised on a GitLab runner. The toolchain pins
+# match the locally verified versions (Go 1.26, Node 24, Rust stable, Zig 0.16.0).
+
+stages:
+  - reference
+  - ports
+
+default:
+  interruptible: true
+
+variables:
+  ZIG_VERSION: "0.16.0"
+
+reference:
+  stage: reference
+  image: golang:1.26-bookworm
+  script:
+    - go vet ./...
+    - go test ./...
+    - go build -o bin/ownscout ./cmd/ownscout
+
+ports:
+  stage: ports
+  image: debian:bookworm
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential
+    # Rust stable via rustup.
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+    # Zig, pinned to the version the ports target.
+    - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+    - tar -C /opt -xf /tmp/zig.tar.xz
+    - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+    # Node 24 for the TypeScript port.
+    - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+    - apt-get install -y -qq nodejs
+  script:
+    - . "$HOME/.cargo/env"
+    - node --version && cargo --version && zig version && python3 --version
+    - make ports
+    - spec/parity/verify-all.sh
