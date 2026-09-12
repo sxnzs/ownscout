@@ -443,9 +443,8 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
                 error.InvalidPath => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
                 error.NotFound => blk: {
                     var cwd_buf: [4096]u8 = undefined;
-                    const cwd_ptr = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse "";
-                    const cwd = std.mem.sliceTo(cwd_ptr, 0);
-                    break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd, root, item.path });
+                    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch 0;
+                    break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd_buf[0..cwd_len], root, item.path });
                 },
                 error.BadHash => try std.fmt.allocPrint(allocator, "invalid SHA-256 content hash \"{s}\"", .{item.content_hash}),
                 error.BadRange => try std.fmt.allocPrint(allocator, "invalid line range {d}-{d} for 3 line(s)", .{ item.line_start, item.line_end }),
@@ -479,8 +478,8 @@ fn repositoryError(allocator: std.mem.Allocator, repo: []const u8, json_output: 
         }
     } else |_| {}
     var cwd_buf: [4096]u8 = undefined;
-    const cwd_ptr = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &.{ "could not determine current directory" }, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
-    const cwd = try allocator.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(cwd_ptr))));
+    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &.{ "could not determine current directory" }, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
+    const cwd = try allocator.dupe(u8, cwd_buf[0..cwd_len]);
     const detail = try std.fmt.allocPrint(allocator, "resolve repository root \"{s}\": lstat {s}/{s}: no such file or directory", .{ repo, cwd, repo });
     const details = [_][]const u8{detail};
     return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
