@@ -5,8 +5,10 @@
 # ledger bytes exactly, so this pipeline builds all three and replays the
 # recorded corpora.
 #
-# Status: authored but not yet exercised on a GitLab runner. The toolchain pins
-# match the locally verified versions (Go 1.26, Node 24, Rust stable, Zig 0.16.0).
+# Status: authored but not yet exercised on a GitLab runner. Every remote
+# dependency below was checked by hand: the Zig 0.16.0 linux tarball, rustup,
+# and the golang:1.26-bookworm / node:24-bookworm image tags all resolve, and
+# the Zig archive unpacks to zig-x86_64-linux-0.16.0/ as the symlink expects.
 
 stages:
   - reference
@@ -28,7 +30,7 @@ reference:
 
 ports:
   stage: ports
-  image: debian:bookworm
+  image: node:24-bookworm
   before_script:
     - apt-get update -qq
     - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential
@@ -38,9 +40,6 @@ ports:
     - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
     - tar -C /opt -xf /tmp/zig.tar.xz
     - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
-    # Node 24 for the TypeScript port.
-    - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
-    - apt-get install -y -qq nodejs
   script:
     - . "$HOME/.cargo/env"
     - node --version && cargo --version && zig version && python3 --version
