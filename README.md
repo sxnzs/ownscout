@@ -59,7 +59,7 @@ packet, do not ask the tool to reinterpret it.**
 OwnScout is a single static binary with no runtime dependencies.
 
 ```bash
-git clone https://github.com/sainzcodes/ownscout
+git clone https://github.com/sainzs/ownscout
 cd ownscout
 make build            # -> bin/ownscout
 bin/ownscout doctor
