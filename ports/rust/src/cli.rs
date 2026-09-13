@@ -716,14 +716,23 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
     }
     let mut store = match ledger::open(&ledger_path, &repo) {
         Ok(v) => v,
-        Err(_) => {
+        Err(e) => {
+            if e == "ledger exceeds 1048576 bytes" {
+                return node_error(
+                    json,
+                    "ledger is full",
+                    &e,
+                    2,
+                    "Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.",
+                );
+            }
             return node_error(
                 json,
                 "ledger could not be opened",
                 "ledger open failed",
                 2,
                 "Provide a writable ledger path outside the repository and try again.",
-            )
+            );
         }
     };
     let report = match evidence::verify_with_options(&repo, &p, &evidence::Options { relocate }) {
@@ -748,21 +757,27 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
             reason: x.reason.clone(),
         })
         .collect();
-    if store
-        .append(
-            &sha256::hex(&sha256::digest(&eb)),
-            &binding,
-            "0.1.0",
-            results,
-        )
-        .is_err()
-    {
+    if let Err(e) = store.append(
+        &sha256::hex(&sha256::digest(&eb)),
+        &binding,
+        "0.1.0",
+        results,
+    ) {
+        if e == "ledger exceeds 1048576 bytes" {
+            return node_error(
+                json,
+                "ledger is full",
+                &e,
+                2,
+                "Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.",
+            );
+        }
         return node_error(
             json,
-            "ledger could not be updated",
-            "append-only ledger update failed",
+            "ledger append failed",
+            "node results could not be appended",
             2,
-            "Provide a writable append-only ledger path outside the repository.",
+            "Check the ledger and try again; no result was consumed.",
         );
     }
     let mut details: Vec<String> = eval

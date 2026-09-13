@@ -1088,9 +1088,19 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
     Sha256.hash(envelope_data, &envelope_digest, .{});
     const envelope_sum = envelope_digest;
     const envelope_hash = std.fmt.bytesToHex(envelope_sum, .lower);
-    appendLedger(allocator, ledger_path, envelope_hash, binding, details.items) catch {
-        const ledger_details = [_][]const u8{"ledger open failed"};
-        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &ledger_details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    appendLedger(allocator, ledger_path, envelope_hash, binding, details.items) catch |err| switch (err) {
+        error.LedgerFull => {
+            const ledger_details = [_][]const u8{"ledger exceeds 1048576 bytes"};
+            return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger is full", .details = &ledger_details, .next_action = "Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify." }, json_output), .code = 2 };
+        },
+        error.LedgerAppendFailed => {
+            const ledger_details = [_][]const u8{"node results could not be appended"};
+            return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger append failed", .details = &ledger_details, .next_action = "Check the ledger and try again; no result was consumed." }, json_output), .code = 2 };
+        },
+        else => {
+            const ledger_details = [_][]const u8{"ledger open failed"};
+            return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &ledger_details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+        },
     };
     if (std.mem.indexOfScalar(bool, failed, true) != null) {
         // With --relocate the failed evaluation also reports every evidence
@@ -2472,12 +2482,13 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     const io = std.Options.debug_io;
     const old: []const u8 = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
         error.FileNotFound => "",
-        else => return error.InvalidLedger,
+        error.StreamTooLong, error.FileTooBig => return error.LedgerFull,
+        else => return error.LedgerOpenFailed,
     };
     var count: u64 = 0;
     var last_hash: []const u8 = ledger_zero_hash;
     switch (validateLedgerData(allocator, old)) {
-        .invalid => return error.InvalidLedger,
+        .invalid => return error.LedgerOpenFailed,
         .ok => |summary| {
             count = summary.records;
             last_hash = if (summary.records == 0) ledger_zero_hash else summary.tip;
@@ -2497,7 +2508,7 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
         .node_results = results,
     };
     var pending_error: []const u8 = "invalid record";
-    if (!validateLedgerRecordDetailed(allocator, pending, seq, previous, &pending_error)) return error.InvalidLedger;
+    if (!validateLedgerRecordDetailed(allocator, pending, seq, previous, &pending_error)) return error.LedgerAppendFailed;
     const record_hash = try ledgerRecordHash(allocator, pending);
     const final = LedgerRecord{
         .schema_version = pending.schema_version,
@@ -2514,7 +2525,8 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     if (old.len != 0) try output.appendSlice(allocator, old);
     try output.appendSlice(allocator, encoded);
     try output.append(allocator, '\n');
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } });
+    if (output.items.len > ledger_max_size) return error.LedgerFull;
+    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } }) catch return error.LedgerAppendFailed;
 }
 test "evidence verification hashes selected lines and normalizes CRLF" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -3082,7 +3094,7 @@ test "ledger validation rejects forged records and preserves the chain" {
     for (forgeries) |forgery| {
         const text = try replaceFirst(allocator, good, forgery[0], forgery[1]);
         try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = text, .flags = .{ .truncate = true, .permissions = .default_file } });
-        try std.testing.expectError(error.InvalidLedger, appendLedger(allocator, path, envelope, binding, &details));
+        try std.testing.expectError(error.LedgerOpenFailed, appendLedger(allocator, path, envelope, binding, &details));
     }
 
     // An unmodified ledger still appends.
@@ -3112,7 +3124,7 @@ test "ledger validation rejects malformed framing" {
     };
     for (frames) |frame| {
         try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = frame, .flags = .{ .truncate = true, .permissions = .default_file } });
-        try std.testing.expectError(error.InvalidLedger, appendLedger(allocator, path, envelope, binding, &details));
+        try std.testing.expectError(error.LedgerOpenFailed, appendLedger(allocator, path, envelope, binding, &details));
     }
 }
 
