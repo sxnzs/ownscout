@@ -2303,6 +2303,79 @@
     },
     {
       "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/repo"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-packet-is-dir-human",
+      "stdout": "ERROR: packet could not be loaded\n  - read packet \"fixtures/repo\": read fixtures/repo: is a directory\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/repo",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "evidence-edge-packet-is-dir-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"read packet \\\"fixtures/repo\\\": read fixtures/repo: is a directory\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/repo",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-packet-is-dir-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"read packet \\\"fixtures/repo\\\": read fixtures/repo: is a directory\"],\"next_action\":\"Provide a readable packet file with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/repo",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-envelope-is-dir-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope could not be loaded\",\"details\":[\"read envelope \\\"fixtures/repo\\\": read fixtures/repo: is a directory\"],\"next_action\":\"Provide a readable envelope file with --envelope \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/repo",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-bind-packet-is-dir-json",
+      "stdout": "{\"command\":\"node bind\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"read packet \\\"fixtures/repo\\\": read fixtures/repo: is a directory\"],\"next_action\":\"Provide a readable packet file with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",

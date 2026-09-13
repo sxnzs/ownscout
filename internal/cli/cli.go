@@ -114,7 +114,7 @@ func runNodeBind(args []string, out io.Writer) int {
 
 	packetBytes, err := readBounded(packetPath, "packet", nodepacket.MaxInputBytes)
 	if err != nil {
-		return result(out, jsonOutput, commandError("node bind", "packet could not be loaded", "packet input could not be read", "Provide a readable packet file with --packet <file>."), 2)
+		return result(out, jsonOutput, commandError("node bind", "packet could not be loaded", err.Error(), "Provide a readable packet file with --packet <file>."), 2)
 	}
 	packet, violations := nodepacket.DecodeValid(packetBytes)
 	if len(violations) != 0 {
@@ -242,11 +242,11 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 	relocate := len(relocateOption) > 0 && relocateOption[0]
 	packetBytes, err := readBounded(packetPath, "packet", nodepacket.MaxInputBytes)
 	if err != nil {
-		return nodeError("packet could not be loaded", "packet input could not be read", "Provide a readable packet file with --packet <file>."), 2
+		return nodeError("packet could not be loaded", err.Error(), "Provide a readable packet file with --packet <file>."), 2
 	}
 	envelopeBytes, err := readBounded(envelopePath, "envelope", nodepacket.MaxInputBytes)
 	if err != nil {
-		return nodeError("envelope could not be loaded", "envelope input could not be read", "Provide a readable envelope file with --envelope <file>."), 2
+		return nodeError("envelope could not be loaded", err.Error(), "Provide a readable envelope file with --envelope <file>."), 2
 	}
 
 	packet, violations := nodepacket.DecodeValid(packetBytes)
