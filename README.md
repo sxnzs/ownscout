@@ -8,8 +8,8 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 194/194" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20194%2F194-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="284 tests passing" src="https://img.shields.io/badge/tests-284%20passing-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 208/208" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20208%2F208-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="293 tests passing" src="https://img.shields.io/badge/tests-293%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
@@ -201,9 +201,9 @@ ledger bytes exactly.
 
 | Port | Binary | Build | Tests | Dependencies |
 |---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | none — Node 24 runs the source | 146 | none |
-| Rust | `ports/rust/target/release/ownscout` | `cargo build --release` | 35 | none |
-| Zig | `ports/zig/zig-out/bin/ownscout` | `zig build` | 34 | none |
+| TypeScript | `ports/ts/bin/ownscout` | none — Node 24 runs the source | 149 | none |
+| Rust | `ports/rust/target/release/ownscout` | `cargo build --release` | 38 | none |
+| Zig | `ports/zig/zig-out/bin/ownscout` | `zig build` | 37 | none |
 
 Build the compiled ports and run everything:
 
@@ -223,10 +223,10 @@ A port is only interesting if a passing grade means something. Here is how
 equivalence is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Trace-equivalence matrix: every port passes 28 base and 194 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Trace-equivalence matrix: every port passes 28 base and 208 edge cases" width="100%">
 </p>
 
-- **Recorded traces.** The Go reference records 28 base cases and 194 hardening
+- **Recorded traces.** The Go reference records 28 base cases and 208 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
   ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
@@ -234,8 +234,8 @@ equivalence is established.
   re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
   Every port replays them byte-for-byte.
 - **Mutation-tested traces.** Four deliberately broken reference builds fail
-  the trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 167/190, 99/190, 188/190
-  and 188/190), so a pass is evidence, not a formality. The newest mutant strips
+  the trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 172/208, 106/208, 206/208
+  and 206/208), so a pass is evidence, not a formality. The newest mutant strips
   the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
   see, which is why the edge trace corpus exists.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
