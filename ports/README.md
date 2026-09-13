@@ -66,10 +66,10 @@ spec/parity/status.sh         # compact per-port status, never fails
 make fuzz                     # differential fuzzing vs a freshly built reference
 ```
 
-`verify-all.sh` grades every port against both corpora (28 base cases, 93 edge
+`verify-all.sh` grades every port against both corpora (28 base cases, 103 edge
 cases), runs that port's own test suite, and then fails if anything outside
 `ports/` was modified. Commit unrelated changes before running it.
 
-The oracle itself is mutation-tested: two deliberately broken reference builds
+The oracle itself is mutation-tested: three deliberately broken reference builds
 fail the corpora, so a passing harness is meaningful rather than vacuous. See
 `docs/PORTS.md` for those numbers.

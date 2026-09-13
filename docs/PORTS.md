@@ -3,16 +3,18 @@
 Three independent, standard-library-only ports of the Go reference in `internal/`,
 all verified byte-for-byte against the same recorded oracle.
 
-## Status (2026-09-11)
+## Status (2026-09-13)
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 93/93 | 106 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 93/93 | 16 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 93/93 | 17 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 103/103 | 106 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 103/103 | 16 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 103/103 | 17 | none (empty `[dependencies]`) |
 
-The Go reference itself is unchanged: 62 tests, `node` 98.7% / `nodepacket` 94.5%
-coverage, `go test -race` clean.
+The Go reference's observable behaviour is unchanged: 64 tests,
+`node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
+verification was reworked to hash cited ranges in place (no intermediate
+copies) with a differential oracle kept in the test package.
 
 ## How to verify
 
@@ -32,11 +34,14 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 93 cases (path escape, non-UTF8, graph cycles, ledger hash
-  chaining, in-repo ledger rejection, Go JSON HTML-escaping, and null/empty
-  field shapes).
-- Oracle mutation test: two deliberately broken reference builds fail the
-  corpora (26/28 and 20/28 base; 85/93 and 51/93 edge), so a pass is meaningful.
+- Edge corpus: 103 cases (path escape, non-UTF8, graph cycles, ledger hash
+  chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
+  field shapes, and the raw-byte evidence shapes: invalid UTF-8 and CRLF in
+  evidence files, a single empty selected line, oversize evidence files, and
+  range errors that must report the real line count).
+- Oracle mutation test: three deliberately broken reference builds fail the
+  corpora (26/28, 20/28 and 28/28 base; 95/103, 56/103 and 101/103 edge), so a
+  pass is meaningful.
 - Fuzzing: no divergence in 200 iterations (seed 1) plus 300 iterations
   (seed 7) per port, and seed 11 found the null-handling defect recorded below.
 

@@ -8,8 +8,8 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 93/93" src="https://img.shields.io/badge/parity-28%2F28%20%2B%2093%2F93-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="201 tests passing" src="https://img.shields.io/badge/tests-201%20passing-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 103/103" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20103%2F103-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="203 tests passing" src="https://img.shields.io/badge/tests-203%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
@@ -187,16 +187,18 @@ A port is only interesting if a passing grade means something. Here is how
 parity is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 93 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 103 edge cases" width="100%">
 </p>
 
-- **Recorded oracle.** The Go reference records 28 base cases and 81 hardening
+- **Recorded oracle.** The Go reference records 28 base cases and 103 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
-  ledger rejection, JSON HTML-escaping, and the null/empty field shapes below).
-  Every port replays them byte-for-byte.
-- **Mutation-tested oracle.** Two deliberately broken reference builds fail the
-  corpora (26/28 and 20/28 base; 85/93 and 51/93 edge), so a pass is evidence,
-  not a formality.
+  ledger rejection, JSON HTML-escaping, the null/empty field shapes, and the
+  raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
+  empty selected line, and evidence files beyond 1 MiB). Every port replays
+  them byte-for-byte.
+- **Mutation-tested oracle.** Three deliberately broken reference builds fail
+  the corpora (26/28, 20/28 and 28/28 base; 95/103, 56/103 and 101/103 edge),
+  so a pass is evidence, not a formality.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
   compares the reference against a candidate. It is what caught a real shared
   defect in all three ports: an explicit JSON `null` for `evidence` or

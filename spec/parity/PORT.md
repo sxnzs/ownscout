@@ -59,10 +59,15 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (93 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (103 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
-ledger), and an in-repository ledger rejection. Run it with the same harness:
+ledger), an in-repository ledger rejection, and the raw-byte evidence shapes
+(`fixtures/edge/packet-evidence-shape-*.json` against
+`fixtures/repo/binary.txt`, `blank.txt` and `oversize.txt`): hashing reads raw
+file bytes, CRLF pairs are one terminator, a single empty selected line hashes
+the empty string, evidence files have no size limit, and range errors report
+the real line count. Run it with the same harness:
 
 ```
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
@@ -70,16 +75,19 @@ python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <bina
 
 ## Oracle validation
 
-The corpus was mutation-tested against two deliberately broken reference builds:
+The corpus was mutation-tested against three deliberately broken reference builds:
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 85/93 |
-| `next_action` renamed to `nextAction` | 20/28 | 51/93 |
-| unmutated reference | 28/28 | 93/93 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 95/103 |
+| `next_action` renamed to `nextAction` | 20/28 | 56/103 |
+| final newline always appended to the hashed evidence range | 28/28 | 101/103 |
+| unmutated reference | 28/28 | 103/103 |
 
-Both subtle divergences are caught, so a passing harness is meaningful rather
-than vacuous.
+Each subtle divergence is caught, so a passing harness is meaningful rather
+than vacuous. The third mutation is the single-empty-line rule above: the
+shape cases exist because all three ports shipped that exact bug while passing
+the earlier 93-case corpus.
 
 ## Behavior to preserve (read the Go source)
 
