@@ -1741,441 +1741,696 @@ fn isUint64Token(number: []const u8) bool {
 // line is reported with the reference's exact JSON syntax error text.
 // ---------------------------------------------------------------------------
 
-const GoScanState = enum {
-    begin_value,
-    begin_value_or_empty,
-    begin_string_or_empty,
-    begin_string,
-    end_value,
-    end_top,
-    in_string,
-    in_string_esc,
-    in_string_esc_u,
-    in_string_esc_u1,
-    in_string_esc_u12,
-    in_string_esc_u123,
-    neg,
-    one,
-    zero,
-    dot,
-    dot0,
-    e,
-    e_sign,
-    e0,
-    t,
-    tr,
-    tru,
-    f,
-    fa,
-    fal,
-    fals,
-    n,
-    nu,
-    nul,
-    failed,
-};
-
-const go_parse_object_key: u8 = 0;
-const go_parse_object_value: u8 = 1;
-const go_parse_array_value: u8 = 2;
-
-fn goQuoteChar(allocator: std.mem.Allocator, c: u8) ![]const u8 {
-    if (c == '\'') return "'\\''";
-    if (c == '"') return "'\"'";
-    var out = std.ArrayList(u8).empty;
-    try out.append(allocator, '\'');
-    try appendQuotedRune(&out, allocator, @as(u21, c));
-    try out.append(allocator, '\'');
-    return try out.toOwnedSlice(allocator);
-}
+const ScannedString = struct { value: []const u8, end: usize };
 
 fn isScanSpace(c: u8) bool {
-    return c == ' ' or c == '\t' or c == '\r' or c == '\n';
+    // encoding/json skips only these four; \v and \f are invalid JSON text.
+    return c == ' ' or c == '\t' or c == '\n' or c == '\r';
 }
 
-const GoScanner = struct {
-    state: GoScanState = .begin_value,
-    depth: usize = 0,
-    parse_state: [10000]u8 = undefined,
-    error_message: ?[]const u8 = null,
-    done: bool = false,
-
-    fn raise(self: *GoScanner, allocator: std.mem.Allocator, c: u8, context: []const u8) void {
-        self.state = .failed;
-        self.error_message = std.fmt.allocPrint(allocator, "invalid character {s} {s}", .{ goQuoteChar(allocator, c) catch "?", context }) catch "invalid character";
-    }
-
-    fn push(self: *GoScanner, allocator: std.mem.Allocator, c: u8, state: u8, next: GoScanState) void {
-        if (self.depth >= self.parse_state.len) {
-            self.raise(allocator, c, "exceeded max depth");
-            return;
-        }
-        self.parse_state[self.depth] = state;
-        self.depth += 1;
-        self.state = next;
-    }
-
-    fn pop(self: *GoScanner) void {
-        self.depth -= 1;
-        if (self.depth == 0) self.done = true else self.state = .end_value;
-    }
-
-    fn step(self: *GoScanner, allocator: std.mem.Allocator, c: u8) void {
-        while (true) {
-            switch (self.state) {
-                .begin_value => {
-                    if (isScanSpace(c)) return;
-                    switch (c) {
-                        '{' => self.push(allocator, c, go_parse_object_key, .begin_string_or_empty),
-                        '[' => self.push(allocator, c, go_parse_array_value, .begin_value_or_empty),
-                        '"' => self.state = .in_string,
-                        '-' => self.state = .neg,
-                        '0' => self.state = .zero,
-                        't' => self.state = .t,
-                        'f' => self.state = .f,
-                        'n' => self.state = .n,
-                        '1'...'9' => self.state = .one,
-                        else => self.raise(allocator, c, "looking for beginning of value"),
-                    }
-                    return;
-                },
-                .begin_value_or_empty => {
-                    if (isScanSpace(c)) return;
-                    if (c == ']') {
-                        self.state = .end_value;
-                        continue;
-                    }
-                    self.state = .begin_value;
-                    continue;
-                },
-                .begin_string_or_empty => {
-                    if (isScanSpace(c)) return;
-                    if (c == '}') {
-                        if (self.depth > 0) self.parse_state[self.depth - 1] = go_parse_object_value;
-                        self.state = .end_value;
-                        continue;
-                    }
-                    self.state = .begin_string;
-                    continue;
-                },
-                .begin_string => {
-                    if (isScanSpace(c)) return;
-                    if (c == '"') {
-                        self.state = .in_string;
-                        return;
-                    }
-                    self.raise(allocator, c, "looking for beginning of object key string");
-                    return;
-                },
-                .end_value => {
-                    if (self.depth == 0) {
-                        self.done = true;
-                        return;
-                    }
-                    if (isScanSpace(c)) return;
-                    const ps = self.parse_state[self.depth - 1];
-                    if (ps == go_parse_object_key) {
-                        if (c == ':') {
-                            self.parse_state[self.depth - 1] = go_parse_object_value;
-                            self.state = .begin_value;
-                            return;
-                        }
-                        self.raise(allocator, c, "after object key");
-                        return;
-                    } else if (ps == go_parse_object_value) {
-                        if (c == ',') {
-                            self.parse_state[self.depth - 1] = go_parse_object_key;
-                            self.state = .begin_string;
-                            return;
-                        }
-                        if (c == '}') {
-                            self.pop();
-                            return;
-                        }
-                        self.raise(allocator, c, "after object key:value pair");
-                        return;
-                    } else {
-                        if (c == ',') {
-                            self.state = .begin_value;
-                            return;
-                        }
-                        if (c == ']') {
-                            self.pop();
-                            return;
-                        }
-                        self.raise(allocator, c, "after array element");
-                        return;
-                    }
-                },
-                .end_top => {
-                    if (!isScanSpace(c)) self.raise(allocator, c, "after top-level value");
-                    return;
-                },
-                .in_string => {
-                    if (c == '"') {
-                        self.state = .end_value;
-                        return;
-                    }
-                    if (c == '\\') {
-                        self.state = .in_string_esc;
-                        return;
-                    }
-                    if (c < 0x20) {
-                        self.raise(allocator, c, "in string literal");
-                        return;
-                    }
-                    return;
-                },
-                .in_string_esc => {
-                    switch (c) {
-                        'b', 'f', 'n', 'r', 't', '\\', '/', '"' => self.state = .in_string,
-                        'u' => self.state = .in_string_esc_u,
-                        else => self.raise(allocator, c, "in string escape code"),
-                    }
-                    return;
-                },
-                .in_string_esc_u => {
-                    if (isHexDigit(c)) {
-                        self.state = .in_string_esc_u1;
-                    } else {
-                        self.raise(allocator, c, "in \\u hexadecimal character escape");
-                    }
-                    return;
-                },
-                .in_string_esc_u1 => {
-                    if (isHexDigit(c)) {
-                        self.state = .in_string_esc_u12;
-                    } else {
-                        self.raise(allocator, c, "in \\u hexadecimal character escape");
-                    }
-                    return;
-                },
-                .in_string_esc_u12 => {
-                    if (isHexDigit(c)) {
-                        self.state = .in_string_esc_u123;
-                    } else {
-                        self.raise(allocator, c, "in \\u hexadecimal character escape");
-                    }
-                    return;
-                },
-                .in_string_esc_u123 => {
-                    if (isHexDigit(c)) {
-                        self.state = .in_string;
-                    } else {
-                        self.raise(allocator, c, "in \\u hexadecimal character escape");
-                    }
-                    return;
-                },
-                .neg => {
-                    if (c == '0') {
-                        self.state = .zero;
-                        return;
-                    }
-                    if (c >= '1' and c <= '9') {
-                        self.state = .one;
-                        return;
-                    }
-                    self.raise(allocator, c, "in numeric literal");
-                    return;
-                },
-                .one => {
-                    if (c >= '0' and c <= '9') return;
-                    self.state = .zero;
-                    continue;
-                },
-                .zero => {
-                    if (c == '.') {
-                        self.state = .dot;
-                        return;
-                    }
-                    if (c == 'e' or c == 'E') {
-                        self.state = .e;
-                        return;
-                    }
-                    self.state = .end_value;
-                    continue;
-                },
-                .dot => {
-                    if (c >= '0' and c <= '9') {
-                        self.state = .dot0;
-                        return;
-                    }
-                    self.raise(allocator, c, "after decimal point in numeric literal");
-                    return;
-                },
-                .dot0 => {
-                    if (c >= '0' and c <= '9') return;
-                    if (c == 'e' or c == 'E') {
-                        self.state = .e;
-                        return;
-                    }
-                    self.state = .end_value;
-                    continue;
-                },
-                .e => {
-                    if (c == '+' or c == '-') {
-                        self.state = .e_sign;
-                        return;
-                    }
-                    self.state = .e_sign;
-                    continue;
-                },
-                .e_sign => {
-                    if (c >= '0' and c <= '9') {
-                        self.state = .e0;
-                        return;
-                    }
-                    self.raise(allocator, c, "in exponent of numeric literal");
-                    return;
-                },
-                .e0 => {
-                    if (c >= '0' and c <= '9') return;
-                    self.state = .end_value;
-                    continue;
-                },
-                .t => {
-                    if (c == 'r') self.state = .tr else self.raise(allocator, c, "in literal true (expecting 'r')");
-                    return;
-                },
-                .tr => {
-                    if (c == 'u') self.state = .tru else self.raise(allocator, c, "in literal true (expecting 'u')");
-                    return;
-                },
-                .tru => {
-                    if (c == 'e') self.state = .end_value else self.raise(allocator, c, "in literal true (expecting 'e')");
-                    return;
-                },
-                .f => {
-                    if (c == 'a') self.state = .fa else self.raise(allocator, c, "in literal false (expecting 'a')");
-                    return;
-                },
-                .fa => {
-                    if (c == 'l') self.state = .fal else self.raise(allocator, c, "in literal false (expecting 'l')");
-                    return;
-                },
-                .fal => {
-                    if (c == 's') self.state = .fals else self.raise(allocator, c, "in literal false (expecting 's')");
-                    return;
-                },
-                .fals => {
-                    if (c == 'e') self.state = .end_value else self.raise(allocator, c, "in literal false (expecting 'e')");
-                    return;
-                },
-                .n => {
-                    if (c == 'u') self.state = .nu else self.raise(allocator, c, "in literal null (expecting 'u')");
-                    return;
-                },
-                .nu => {
-                    if (c == 'l') self.state = .nul else self.raise(allocator, c, "in literal null (expecting 'l')");
-                    return;
-                },
-                .nul => {
-                    if (c == 'l') self.state = .end_value else self.raise(allocator, c, "in literal null (expecting 'l')");
-                    return;
-                },
-                .failed => return,
-            }
-        }
-    }
-};
+fn skipScanSpace(data: []const u8, start: usize) usize {
+    var index = start;
+    while (index < data.len and isScanSpace(data[index])) index += 1;
+    return index;
+}
 
 fn isHexDigit(c: u8) bool {
     return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
 }
 
-/// The first encoding/json syntax error message for data, or null when the
-/// scanner accepts a complete top-level value.
-fn goJsonSyntaxMessage(allocator: std.mem.Allocator, data: []const u8) ?[]const u8 {
-    var scanner = GoScanner{};
+/// The bytes of the rune starting at index, or the single byte when it is not a
+/// complete valid UTF-8 sequence. Mirrors utf8.DecodeRune's width.
+fn runeBytesAt(data: []const u8, index: usize) []const u8 {
+    const c = data[index];
+    if (c < 0x80) return data[index .. index + 1];
+    const length: usize = std.unicode.utf8ByteSequenceLength(c) catch return data[index .. index + 1];
+    if (index + length > data.len or !std.unicode.utf8ValidateSlice(data[index .. index + length])) return data[index .. index + 1];
+    return data[index .. index + length];
+}
+
+/// strconv.QuoteRune for the single-quote context (jsonwire.QuoteRune).
+fn appendQuoteRuneChar(out: *std.ArrayList(u8), allocator: std.mem.Allocator, r: u21) !void {
+    if (r == '\'' or r == '\\') {
+        try out.append(allocator, '\\');
+        try out.append(allocator, @intCast(r));
+        return;
+    }
+    if (strconvIsPrint(r)) {
+        var encoded: [4]u8 = undefined;
+        const length: usize = std.unicode.utf8Encode(r, &encoded) catch {
+            try appendHexByte(out, allocator, @intCast(r));
+            return;
+        };
+        try out.appendSlice(allocator, encoded[0..length]);
+        return;
+    }
+    switch (r) {
+        0x07 => try out.appendSlice(allocator, "\\a"),
+        0x08 => try out.appendSlice(allocator, "\\b"),
+        0x0c => try out.appendSlice(allocator, "\\f"),
+        0x0a => try out.appendSlice(allocator, "\\n"),
+        0x0d => try out.appendSlice(allocator, "\\r"),
+        0x09 => try out.appendSlice(allocator, "\\t"),
+        0x0b => try out.appendSlice(allocator, "\\v"),
+        else => {
+            if (r < 0x20 or r == 0x7f) {
+                try appendHexByte(out, allocator, @intCast(r));
+            } else if (r < 0x10000) {
+                try appendRuneHex(out, allocator, "\\u", r, 4);
+            } else {
+                try appendRuneHex(out, allocator, "\\U", r, 8);
+            }
+        },
+    }
+}
+
+fn quoteRuneBytes(allocator: std.mem.Allocator, what: []const u8) []const u8 {
+    // Mirrors jsonwire.QuoteRune: a byte that is not a complete valid UTF-8
+    // sequence is reported as \xNN rather than decoded.
+    const decoded: u21 = blk: {
+        if (what.len == 0) break :blk 0xFFFD;
+        const first = what[0];
+        if (first < 0x80) break :blk first;
+        const length: usize = std.unicode.utf8ByteSequenceLength(first) catch break :blk 0xFFFD;
+        if (length > what.len or !std.unicode.utf8ValidateSlice(what[0..length])) break :blk 0xFFFD;
+        break :blk std.unicode.utf8Decode(what[0..length]) catch 0xFFFD;
+    };
+    if (decoded == 0xFFFD and what.len != 0 and what[0] >= 0x80) {
+        const length: usize = std.unicode.utf8ByteSequenceLength(what[0]) catch 0;
+        if (length == 0 or length > what.len or !std.unicode.utf8ValidateSlice(what[0..length])) {
+            return std.fmt.allocPrint(allocator, "'\\x{x}'", .{what[0]}) catch "'?'";
+        }
+    }
+    var out = std.ArrayList(u8).empty;
+    out.append(allocator, '\'') catch return "'?'";
+    appendQuoteRuneChar(&out, allocator, decoded) catch return "'?'";
+    out.append(allocator, '\'') catch return "'?'";
+    return out.toOwnedSlice(allocator) catch "'?'";
+}
+
+fn countRunes(value: []const u8) usize {
+    var count: usize = 0;
     var index: usize = 0;
-    while (index < data.len and !scanner.done and scanner.error_message == null) : (index += 1) {
-        scanner.step(allocator, data[index]);
+    while (index < value.len) {
+        const length: usize = std.unicode.utf8ByteSequenceLength(value[index]) catch {
+            index += 1;
+            count += 1;
+            continue;
+        };
+        if (index + length > value.len or !std.unicode.utf8ValidateSlice(value[index .. index + length])) {
+            index += 1;
+            count += 1;
+            continue;
+        }
+        index += length;
+        count += 1;
     }
-    if (scanner.error_message) |message| return message;
-    if (!scanner.done) {
-        scanner.step(allocator, ' ');
-        if (scanner.error_message) |message| return message;
-        if (!scanner.done) return "unexpected end of JSON input";
+    return count;
+}
+
+fn whatNeedsEscape(value: []const u8) bool {
+    var index: usize = 0;
+    while (index < value.len) {
+        const length: usize = std.unicode.utf8ByteSequenceLength(value[index]) catch return true;
+        if (index + length > value.len or !std.unicode.utf8ValidateSlice(value[index .. index + length])) return true;
+        const decoded = std.unicode.utf8Decode(value[index .. index + length]) catch return true;
+        if (decoded == '`' or decoded == 0xFFFD) return true;
+        if (decoded == ' ' or decoded == '\t' or decoded == '\n' or decoded == '\r' or decoded == 0x0b or decoded == 0x0c) return true;
+        if (!strconvIsPrint(decoded)) return true;
+        index += length;
     }
+    return false;
+}
+
+/// jsonwire.InvalidTextError.Error().
+fn invalidTextError(allocator: std.mem.Allocator, label: []const u8, what: []const u8, where: []const u8) []const u8 {
+    var rendered: []const u8 = undefined;
+    if (countRunes(what) == 1) {
+        rendered = quoteRuneBytes(allocator, what);
+    } else if (whatNeedsEscape(what)) {
+        rendered = quoteGoString(allocator, what) catch what;
+    } else {
+        rendered = std.fmt.allocPrint(allocator, "`{s}`", .{what}) catch what;
+    }
+    const full = std.fmt.allocPrint(allocator, "invalid {s} {s} {s}", .{ label, rendered, where }) catch "invalid";
+    return if (full.len > 0 and full[full.len - 1] == ' ') full[0 .. full.len - 1] else full;
+}
+
+fn scanErrorAt(allocator: std.mem.Allocator, error_out: *[]const u8, data: []const u8, index: usize, context: []const u8) void {
+    error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: {s}", .{invalidTextError(allocator, "character", runeBytesAt(data, index), context)}) catch "malformed JSON";
+}
+
+fn scanErrorByte(allocator: std.mem.Allocator, error_out: *[]const u8, c: u8, context: []const u8) void {
+    const bytes = [_]u8{c};
+    error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: {s}", .{invalidTextError(allocator, "character", &bytes, context)}) catch "malformed JSON";
+}
+
+fn invalidEscape(allocator: std.mem.Allocator, what: []const u8) []const u8 {
+    const label = if (what.len > 6) "surrogate pair" else "escape sequence";
+    return std.fmt.allocPrint(allocator, "malformed JSON: {s}", .{invalidTextError(allocator, label, what, "in string")}) catch "malformed JSON";
+}
+
+/// Decode a complete JSON string (including its quotes), substituting U+FFFD for
+/// invalid UTF-8 and unpaired surrogates the way encoding/json does.
+fn decodeGoJsonString(allocator: std.mem.Allocator, raw: []const u8) []const u8 {
+    var out = std.ArrayList(u8).empty;
+    if (raw.len < 2) return out.toOwnedSlice(allocator) catch "";
+    const limit = raw.len - 1;
+    var index: usize = 1;
+    while (index < limit) {
+        const c = raw[index];
+        if (c == '\\') {
+            index += 1;
+            if (index >= limit) break;
+            const escaped = raw[index];
+            switch (escaped) {
+                '/', '"', '\\' => {
+                    out.append(allocator, escaped) catch {};
+                    index += 1;
+                },
+                'b' => {
+                    out.append(allocator, 8) catch {};
+                    index += 1;
+                },
+                'f' => {
+                    out.append(allocator, 12) catch {};
+                    index += 1;
+                },
+                'n' => {
+                    out.append(allocator, '\n') catch {};
+                    index += 1;
+                },
+                'r' => {
+                    out.append(allocator, '\r') catch {};
+                    index += 1;
+                },
+                't' => {
+                    out.append(allocator, '\t') catch {};
+                    index += 1;
+                },
+                'u' => {
+                    if (index + 5 > limit) break;
+                    const first = parseHex4(raw[index + 1 .. index + 5]) orelse break;
+                    index += 5;
+                    var codepoint: u21 = first;
+                    if (first >= 0xd800 and first <= 0xdfff) {
+                        codepoint = 0xFFFD;
+                        if (index + 6 <= limit and raw[index] == '\\' and raw[index + 1] == 'u') {
+                            if (parseHex4(raw[index + 2 .. index + 6])) |second| {
+                                if (first <= 0xdbff and second >= 0xdc00 and second <= 0xdfff) {
+                                    codepoint = 0x10000 + (@as(u21, first) - 0xd800) * 0x400 + (@as(u21, second) - 0xdc00);
+                                    index += 6;
+                                }
+                            }
+                        }
+                    }
+                    var encoded: [4]u8 = undefined;
+                    const length = std.unicode.utf8Encode(codepoint, &encoded) catch continue;
+                    out.appendSlice(allocator, encoded[0..length]) catch {};
+                },
+                else => index += 1,
+            }
+            continue;
+        }
+        if (c < 0x80) {
+            out.append(allocator, c) catch {};
+            index += 1;
+            continue;
+        }
+        const length: usize = std.unicode.utf8ByteSequenceLength(c) catch {
+            out.appendSlice(allocator, "\xef\xbf\xbd") catch {};
+            index += 1;
+            continue;
+        };
+        if (index + length > limit or !std.unicode.utf8ValidateSlice(raw[index .. index + length])) {
+            out.appendSlice(allocator, "\xef\xbf\xbd") catch {};
+            index += 1;
+            continue;
+        }
+        out.appendSlice(allocator, raw[index .. index + length]) catch {};
+        index += length;
+    }
+    return out.toOwnedSlice(allocator) catch "";
+}
+
+fn parseHex4(bytes: []const u8) ?u16 {
+    if (bytes.len < 4) return null;
+    var value: u16 = 0;
+    for (bytes[0..4]) |c| {
+        value <<= 4;
+        value |= switch (c) {
+            '0'...'9' => c - '0',
+            'a'...'f' => c - 'a' + 10,
+            'A'...'F' => c - 'A' + 10,
+            else => return null,
+        };
+    }
+    return value;
+}
+
+/// Scan one JSON string starting at `start` (which must be '"'), returning the
+/// decoded value and the index after the closing quote.
+fn scanJsonString(allocator: std.mem.Allocator, data: []const u8, start: usize, error_out: *[]const u8) ?ScannedString {
+    var index = start + 1;
+    while (index < data.len) {
+        const c = data[index];
+        if (c == '"') {
+            return .{ .value = decodeGoJsonString(allocator, data[start .. index + 1]), .end = index + 1 };
+        }
+        if (c == '\\') {
+            if (index + 2 > data.len) {
+                error_out.* = "malformed JSON: unexpected EOF";
+                return null;
+            }
+            switch (data[index + 1]) {
+                '/', '"', '\\', 'b', 'f', 'n', 'r', 't' => {
+                    index += 2;
+                    continue;
+                },
+                'u' => {
+                    // Go scans up to four hex digits after \u; when the input
+                    // ends first it reports unexpected EOF, otherwise it names
+                    // the escape sequence it read.
+                    if (data.len - (index + 2) >= 4) {
+                        var valid = true;
+                        for (data[index + 2 .. index + 6]) |digit| {
+                            if (!isHexDigit(digit)) valid = false;
+                        }
+                        if (!valid) {
+                            error_out.* = invalidEscape(allocator, data[index .. index + 6]);
+                            return null;
+                        }
+                        index += 6;
+                    } else {
+                        var non_hex = false;
+                        for (data[index + 2 ..]) |digit| {
+                            if (!isHexDigit(digit)) non_hex = true;
+                        }
+                        if (non_hex) {
+                            error_out.* = invalidEscape(allocator, data[index..]);
+                        } else {
+                            error_out.* = "malformed JSON: unexpected EOF";
+                        }
+                        return null;
+                    }
+                    continue;
+                },
+                else => {
+                    error_out.* = invalidEscape(allocator, data[index .. index + 2]);
+                    return null;
+                },
+            }
+        }
+        if (c < 0x20) {
+            scanErrorAt(allocator, error_out, data, index, "in string");
+            return null;
+        }
+        index += runeBytesAt(data, index).len;
+    }
+    error_out.* = "malformed JSON: unexpected EOF";
     return null;
+}
+
+fn scanLiteralDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, word: []const u8, error_out: *[]const u8) ?usize {
+    var i: usize = 0;
+    while (i < word.len) : (i += 1) {
+        const position = start + i;
+        if (position >= data.len) {
+            error_out.* = "malformed JSON: unexpected EOF";
+            return null;
+        }
+        if (data[position] != word[i]) {
+            const context = std.fmt.allocPrint(allocator, "in literal {s} (expecting '{c}')", .{ word, word[i] }) catch "in literal";
+            scanErrorAt(allocator, error_out, data, position, context);
+            return null;
+        }
+    }
+    return start + word.len;
+}
+
+fn scanNumberDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, error_out: *[]const u8) ?usize {
+    var index = start;
+    if (data[index] == '-') {
+        index += 1;
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected EOF";
+            return null;
+        }
+    }
+    if (data[index] == '0') {
+        index += 1;
+    } else if (data[index] >= '1' and data[index] <= '9') {
+        while (index < data.len and data[index] >= '0' and data[index] <= '9') index += 1;
+    } else {
+        scanErrorAt(allocator, error_out, data, index, "in numeric literal");
+        return null;
+    }
+    if (index < data.len and data[index] == '.') {
+        index += 1;
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected EOF";
+            return null;
+        }
+        if (data[index] < '0' or data[index] > '9') {
+            scanErrorAt(allocator, error_out, data, index, "in numeric literal");
+            return null;
+        }
+        while (index < data.len and data[index] >= '0' and data[index] <= '9') index += 1;
+    }
+    if (index < data.len and (data[index] == 'e' or data[index] == 'E')) {
+        index += 1;
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected EOF";
+            return null;
+        }
+        if (data[index] == '+' or data[index] == '-') {
+            index += 1;
+            if (index >= data.len) {
+                error_out.* = "malformed JSON: unexpected EOF";
+                return null;
+            }
+        }
+        if (data[index] < '0' or data[index] > '9') {
+            scanErrorAt(allocator, error_out, data, index, "in numeric literal");
+            return null;
+        }
+        while (index < data.len and data[index] >= '0' and data[index] <= '9') index += 1;
+    }
+    return index;
+}
+
+/// consumeValue: scan exactly one JSON value, returning the index just past it.
+/// `value_eof` is the message for an empty value position, which the token
+/// reader words differently after an object key than inside an array.
+fn consumeValueDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, value_eof: []const u8, error_out: *[]const u8) ?usize {
+    const index = skipScanSpace(data, start);
+    if (index >= data.len) {
+        error_out.* = value_eof;
+        return null;
+    }
+    const c = data[index];
+    return switch (c) {
+        '{' => consumeObjectDetailed(allocator, data, index, null, error_out),
+        '[' => consumeArrayDetailed(allocator, data, index, error_out),
+        '"' => blk: {
+            const scanned = scanJsonString(allocator, data, index, error_out) orelse break :blk null;
+            break :blk scanned.end;
+        },
+        't' => scanLiteralDetailed(allocator, data, index, "true", error_out),
+        'f' => scanLiteralDetailed(allocator, data, index, "false", error_out),
+        'n' => scanLiteralDetailed(allocator, data, index, "null", error_out),
+        '-', '0'...'9' => scanNumberChecked(allocator, data, index, error_out),
+        else => blk: {
+            scanErrorAt(allocator, error_out, data, index, "looking for beginning of value");
+            break :blk null;
+        },
+    };
+}
+
+/// scanNumberDetailed plus the float64 conversion the token reader performs: a
+/// literal that overflows is rejected before the typed decode.
+fn scanNumberChecked(allocator: std.mem.Allocator, data: []const u8, start: usize, error_out: *[]const u8) ?usize {
+    const end = scanNumberDetailed(allocator, data, start, error_out) orelse return null;
+    const magnitude = std.fmt.parseFloat(f64, data[start..end]) catch std.math.inf(f64);
+    if (std.math.isInf(magnitude)) {
+        error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: json: cannot unmarshal number {s} into Go value of type float64", .{data[start..end]}) catch "malformed JSON";
+        return null;
+    }
+    return end;
+}
+
+fn consumeArrayDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, error_out: *[]const u8) ?usize {
+    var index = start + 1;
+    var comma_index: ?usize = null;
+    while (true) {
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        // A closing delimiter directly after a comma is reported against the comma.
+        if (comma_index) |comma| {
+            if (data[index] == ']' or data[index] == '}') {
+                scanErrorAt(allocator, error_out, data, comma, "looking for beginning of value");
+                return null;
+            }
+        }
+        if (data[index] == ']') return index + 1;
+        index = consumeValueDetailed(allocator, data, index, "malformed JSON: unexpected end of JSON input", error_out) orelse return null;
+        comma_index = null;
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        if (data[index] == ',') {
+            comma_index = index;
+            index += 1;
+            continue;
+        }
+        if (data[index] == ']') return index + 1;
+        scanErrorAt(allocator, error_out, data, index, "after array element");
+        return null;
+    }
+}
+
+fn consumeNodeResultsDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, error_out: *[]const u8) ?usize {
+    if (start >= data.len) {
+        error_out.* = "malformed JSON: unexpected end of JSON input";
+        return null;
+    }
+    if (data[start] != '[') {
+        // The token reader reads one value first, so a malformed value reports
+        // its own syntax error rather than the array type complaint.
+        switch (data[start]) {
+            '{' => {},
+            '"' => _ = scanJsonString(allocator, data, start, error_out) orelse return null,
+            't' => _ = scanLiteralDetailed(allocator, data, start, "true", error_out) orelse return null,
+            'f' => _ = scanLiteralDetailed(allocator, data, start, "false", error_out) orelse return null,
+            'n' => _ = scanLiteralDetailed(allocator, data, start, "null", error_out) orelse return null,
+            '-', '0'...'9' => _ = scanNumberChecked(allocator, data, start, error_out) orelse return null,
+            else => {
+                scanErrorAt(allocator, error_out, data, start, "looking for beginning of value");
+                return null;
+            },
+        }
+        error_out.* = "malformed JSON: node_results must be an array";
+        return null;
+    }
+    var index = start + 1;
+    var comma_index: ?usize = null;
+    while (true) {
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        if (comma_index) |comma| {
+            if (data[index] == ']' or data[index] == '}') {
+                scanErrorAt(allocator, error_out, data, comma, "looking for beginning of value");
+                return null;
+            }
+        }
+        if (data[index] == ']') return index + 1;
+        // The element must be an object token; other values are scanned first so
+        // their own syntax errors win, exactly as the token reader behaves.
+        if (data[index] == '{') {
+            index = consumeObjectDetailed(allocator, data, index, &ledger_node_result_fields, error_out) orelse return null;
+        } else {
+            const c = data[index];
+            switch (c) {
+                '[' => {},
+                '"' => _ = scanJsonString(allocator, data, index, error_out) orelse return null,
+                't' => _ = scanLiteralDetailed(allocator, data, index, "true", error_out) orelse return null,
+                'f' => _ = scanLiteralDetailed(allocator, data, index, "false", error_out) orelse return null,
+                'n' => _ = scanLiteralDetailed(allocator, data, index, "null", error_out) orelse return null,
+                '-', '0'...'9' => _ = scanNumberChecked(allocator, data, index, error_out) orelse return null,
+                else => {
+                    scanErrorAt(allocator, error_out, data, index, "looking for beginning of value");
+                    return null;
+                },
+            }
+            error_out.* = "malformed JSON: node result must be a JSON object";
+            return null;
+        }
+        comma_index = null;
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        if (data[index] == ',') {
+            comma_index = index;
+            index += 1;
+            continue;
+        }
+        if (data[index] == ']') return index + 1;
+        scanErrorAt(allocator, error_out, data, index, "after array element");
+        return null;
+    }
+}
+
+/// consumeObject: check every key before scanning its value. `allowed == null`
+/// accepts any key.
+fn consumeObjectDetailed(allocator: std.mem.Allocator, data: []const u8, start: usize, allowed: ?[]const []const u8, error_out: *[]const u8) ?usize {
+    var index = start + 1;
+    var seen: std.ArrayList([]const u8) = .empty;
+    var comma_index: ?usize = null;
+    while (true) {
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        // A closing delimiter directly after a comma is reported against the comma.
+        if (comma_index) |comma| {
+            if (data[index] == '}' or data[index] == ']') {
+                scanErrorAt(allocator, error_out, data, comma, "looking for beginning of value");
+                return null;
+            }
+        }
+        if (data[index] == '}') return index + 1;
+        if (data[index] != '"') {
+            // The token reader returns delimiters and digits lazily, so { and [
+            // and 0-9 reach the member-name check unchanged; a literal or a
+            // negative number is scanned first and its own error wins.
+            if (data[index] == '{' or data[index] == '[' or (data[index] >= '0' and data[index] <= '9')) {
+                error_out.* = "malformed JSON: object member name must be a string";
+                return null;
+            }
+            switch (data[index]) {
+                't' => _ = scanLiteralDetailed(allocator, data, index, "true", error_out) orelse return null,
+                'f' => _ = scanLiteralDetailed(allocator, data, index, "false", error_out) orelse return null,
+                'n' => _ = scanLiteralDetailed(allocator, data, index, "null", error_out) orelse return null,
+                '-' => _ = scanNumberDetailed(allocator, data, index, error_out) orelse return null,
+                else => {
+                    scanErrorAt(allocator, error_out, data, index, "looking for beginning of value");
+                    return null;
+                },
+            }
+            error_out.* = "malformed JSON: object member name must be a string";
+            return null;
+        }
+        const key = scanJsonString(allocator, data, index, error_out) orelse return null;
+        index = key.end;
+        for (seen.items) |previous| {
+            if (std.mem.eql(u8, previous, key.value)) {
+                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: duplicate JSON field {s}", .{ledgerQuote(allocator, key.value)}) catch "malformed JSON";
+                return null;
+            }
+        }
+        seen.append(allocator, key.value) catch {};
+        var canonical: []const u8 = key.value;
+        if (allowed) |fields| {
+            canonical = exactLedgerField(key.value, fields) orelse {
+                if (foldedLedgerField(key.value, fields)) |folded| {
+                    error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: non-canonical JSON field {s}; use {s}", .{ ledgerQuote(allocator, key.value), ledgerQuote(allocator, folded) }) catch "malformed JSON";
+                } else {
+                    error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: unknown JSON field {s}", .{ledgerQuote(allocator, key.value)}) catch "malformed JSON";
+                }
+                return null;
+            };
+        }
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: EOF";
+            return null;
+        }
+        if (data[index] != ':') {
+            scanErrorAt(allocator, error_out, data, index, "after object key");
+            return null;
+        }
+        index = skipScanSpace(data, index + 1);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: EOF";
+            return null;
+        }
+        if (data[index] == '}') {
+            error_out.* = "malformed JSON: missing value after object key";
+            return null;
+        }
+        if (data[index] == ']') {
+            scanErrorAt(allocator, error_out, data, index, "after object key:value pair");
+            return null;
+        }
+        if (std.mem.eql(u8, canonical, "node_results")) {
+            index = consumeNodeResultsDetailed(allocator, data, index, error_out) orelse return null;
+        } else {
+            index = consumeValueDetailed(allocator, data, index, "malformed JSON: EOF", error_out) orelse return null;
+        }
+        comma_index = null;
+        index = skipScanSpace(data, index);
+        if (index >= data.len) {
+            error_out.* = "malformed JSON: unexpected end of JSON input";
+            return null;
+        }
+        if (data[index] == ',') {
+            comma_index = index;
+            index += 1;
+            continue;
+        }
+        if (data[index] == '}') return index + 1;
+        scanErrorAt(allocator, error_out, data, index, "after object key:value pair");
+        return null;
+    }
+}
+
+/// validateJSONObject: the record must be a JSON object with only canonical
+/// fields, checked key-by-key before each value is scanned.
+fn validateJsonObjectDetailed(allocator: std.mem.Allocator, data: []const u8, object_end: *usize, error_out: *[]const u8) bool {
+    const first = skipScanSpace(data, 0);
+    if (first >= data.len) {
+        error_out.* = "malformed JSON: EOF";
+        return false;
+    }
+    if (data[first] == '[') {
+        error_out.* = "record must be a JSON object";
+        return false;
+    }
+    if (data[first] != '{') {
+        if (consumeValueDetailed(allocator, data, first, "malformed JSON: EOF", error_out) == null) return false;
+        error_out.* = "record must be a JSON object";
+        return false;
+    }
+    const end = consumeObjectDetailed(allocator, data, first, &ledger_record_fields, error_out) orelse return false;
+    object_end.* = end;
+    const trailing = skipScanSpace(data, end);
+    if (trailing < data.len) {
+        const probe: []const u8 = "malformed JSON: EOF";
+        if (consumeValueDetailed(allocator, data, trailing, probe, error_out)) |_| {
+            error_out.* = "trailing data";
+        } else if (std.mem.startsWith(u8, error_out.*, "malformed JSON: ")) {
+            const message = error_out.*["malformed JSON: ".len..];
+            error_out.* = std.fmt.allocPrint(allocator, "trailing data: {s}", .{message}) catch "trailing data";
+        }
+        return false;
+    }
+    return true;
 }
 
 /// decodeRecord for one trimmed ledger line: validateJSONObject followed by a
 /// strict typed decode. Returns null and sets error_out on failure.
 fn parseLedgerRecordDetailed(allocator: std.mem.Allocator, line: []const u8, error_out: *[]const u8) ?LedgerRecord {
+    // Syntax and structure are checked on the raw bytes so an invalid UTF-8 byte
+    // is reported as itself; invalid UTF-8 inside a string becomes U+FFFD, as
+    // encoding/json does.
+    var object_end: usize = 0;
+    if (!validateJsonObjectDetailed(allocator, line, &object_end, error_out)) return null;
     const normalized = normalizeJsonUtf8(allocator, line) catch {
         error_out.* = "malformed JSON";
         return null;
     };
-    if (goJsonSyntaxMessage(allocator, normalized)) |message| {
-        error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: {s}", .{message}) catch "malformed JSON";
-        return null;
-    }
-    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch |err| {
-        error_out.* = switch (err) {
-            error.TrailingData => "trailing data",
-            else => "malformed JSON",
-        };
+    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch {
+        error_out.* = "malformed JSON";
         return null;
     };
-    if (root != .object) {
-        error_out.* = "record must be a JSON object";
-        return null;
-    }
-    // Structure pass, mirroring validateJSONObject's consumeObject.
-    var seen: std.ArrayList([]const u8) = .empty;
-    for (root.object) |field| {
-        for (seen.items) |previous| {
-            if (std.mem.eql(u8, previous, field.key)) {
-                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: duplicate JSON field {s}", .{ledgerQuote(allocator, field.key)}) catch "malformed JSON";
-                return null;
-            }
-        }
-        seen.append(allocator, field.key) catch {};
-        if (exactLedgerField(field.key, &ledger_record_fields) == null) {
-            if (foldedLedgerField(field.key, &ledger_record_fields)) |canonical| {
-                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: non-canonical JSON field {s}; use {s}", .{ ledgerQuote(allocator, field.key), ledgerQuote(allocator, canonical) }) catch "malformed JSON";
-            } else {
-                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: unknown JSON field {s}", .{ledgerQuote(allocator, field.key)}) catch "malformed JSON";
-            }
-            return null;
-        }
-        if (std.mem.eql(u8, field.key, "node_results")) {
-            if (field.value != .array) {
-                error_out.* = "malformed JSON: node_results must be an array";
-                return null;
-            }
-            for (field.value.array) |item| {
-                if (item != .object) {
-                    error_out.* = "malformed JSON: node result must be a JSON object";
-                    return null;
-                }
-                var nested_seen: std.ArrayList([]const u8) = .empty;
-                for (item.object) |member| {
-                    for (nested_seen.items) |previous| {
-                        if (std.mem.eql(u8, previous, member.key)) {
-                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: duplicate JSON field {s}", .{ledgerQuote(allocator, member.key)}) catch "malformed JSON";
-                            return null;
-                        }
-                    }
-                    nested_seen.append(allocator, member.key) catch {};
-                    if (exactLedgerField(member.key, &ledger_node_result_fields) == null) {
-                        if (foldedLedgerField(member.key, &ledger_node_result_fields)) |canonical| {
-                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: non-canonical JSON field {s}; use {s}", .{ ledgerQuote(allocator, member.key), ledgerQuote(allocator, canonical) }) catch "malformed JSON";
-                        } else {
-                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: unknown JSON field {s}", .{ledgerQuote(allocator, member.key)}) catch "malformed JSON";
-                        }
-                        return null;
-                    }
-                }
-            }
-        }
-    }
     // Type pass, mirroring decoder.Decode(&record) with DisallowUnknownFields.
     var record = LedgerRecord{};
     for (root.object) |field| {
         const canonical = exactLedgerField(field.key, &ledger_record_fields) orelse continue;
         if (std.mem.eql(u8, canonical, "seq")) {
+            // A JSON null leaves a Go scalar at its zero value.
+            if (field.value == .null) continue;
             if (field.value != .number or !isUint64Token(field.value.number)) {
                 const value_name = if (field.value == .number) std.fmt.allocPrint(allocator, "number {s}", .{field.value.number}) catch "number" else jsonTypeName(field.value);
                 error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.seq of type uint64", .{value_name}) catch "malformed record";
@@ -2183,12 +2438,14 @@ fn parseLedgerRecordDetailed(allocator: std.mem.Allocator, line: []const u8, err
             }
             record.seq = std.fmt.parseUnsigned(u64, field.value.number, 10) catch 0;
         } else if (std.mem.eql(u8, canonical, "node_results")) {
+            if (field.value == .null) continue;
             const results = allocator.alloc(LedgerNodeResult, field.value.array.len) catch return null;
             for (field.value.array, 0..) |item, i| {
                 var node_result = LedgerNodeResult{ .node_id = "", .status = "" };
                 for (item.object) |member| {
+                    if (member.value == .null) continue;
                     if (member.value != .string) {
-                        error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.node_results.{s} of type string", .{ jsonTypeName(member.value), member.key }) catch "malformed record";
+                        error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.node_results.{d}.{s} of type string", .{ jsonTypeName(member.value), i, member.key }) catch "malformed record";
                         return null;
                     }
                     if (std.mem.eql(u8, member.key, "node_id")) {
@@ -2203,6 +2460,7 @@ fn parseLedgerRecordDetailed(allocator: std.mem.Allocator, line: []const u8, err
             }
             record.node_results = results;
         } else {
+            if (field.value == .null) continue;
             if (field.value != .string) {
                 error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.{s} of type string", .{ jsonTypeName(field.value), field.key }) catch "malformed record";
                 return null;
