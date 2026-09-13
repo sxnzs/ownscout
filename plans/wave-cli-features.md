@@ -24,13 +24,24 @@ single-writer (orchestrator).
 | N4 | Independent diff review | crew `reviewer` | none (read-only) | verdict + issues |
 | N5 | Commit, README usage lines, report | orchestrator | `README.md` | gate green |
 
+## Wave 2: port parity (running after the case-fold lane committed)
+
+Three crew tasks, one per port, disjoint scopes (`ports/ts`, `ports/rust`,
+`ports/zig`). Each implements `node bind`, `ledger verify`, and
+`node verify --relocate` against the recorded cases (18 new edge cases at
+190 total) plus the updated usage strings in the base corpus.
+
+| # | Node | Owner | Write scope | Validation |
+|---|---|---|---|---|
+| W2.1 | ts port | crew `port-ts` | `ports/ts/` | `verify-port.sh ts ports/ts/bin/ownscout 'cd ports/ts && node --test'` |
+| W2.2 | rust port | crew `port-rust` | `ports/rust/` | `verify-port.sh rust ports/rust/target/release/ownscout 'cd ports/rust && cargo test --quiet'` |
+| W2.3 | zig port | crew `port-zig` | `ports/zig/` | `verify-port.sh zig ports/zig/zig-out/bin/ownscout 'cd ports/zig && zig build test'` |
+| W2.4 | integration | orchestrator | `docs/`, `README.md` | `spec/parity/verify-all.sh` green |
+
 ## Deferred (recorded, not dropped)
 
 - **Decoder unification** (`loadPacket` → `nodepacket.Decode`): currently
   contradicts the pinned two-decoder contract. Requires a spec decision: keep
   the documented asymmetry, or version the contract. Not a code question.
-- **Port parity for the new commands**: the next wave, after the case-fold lane
-  commits. Adding corpus cases for `node bind`/`ledger verify` will read red on
-  `status.sh` until then — honest intermediate state.
 - **Ledger 1 MiB rotation policy**: a product decision (cap, archive, or
   documented rotation), deferred with it.
