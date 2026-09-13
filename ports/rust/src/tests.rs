@@ -491,6 +491,118 @@ fn ledger_rejects_invalid_inputs_and_repository_paths() {
 }
 
 #[test]
+fn cli_ledger_verify_reports_summary_and_errors() {
+    let root = temp_dir("ledger-verify-root");
+    let outside = temp_dir("ledger-verify-outside").join("ledger.jsonl");
+    let mut store = ledger::open(outside.to_str().unwrap(), root.to_str().unwrap()).unwrap();
+    store
+        .append(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            "0.1.0",
+            vec![ledger::NodeResult {
+                node_id: "build".into(),
+                status: "evidence_current".into(),
+                reason: String::new(),
+            }],
+        )
+        .unwrap();
+    drop(store);
+    let run = |path: &std::path::Path| {
+        cli::run(&[
+            "ledger".into(),
+            "verify".into(),
+            "--ledger".into(),
+            path.to_str().unwrap().into(),
+            "--json".into(),
+        ])
+    };
+    let (out, code) = run(&outside);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("\"summary\":\"ledger is intact\""), "{out}");
+    assert!(out.contains("1 record(s), tip "), "{out}");
+    // A malformed record is a validation failure carrying Go's scanner error.
+    fs::write(&outside, b"not a ledger record\n").unwrap();
+    let (out, code) = run(&outside);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("invalid character 'o' in literal null (expecting 'u')"),
+        "{out}"
+    );
+    // A missing path and a directory are read failures.
+    let (out, code) = run(&outside.with_extension("absent"));
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("ledger could not be read"), "{out}");
+    let (out, code) = run(&root);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("not a regular file"), "{out}");
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn cli_node_bind_and_verify_relocate_dispatch() {
+    let p = packet();
+    let dir = temp_dir("node-bind");
+    let path = dir.join("packet.json");
+    fs::write(&path, node::canonical_packet(&p)).unwrap();
+    let expected = node::binding(&p);
+    let (out, code) = cli::run(&[
+        "node".into(),
+        "bind".into(),
+        "--packet".into(),
+        path.to_str().unwrap().into(),
+        "--json".into(),
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&expected), "{out}");
+    // A missing --packet is a usage error.
+    let (out, code) = cli::run(&["node".into(), "bind".into()]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("missing required --packet value"), "{out}");
+    // The strict decoder rejects a duplicate key.
+    fs::write(&path, br#"{"packet_id":"a","packet_id":"b"}"#).unwrap();
+    let (out, code) = cli::run(&[
+        "node".into(),
+        "bind".into(),
+        "--packet".into(),
+        path.to_str().unwrap().into(),
+        "--json".into(),
+    ]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("packet could not be decoded"), "{out}");
+    // node verify accepts --relocate as a switch.
+    let (out, code) = cli::run(&["node".into(), "verify".into(), "--relocate".into()]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("missing required --repo value"), "{out}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cli_help_covers_ledger_and_node_bind() {
+    let (out, code) = cli::run(&["--help".into()]);
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("ownscout ledger verify --ledger <file> [--json]"),
+        "{out}"
+    );
+    assert!(
+        out.contains("ownscout node bind --packet <file> [--json]"),
+        "{out}"
+    );
+    let (out, _) = cli::run(&["node".into(), "bind".into(), "--help".into()]);
+    assert!(out.contains("Computes the canonical packet binding"), "{out}");
+    let (out, _) = cli::run(&["ledger".into(), "verify".into(), "--help".into()]);
+    assert!(out.contains("Replays the SHA-256 ledger chain"), "{out}");
+    let (out, code) = cli::run(&["ledger".into()]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("a ledger subcommand is required"), "{out}");
+    let (out, code) = cli::run(&["ledger".into(), "bogus".into()]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("unknown ledger subcommand 'bogus'"), "{out}");
+}
+
+#[test]
 fn cli_handles_help_version_and_usage_errors() {
     let (out, code) = cli::run(&["version".into()]);
     assert_eq!(code, 0);

@@ -30,6 +30,9 @@ pub struct Options {
     pub relocate: bool,
 }
 
+// verify is the relocate-off convenience form used by the unit tests; the CLI
+// always goes through verify_with_options.
+#[cfg(test)]
 pub fn verify(repo: &str, p: &Packet) -> Result<Report, String> {
     verify_with_options(repo, p, &Options { relocate: false })
 }

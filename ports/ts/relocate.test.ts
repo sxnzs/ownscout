@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   countLines,
@@ -187,18 +189,24 @@ test("an unusable fingerprint or disabled option yields no relocation clause", (
   );
 });
 
-test("--relocate is rejected by contract validate and node verify", () => {
+test("--relocate is rejected by contract validate but accepted by node verify", () => {
   const contract = run("contract", "validate", "--packet", fixture("packet-valid.json"), "--relocate");
   assert.equal(contract.status, 2);
   assert.equal(contract.stdout, "error: unknown flag or argument '--relocate'\nNext action: run 'ownscout contract validate --help'.\n");
-  const node = run("node", "verify", "--repo", fixture("repo"), "--packet", fixture("packet-valid.json"), "--envelope", fixture("envelope-valid.json"), "--ledger", "/tmp/does-not-matter.jsonl", "--relocate");
-  assert.equal(node.status, 2);
-  assert.match(node.stdout, /unknown flag or argument '--relocate'/);
+  const dir = mkdtempSync(path.join(tmpdir(), "ownscout-node-relocate-"));
+  try {
+    const node = run("node", "verify", "--repo", fixture("repo"), "--packet", fixture("packet-valid.json"), "--envelope", fixture("envelope-valid.json"), "--ledger", path.join(dir, "ledger.jsonl"), "--relocate");
+    assert.equal(node.status, 0);
+    assert.match(node.stdout, /all nodes are evidence_current/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-test("help text advertises --relocate on evidence verify only", () => {
+test("help text advertises --relocate on evidence verify and node verify", () => {
   const rootHelp = run("--help");
   assert.match(rootHelp.stdout, /ownscout evidence verify --repo <dir> --packet <file> \[--relocate\] \[--json\]/);
+  assert.match(rootHelp.stdout, /ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> \[--relocate\] \[--json\]/);
   const evidenceHelp = run("evidence", "verify", "--help");
   assert.equal(
     evidenceHelp.stdout,
@@ -206,4 +214,7 @@ test("help text advertises --relocate on evidence verify only", () => {
   );
   const subcommandHelp = run("evidence", "--help");
   assert.match(subcommandHelp.stdout, /Usage: ownscout evidence verify --repo <dir> --packet <file> \[--relocate\] \[--json\]/);
+  const nodeHelp = run("node", "verify", "--help");
+  assert.match(nodeHelp.stdout, /\[--relocate\] \[--json\]/);
+  assert.match(nodeHelp.stdout, /With --relocate, failed evidence details include matching locations when available\./);
 });

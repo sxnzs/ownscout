@@ -12,7 +12,9 @@ Usage:
   ownscout version
   ownscout contract validate --packet <file> [--json]
   ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
-  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]
+  ownscout ledger verify --ledger <file> [--json]
+  ownscout node bind --packet <file> [--json]
+  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]
 
 Use "ownscout <command> --help" for command details.`;
 
@@ -259,7 +261,7 @@ class StrictParser {
       if (this.s[this.i] === "}") { this.i++; return out; }
       while (true) {
         const key = this.string(); this.ws();
-        if (seen.has(key) && this.rejectDuplicates) this.fail("duplicate key");
+        if (seen.has(key) && this.rejectDuplicates) this.fail(`duplicate key ${goQuote(key)}`);
         seen.add(key);
         // The CLI packet path falls back to a case-folded match, exactly as
         // encoding/json does; the node-envelope decoder matches exactly only.
@@ -737,7 +739,13 @@ function ledgerOpen(ledger:string,repo:string):{path:string;records:any[]} {
   const records:any[]=[]; for(const line of data.toString().split("\n").filter(Boolean)){const rec=JSON.parse(line); if(rec.schema_version!=="ownscout-ledger-v1"||rec.seq!==records.length+1||rec.prev_record_hash!==(records.length?records.at(-1).record_hash:zero)||rec.record_hash!==hashRecord(rec))throw new Error("validate ledger: invalid record");records.push(rec);}
   return {path:p,records};
 }
-function hashRecord(r:any):string{const c={...r,record_hash:""};return sha256(goJson(c));}
+// hashRecord hashes exactly what Go's json.Marshal emits for a ledger Record:
+// struct field order, record_hash blanked, and the omitempty reason omitted.
+function ledgerRecordCanonical(r:any):any{
+  const results=Array.isArray(r.node_results)?r.node_results:[];
+  return {schema_version:r.schema_version,seq:r.seq,prev_record_hash:r.prev_record_hash,record_hash:"",envelope_sha256:r.envelope_sha256,packet_binding_sha256:r.packet_binding_sha256,ownscout_version:r.ownscout_version,node_results:results.map((n:any)=>({node_id:n.node_id,status:n.status,...(n.reason?{reason:n.reason}:{})}))};
+}
+function hashRecord(r:any):string{return sha256(goJson(ledgerRecordCanonical(r)));}
 function appendLedger(l:any,b:string,envHash:string,results:any[]):void {
   if(!results.length)throw new Error("node_results must be non-empty");
   const prev=l.records.length?l.records.at(-1).record_hash:zero;
@@ -746,12 +754,189 @@ function appendLedger(l:any,b:string,envHash:string,results:any[]):void {
   fs.appendFileSync(l.path,line,{mode:0o600});l.records.push(rec);
 }
 
+// --- ledger verify -------------------------------------------------------
+class LedgerValidationError extends Error {}
+const MAX_LEDGER=1<<20, MAX_NODE_RESULTS=4096;
+const ledgerNodeResultSchema={node_id:"string",status:"string",reason:"string"};
+const ledgerRecordSchema={schema_version:"string",seq:"int64",prev_record_hash:"string",record_hash:"string",envelope_sha256:"string",packet_binding_sha256:"string",ownscout_version:"string",node_results:{array:ledgerNodeResultSchema}};
+
+function isJSONSpace(c:number):boolean{return c===0x20||c===0x09||c===0x0a||c===0x0d;}
+function goQuoteChar(c:number):string{
+  if(c===0x27) return "'\\''";
+  if(c===0x22) return "'\"'";
+  if(c>=0x20 && c<0x7f) return "'"+String.fromCharCode(c)+"'";
+  return "'"+goQuote(String.fromCharCode(c)).slice(1,-1)+"'";
+}
+// ledgerSyntaxError reproduces the first-token syntax errors of Go's
+// encoding/json scanner, which validateJSONObject surfaces as "malformed JSON".
+function ledgerSyntaxError(s:string):string|undefined{
+  let i=0; while(i<s.length && isJSONSpace(s.charCodeAt(i))) i++;
+  if(i>=s.length) return "unexpected end of JSON input";
+  const c=s[i];
+  if(c==="{"||c==="["||c==="\""||(c>="0"&&c<="9")||c==="-") return undefined;
+  for(const lit of ["true","false","null"]){
+    if(c!==lit[0]) continue;
+    for(let k=0;k<lit.length;k++){
+      if(i+k>=s.length) return "unexpected EOF";
+      if(s[i+k]!==lit[k]) return `invalid character ${goQuoteChar(s.charCodeAt(i+k))} in literal ${lit} (expecting ${goQuoteChar(lit.charCodeAt(k))})`;
+    }
+    return undefined;
+  }
+  return `invalid character ${goQuoteChar(c.charCodeAt(0))} looking for beginning of value`;
+}
+function decodeLedgerRecord(text:string):any{
+  const syntax=ledgerSyntaxError(text);
+  if(syntax!==undefined) throw new Error(`malformed JSON: ${syntax}`);
+  // validateJSONObject parses the first token before anything else, so any
+  // valid non-object line is rejected with this exact message.
+  if(text[0]!=="{") throw new Error("record must be a JSON object");
+  try{return new StrictParser(text,true,true,true,false,false).parse(ledgerRecordSchema);}
+  catch(e:any){
+    const m=String(e.message);
+    if(m.startsWith("unknown field ")) throw new Error(`malformed JSON: unknown JSON field ${m.slice("unknown field ".length)}`);
+    if(m.startsWith("duplicate key ")) throw new Error(`malformed JSON: duplicate JSON field ${m.slice("duplicate key ".length)}`);
+    throw new Error(`malformed record: ${m}`);
+  }
+}
+function validateLedgerIdentifier(value:any):void{
+  if(typeof value!=="string"||value.length<1||value.length>128) throw new Error("must contain 1-128 ASCII identifier characters");
+  for(let i=0;i<value.length;i++){
+    const c=value.charCodeAt(i);
+    const alnum=(c>=0x61&&c<=0x7a)||(c>=0x41&&c<=0x5a)||(c>=0x30&&c<=0x39);
+    if(i===0){if(!alnum)throw new Error("must start with an ASCII alphanumeric character");continue;}
+    if(!alnum&&c!==0x2e&&c!==0x5f&&c!==0x2d&&c!==0x3a)throw new Error("contains an invalid character");
+  }
+}
+function validateLedgerSHA256(field:string,value:any):void{
+  if(typeof value!=="string"||!/^[0-9a-f]{64}$/.test(value)) throw new Error(`${field} must be exactly 64 lowercase hexadecimal characters`);
+}
+function containsNUL(value:any):boolean{return typeof value==="string"&&value.indexOf("\u0000")>=0;}
+function validateLedgerNodeResult(r:any):void{
+  try{validateLedgerIdentifier(r&&r.node_id);}catch(e:any){throw new Error(`node_id: ${e.message}`);}
+  if(!["evidence_current","failed","blocked"].includes(r&&r.status)) throw new Error(`status ${goQuote(r&&r.status)} is invalid`);
+  if(containsNUL(r&&r.node_id)||containsNUL(r&&r.status)||containsNUL(r&&r.reason)) throw new Error("contains a NUL byte");
+}
+function validateLedgerRecord(r:any,expectedSeq:number,expectedPrev:string):void{
+  if(r.schema_version!=="ownscout-ledger-v1") throw new Error('schema_version must be "ownscout-ledger-v1"');
+  if(r.seq!==expectedSeq) throw new Error(`seq ${r.seq} does not follow expected sequence ${expectedSeq}`);
+  if(r.prev_record_hash!==expectedPrev) throw new Error("prev_record_hash does not match hash chain");
+  validateLedgerSHA256("prev_record_hash",r.prev_record_hash);
+  validateLedgerSHA256("record_hash",r.record_hash);
+  validateLedgerSHA256("envelope_sha256",r.envelope_sha256);
+  validateLedgerSHA256("packet_binding_sha256",r.packet_binding_sha256);
+  if(!r.ownscout_version) throw new Error("ownscout_version must be non-empty");
+  const results=Array.isArray(r.node_results)?r.node_results:[];
+  if(!results.length) throw new Error("node_results must be non-empty");
+  if(results.length>MAX_NODE_RESULTS) throw new Error(`node_results exceeds ${MAX_NODE_RESULTS} results`);
+  if(containsNUL(r.schema_version)||containsNUL(r.prev_record_hash)||containsNUL(r.record_hash)||containsNUL(r.envelope_sha256)||containsNUL(r.packet_binding_sha256)||containsNUL(r.ownscout_version)) throw new Error("record contains a NUL byte");
+  const seen=new Set<string>();
+  for(let i=0;i<results.length;i++){
+    try{validateLedgerNodeResult(results[i]);}catch(e:any){throw new Error(`node_results[${i}]: ${e.message}`);}
+    const id=results[i].node_id;
+    if(seen.has(id)) throw new Error(`duplicate node_id ${goQuote(id)}`);
+    seen.add(id);
+  }
+}
+function validateLedger(data:Buffer):{records:number;tip:string}{
+  if(data.length&&data[data.length-1]!==0x0a) throw new LedgerValidationError("nonempty ledger must end with LF");
+  let text:string;
+  try{text=new TextDecoder("utf-8",{fatal:true}).decode(data);}catch{throw new LedgerValidationError("invalid UTF-8");}
+  const lines=text.length?text.split("\n"):[];
+  if(lines.length&&lines[lines.length-1]==="") lines.pop();
+  let last:any=null,count=0;
+  for(let i=0;i<lines.length;i++){
+    let line=lines[i];
+    if(line.endsWith("\r")) line=line.slice(0,-1);
+    const trimmed=line.trim();
+    if(trimmed.length===0) throw new LedgerValidationError("empty or blank line");
+    let record:any;
+    try{record=decodeLedgerRecord(trimmed);}catch(e:any){throw new LedgerValidationError(`line ${count+1}: ${e.message}`);}
+    const expectedSeq=count+1, expectedPrev=count!==0?last.record_hash:zero;
+    try{validateLedgerRecord(record,expectedSeq,expectedPrev);}catch(e:any){throw new LedgerValidationError(`line ${count+1}: ${e.message}`);}
+    if(record.record_hash!==hashRecord(record)) throw new LedgerValidationError(`line ${count+1}: record_hash does not match canonical record`);
+    last=record;count++;
+  }
+  return {records:count,tip:count?last.record_hash:""};
+}
+function ledgerVerify(pth:string):{records:number;tip:string}{
+  const ledgerPath=path.resolve(pth);
+  let st:fs.Stats;
+  try{st=fs.lstatSync(ledgerPath);}
+  catch(e:any){
+    const reason=e&&e.code==="ENOENT"?"no such file or directory":e&&e.code==="EACCES"?"permission denied":String(e&&e.message||e);
+    throw new Error(`read ledger "${ledgerPath}": lstat ${ledgerPath}: ${reason}`);
+  }
+  if(!st.isFile()) throw new Error(`read ledger "${ledgerPath}": not a regular file`);
+  let data:Buffer;
+  try{data=fs.readFileSync(ledgerPath);}catch(e:any){
+    const reason=e&&e.code==="ENOENT"?"no such file or directory":String(e&&e.message||e);
+    throw new Error(`read ledger "${ledgerPath}": ${reason}`);
+  }
+  if(data.length>MAX_LEDGER) throw new Error(`read ledger "${ledgerPath}": ledger exceeds ${MAX_LEDGER} bytes`);
+  try{return validateLedger(data);}
+  catch(e:any){
+    if(e instanceof LedgerValidationError) throw new LedgerValidationError(`validate ledger "${ledgerPath}": ${e.message}`);
+    throw e;
+  }
+}
+function readBounded(pth:string):Buffer{
+  let data:Buffer;
+  try{data=fs.readFileSync(pth);}catch{throw new Error("read failed");}
+  if(data.length>MAX_INPUT) throw new Error("input exceeds 1 MiB");
+  return data;
+}
+function evidenceIssues(r:any):string[]{
+  return r.results.filter((x:any)=>x.status!=="verified").map((x:any)=>`evidence "${x.evidence_id}" ("${x.path}"): ${x.message||"status: "+x.status}`);
+}
+function ledgerCmd(a:string[],out:any):number{
+  if(!a.length)return failure(out,"a ledger subcommand is required","ownscout ledger --help");
+  if(a[0]!=="verify")return failure(out,`unknown ledger subcommand '${a[0]}'`,"ownscout ledger --help",a.includes("--json"));
+  const q=parseFlags(a.slice(1),new Set(["--ledger"]));if(q.err)return failure(out,q.err,"ownscout ledger verify --help",q.j);
+  if(!q.f["--ledger"])return failure(out,"missing required --ledger value","ownscout ledger verify --help",q.j);
+  let s:any;
+  try{s=ledgerVerify(q.f["--ledger"]);}
+  catch(e:any){
+    if(e instanceof LedgerValidationError)return emit(out,q.j,{command:"ledger verify",ok:false,summary:"ledger verification failed",details:[e.message],next_action:"Repair the ledger, then run ledger verification again."},1);
+    return emit(out,q.j,{command:"ledger verify",ok:false,summary:"ledger could not be read",details:[e.message],next_action:"Provide a readable ledger file with --ledger <file>."},2);
+  }
+  const tip=s.tip||"none";
+  return emit(out,q.j,{command:"ledger verify",ok:true,summary:"ledger is intact",details:[`${s.records} record(s), tip ${tip}`],next_action:"The ledger chain is intact."},0);
+}
+function nodeBindCmd(a:string[],out:any):number{
+  const q=parseFlags(a,new Set(["--packet"]));
+  if(q.err)return failure(out,q.err,"ownscout node bind --help",q.j);
+  if(!q.f["--packet"])return failure(out,"missing required --packet value","ownscout node bind --help",q.j);
+  let data:Buffer;
+  try{data=readBounded(q.f["--packet"]);}
+  catch{return emit(out,q.j,{command:"node bind",ok:false,summary:"packet could not be loaded",details:["packet input could not be read"],next_action:"Provide a readable packet file with --packet <file>."},2);}
+  const d=decodePacketValid(data);
+  if(d.violations.length){
+    if(d.violations.length===1&&d.violations[0].rule==="packet_decode")return emit(out,q.j,{command:"node bind",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);
+    return emit(out,q.j,{command:"node bind",ok:false,summary:`packet contract failed (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the packet contract, then run node binding again."},1);
+  }
+  return emit(out,q.j,{command:"node bind",ok:true,summary:"packet binding computed",details:[binding(d.packet)],next_action:"Use this as packet_binding_sha256 in a node-envelope-v1 document."},0);
+}
+
 type Result={command:string;ok:boolean;summary:string;details:string[];next_action:string};
 function emit(out:NodeJS.WritableStream,json:boolean,d:Result,code:number):number{if(json)out.write(goJson(d)+"\n");else{out.write(`${d.ok?"OK":"ERROR"}: ${d.summary}\n`);for(const x of d.details)out.write(`  - ${x}\n`);out.write(`Next action: ${d.next_action}\n`);}return code;}
 function failure(out:any,msg:string,next:string,json=false){return json?emit(out,true,{command:"usage",ok:false,summary:msg,details:["usage: "+next],next_action:"Run '"+next+"'."},2):(out.write(`error: ${msg}\nNext action: run '${next}'.\n`),2);}
 function hasHelp(a:string[]){return a.includes("--help")||a.includes("-h");}
 function parseFlags(a:string[],allowed:Set<string>,switches:Set<string>=new Set()):{f:AnyObj;j:boolean;err?:string}{const f:any={},j=a.includes("--json");for(let i=0;i<a.length;i++){const x=a[i];if(x==="--json")continue;if(switches.has(x)){f[x]="true";continue;}if(!allowed.has(x))return{f,j,err:`unknown flag or argument '${x}'`};if(i+1>=a.length||a[i+1].startsWith("-"))return{f,j,err:`${x} requires a value`};f[x]=a[++i];}return{f,j};}
-function help(a:string[],out:any){let t=rootUsage;if(a[0]==="doctor")t="Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.";else if(a[0]==="version")t="Usage: ownscout version\n\nPrints the OwnScout version.";else if(a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";else if(a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";else if(a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.";if(a[1]==="validate"&&a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";if(a[1]==="verify"&&a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";if(a[1]==="verify"&&a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.";out.write(t+"\n");return 0;}
+function help(a:string[],out:any){
+  let t=rootUsage;
+  if(a[0]==="doctor")t="Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.";
+  else if(a[0]==="version")t="Usage: ownscout version\n\nPrints the OwnScout version.";
+  else if(a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";
+  else if(a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";
+  else if(a[0]==="ledger")t="Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.";
+  else if(a[0]==="node")t="Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.";
+  if(a[1]==="validate"&&a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
+  if(a[1]==="verify"&&a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";
+  if(a[1]==="verify"&&a[0]==="ledger")t="Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.";
+  if(a[1]==="bind"&&a[0]==="node")t="Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.";
+  if(a[1]==="verify"&&a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun.";
+  out.write(t+"\n");return 0;
+}
 
 function run(args:string[],out:any):number {
   if(!args.length){out.write("error: a command is required\n\n"+rootUsage+"\n\nNext action: run 'ownscout --help'.\n");return 2;}
@@ -760,6 +945,7 @@ function run(args:string[],out:any):number {
   if(args[0]==="version"){if(args.length!==1)return failure(out,"version does not accept arguments","ownscout version --help");out.write("ownscout "+VERSION+"\n");return 0;}
   if(args[0]==="contract")return contractCmd(args.slice(1),out);
   if(args[0]==="evidence")return evidenceCmd(args.slice(1),out);
+  if(args[0]==="ledger")return ledgerCmd(args.slice(1),out);
   if(args[0]==="node")return nodeCmd(args.slice(1),out);
   return failure(out,`unknown command '${args[0]}'`,"ownscout --help");
 }
@@ -778,18 +964,21 @@ function evidenceCmd(a:string[],out:any):number{
   let p:any;try{p=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
   const v=validatePacket(p);if(v.length)return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet is invalid",details:details(v),next_action:"Fix the packet contract, then verify evidence again."},1);
   let r:any;try{r=verifyEvidence(q.f["--repo"],p,{relocate:q.f["--relocate"]==="true"});}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
-  const issues=r.results.filter((x:any)=>x.status!=="verified").map((x:any)=>`evidence "${x.evidence_id}" ("${x.path}"): ${x.message||"status: "+x.status}`);
+  const issues=evidenceIssues(r);
   if(!r.ok)return emit(out,q.j,{command:"evidence verify",ok:false,summary:`evidence verification failed (${issues.length} issue(s))`,details:issues,next_action:"Refresh or correct the listed evidence, then verify again."},1);
   return emit(out,q.j,{command:"evidence verify",ok:true,summary:"evidence verified",details:[`verified ${r.verified} evidence span(s)`],next_action:"The packet is ready for its declared default action."},0);
 }
 function nodeCmd(a:string[],out:any):number{
   if(!a.length)return failure(out,"a node subcommand is required","ownscout node --help");
+  if(a[0]==="bind")return nodeBindCmd(a.slice(1),out);
   if(a[0]!=="verify")return failure(out,`unknown node subcommand '${a[0]}'`,"ownscout node --help",a.includes("--json"));
-  const q=parseFlags(a.slice(1),new Set(["--repo","--packet","--envelope","--ledger"]));if(q.err)return failure(out,q.err,"ownscout node verify --help",q.j);
+  const q=parseFlags(a.slice(1),new Set(["--repo","--packet","--envelope","--ledger"]),new Set(["--relocate"]));if(q.err)return failure(out,q.err,"ownscout node verify --help",q.j);
   for(const x of ["--repo","--packet","--envelope","--ledger"])if(!q.f[x])return failure(out,`missing required ${x} value`,"ownscout node verify --help",q.j);
+  const relocate=q.f["--relocate"]==="true";
   let p:any,env:any,ord:number[],b:string;try{const pd=fs.readFileSync(q.f["--packet"]);const ed=fs.readFileSync(q.f["--envelope"]);const d=decodePacketValid(pd);if(d.violations.length){if(d.violations.length===1&&d.violations[0].rule==="packet_decode")return emit(out,q.j,{command:"node verify",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);return emit(out,q.j,{command:"node verify",ok:false,summary:`packet contract failed (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the packet contract, then run node verification again."},2);}p=d.packet;try{env=parseEnvelope(ed);}catch(e:any){throw new Error("ENVELOPE_PARSE: "+e.message);}b=binding(p);ord=validateEnvelope(env,p,b);
-    let ledger:any;try{ledger=ledgerOpen(q.f["--ledger"],q.f["--repo"]);}catch{ return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be opened",details:["ledger open failed"],next_action:"Provide a writable ledger path outside the repository and try again."},2); }const report=verifyEvidence(q.f["--repo"],p);const ev=evaluate(env,p,b,report,ord);const results=ev.results.map((x:any)=>({node_id:x.node_id,status:x.status,...(x.reason?{reason:x.reason}:{})}));appendLedger(ledger,b,sha256(ed),results);
-    const det=ev.results.map((x:any)=>`node "${x.node_id}": ${x.status}${x.reason?" ("+x.reason+")":""}`);
+    let ledger:any;try{ledger=ledgerOpen(q.f["--ledger"],q.f["--repo"]);}catch{ return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be opened",details:["ledger open failed"],next_action:"Provide a writable ledger path outside the repository and try again."},2); }const report=verifyEvidence(q.f["--repo"],p,{relocate});const ev=evaluate(env,p,b,report,ord);const results=ev.results.map((x:any)=>({node_id:x.node_id,status:x.status,...(x.reason?{reason:x.reason}:{})}));appendLedger(ledger,b,sha256(ed),results);
+    let det=ev.results.map((x:any)=>`node "${x.node_id}": ${x.status}${x.reason?" ("+x.reason+")":""}`);
+    if(!ev.ok&&relocate)det=det.concat(evidenceIssues(report));
     return emit(out,q.j,{command:"node verify",ok:ev.ok,summary:ev.ok?"all nodes are evidence_current":"node evaluation failed",details:det,next_action:ev.ok?"The node envelope is recorded and ready for its declared workflow.":"Refresh or correct the failed evidence, then run node verification again."},ev.ok?0:1);
   }catch(e:any){let summary="envelope validation failed",detail="node-envelope-v1 validation failed",next="Fix the envelope binding or graph, then run node verification again.";if(String(e.message).startsWith("ENVELOPE_PARSE")){summary="envelope could not be parsed";detail="strict envelope parsing failed";next="Provide one valid node-envelope-v1 JSON object with --envelope <file>."}return emit(out,q.j,{command:"node verify",ok:false,summary,details:[detail],next_action:next},2);}
 }

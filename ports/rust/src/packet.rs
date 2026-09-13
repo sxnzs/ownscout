@@ -84,7 +84,7 @@ fn fold_rune(c: char) -> char {
         _ => c,
     }
 }
-fn fold_name(name: &str) -> String {
+pub(crate) fn fold_name(name: &str) -> String {
     name.chars().map(fold_rune).collect()
 }
 

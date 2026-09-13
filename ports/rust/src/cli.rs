@@ -2,7 +2,7 @@ use crate::result::{render, usage, ResultData};
 use crate::{contract, evidence, ledger, node, packet, sha256};
 use std::fs;
 
-const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nUse \"ownscout <command> --help\" for command details.";
+const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nUse \"ownscout <command> --help\" for command details.";
 
 pub fn run(args: &[String]) -> (String, i32) {
     if args.is_empty() {
@@ -24,6 +24,7 @@ pub fn run(args: &[String]) -> (String, i32) {
         "version" => (usage("version does not accept arguments", "ownscout version --help"), 2),
         "contract" => contract_command(args),
         "evidence" => evidence_command(args),
+        "ledger" => ledger_command(args),
         "node" => node_command(args),
         other => (usage(&format!("unknown command '{}'", other), "ownscout --help"), 2),
     }
@@ -174,19 +175,19 @@ fn load_packet_typed(path: &str) -> Result<packet::Packet, PacketError> {
 // load_packet_strict decodes a packet the way the node command boundary does,
 // using the strict nodepacket decoder. Go reads the packet with a 1 MiB bound
 // first, so an oversize input is a read failure rather than a decode failure.
-fn load_packet_strict(path: &str) -> Result<packet::Packet, PacketError> {
-    let data = fs::read(path).map_err(|e| {
-        PacketError::Read(if e.kind() == std::io::ErrorKind::NotFound {
-            format!("packet file {:?} does not exist", path)
-        } else {
-            format!("read packet {:?}: {}", path, e)
-        })
-    })?;
-    if data.len() > 1 << 20 {
-        return Err(PacketError::Read(
-            "packet exceeds 1048576 byte input limit".into(),
-        ));
+// read_bounded mirrors the reference's readBounded on the node command
+// boundary: a missing, unreadable or oversize (over 1 MiB) file is a read
+// failure rather than a decode failure.
+fn read_bounded(path: &str) -> Result<Vec<u8>, ()> {
+    match fs::read(path) {
+        Ok(data) if data.len() <= 1 << 20 => Ok(data),
+        _ => Err(()),
     }
+}
+
+fn load_packet_strict(path: &str) -> Result<packet::Packet, PacketError> {
+    let data = read_bounded(path)
+        .map_err(|_| PacketError::Read("packet input could not be read".into()))?;
     packet::decode_strict(&data).map_err(PacketError::Decode)
 }
 
@@ -358,23 +359,7 @@ fn evidence_command(args: &[String]) -> (String, i32) {
             ))
         }
     };
-    let issues = report
-        .results
-        .iter()
-        .filter(|x| x.status != "verified")
-        .map(|x| {
-            format!(
-                "evidence {:?} ({:?}): {}",
-                x.evidence_id,
-                x.path,
-                if x.message.is_empty() {
-                    format!("status: {}", x.status)
-                } else {
-                    x.message.clone()
-                }
-            )
-        })
-        .collect::<Vec<_>>();
+    let issues = evidence_issues(&report);
     if !report.ok {
         return result(render(
             &ResultData {
@@ -417,30 +402,240 @@ fn load_evidence_error(json: bool, d: &str) -> (String, i32) {
     ))
 }
 
-fn node_command(args: &[String]) -> (String, i32) {
+// evidenceIssues renders the per-span diagnostics appended to a failed node
+// evaluation when relocation is requested.
+fn evidence_issues(report: &evidence::Report) -> Vec<String> {
+    report
+        .results
+        .iter()
+        .filter(|x| x.status != "verified")
+        .map(|x| {
+            format!(
+                "evidence {:?} ({:?}): {}",
+                x.evidence_id,
+                x.path,
+                if x.message.is_empty() {
+                    format!("status: {}", x.status)
+                } else {
+                    x.message.clone()
+                }
+            )
+        })
+        .collect()
+}
+
+fn ledger_command(args: &[String]) -> (String, i32) {
     if args.len() < 2 {
-        return (
-            usage("a node subcommand is required", "ownscout node --help"),
-            2,
-        );
-    }
-    if args[1] != "verify" {
-        return (
-            usage(
-                &format!("unknown node subcommand '{}'", args[1]),
-                "ownscout node --help",
-            ),
-            2,
-        );
+        return usage_result(false, "a ledger subcommand is required", "ownscout ledger --help");
     }
     let json = args.iter().any(|a| a == "--json");
-    let mut repo = None;
-    let mut packet_path = None;
-    let mut envelope_path = None;
+    if args[1] != "verify" {
+        return usage_result(
+            json,
+            &format!("unknown ledger subcommand '{}'", args[1]),
+            "ownscout ledger --help",
+        );
+    }
     let mut ledger_path = None;
     let mut i = 2;
     while i < args.len() {
         if args[i] == "--json" {
+            i += 1;
+            continue;
+        }
+        if args[i] == "--ledger" {
+            if i + 1 >= args.len() || args[i + 1].starts_with('-') {
+                return usage_result(
+                    json,
+                    "--ledger requires a value",
+                    "ownscout ledger verify --help",
+                );
+            }
+            ledger_path = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            return usage_result(
+                json,
+                &format!("unknown flag or argument '{}'", args[i]),
+                "ownscout ledger verify --help",
+            );
+        }
+    }
+    let Some(path) = ledger_path.filter(|value| !value.is_empty()) else {
+        return usage_result(
+            json,
+            "missing required --ledger value",
+            "ownscout ledger verify --help",
+        );
+    };
+    match ledger::verify(&path) {
+        Ok(summary) => {
+            let tip = if summary.tip.is_empty() {
+                "none".to_string()
+            } else {
+                summary.tip.clone()
+            };
+            result(render(
+                &ResultData {
+                    command: "ledger verify".into(),
+                    ok: true,
+                    summary: "ledger is intact".into(),
+                    details: vec![format!("{} record(s), tip {}", summary.records, tip)],
+                    next_action: "The ledger chain is intact.".into(),
+                },
+                json,
+                0,
+            ))
+        }
+        Err(ledger::VerifyError::Validation(detail)) => result(render(
+            &ResultData {
+                command: "ledger verify".into(),
+                ok: false,
+                summary: "ledger verification failed".into(),
+                details: vec![detail],
+                next_action: "Repair the ledger, then run ledger verification again.".into(),
+            },
+            json,
+            1,
+        )),
+        Err(ledger::VerifyError::Read(detail)) => result(render(
+            &ResultData {
+                command: "ledger verify".into(),
+                ok: false,
+                summary: "ledger could not be read".into(),
+                details: vec![detail],
+                next_action: "Provide a readable ledger file with --ledger <file>.".into(),
+            },
+            json,
+            2,
+        )),
+    }
+}
+
+fn node_command(args: &[String]) -> (String, i32) {
+    if args.len() < 2 {
+        return usage_result(false, "a node subcommand is required", "ownscout node --help");
+    }
+    let json = args.iter().any(|a| a == "--json");
+    match args[1].as_str() {
+        "bind" => node_bind_command(&args[2..], json),
+        "verify" => node_verify_command(&args[2..], json),
+        other => usage_result(
+            json,
+            &format!("unknown node subcommand '{}'", other),
+            "ownscout node --help",
+        ),
+    }
+}
+
+fn node_bind_command(args: &[String], json: bool) -> (String, i32) {
+    let mut packet_path = None;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--json" {
+            i += 1;
+            continue;
+        }
+        if args[i] == "--packet" {
+            if i + 1 >= args.len() || args[i + 1].starts_with('-') {
+                return usage_result(json, "--packet requires a value", "ownscout node bind --help");
+            }
+            packet_path = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            return usage_result(
+                json,
+                &format!("unknown flag or argument '{}'", args[i]),
+                "ownscout node bind --help",
+            );
+        }
+    }
+    let Some(path) = packet_path.filter(|value| !value.is_empty()) else {
+        return usage_result(
+            json,
+            "missing required --packet value",
+            "ownscout node bind --help",
+        );
+    };
+    let data = match read_bounded(&path) {
+        Ok(data) => data,
+        Err(()) => {
+            return result(render(
+                &ResultData {
+                    command: "node bind".into(),
+                    ok: false,
+                    summary: "packet could not be loaded".into(),
+                    details: vec!["packet input could not be read".into()],
+                    next_action: "Provide a readable packet file with --packet <file>.".into(),
+                },
+                json,
+                2,
+            ))
+        }
+    };
+    let packet = match packet::decode_strict(&data) {
+        Ok(packet) => packet,
+        Err(_) => {
+            return result(render(
+                &ResultData {
+                    command: "node bind".into(),
+                    ok: false,
+                    summary: "packet could not be decoded".into(),
+                    details: vec!["strict packet decoding failed".into()],
+                    next_action: "Provide one valid packet-v1 JSON object with --packet <file>."
+                        .into(),
+                },
+                json,
+                2,
+            ))
+        }
+    };
+    let violations = contract::validate(&packet);
+    if !violations.is_empty() {
+        let details = violations
+            .iter()
+            .map(|v| format!("{}: {}: {}", v.rule, v.field, v.message))
+            .collect();
+        return result(render(
+            &ResultData {
+                command: "node bind".into(),
+                ok: false,
+                summary: format!("packet contract failed ({} violation(s))", violations.len()),
+                details,
+                next_action: "Fix the packet contract, then run node binding again.".into(),
+            },
+            json,
+            1,
+        ));
+    }
+    let binding = node::binding(&packet);
+    result(render(
+        &ResultData {
+            command: "node bind".into(),
+            ok: true,
+            summary: "packet binding computed".into(),
+            details: vec![binding],
+            next_action: "Use this as packet_binding_sha256 in a node-envelope-v1 document.".into(),
+        },
+        json,
+        0,
+    ))
+}
+
+fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
+    let mut repo = None;
+    let mut packet_path = None;
+    let mut envelope_path = None;
+    let mut ledger_path = None;
+    let mut relocate = false;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--json" {
+            i += 1;
+            continue;
+        }
+        if args[i] == "--relocate" {
+            relocate = true;
             i += 1;
             continue;
         }
@@ -494,30 +689,6 @@ fn node_command(args: &[String]) -> (String, i32) {
             "ownscout node verify --help",
         );
     };
-    let eb = match fs::read(&envelope_path) {
-        Ok(v) => v,
-        Err(_) => {
-            return node_error(
-                json,
-                "envelope could not be parsed",
-                "strict envelope parsing failed",
-                2,
-                "Provide one valid node-envelope-v1 JSON object with --envelope <file>.",
-            )
-        }
-    };
-    let env = match node::parse(&eb) {
-        Ok(v) => v,
-        Err(_) => {
-            return node_error(
-                json,
-                "envelope could not be parsed",
-                "strict envelope parsing failed",
-                2,
-                "Provide one valid node-envelope-v1 JSON object with --envelope <file>.",
-            )
-        }
-    };
     let p = match load_packet_strict(&packet_path) {
         Ok(v) => v,
         Err(PacketError::Read(_)) => {
@@ -557,6 +728,30 @@ fn node_command(args: &[String]) -> (String, i32) {
             2,
         ));
     }
+    let eb = match read_bounded(&envelope_path) {
+        Ok(v) => v,
+        Err(()) => {
+            return node_error(
+                json,
+                "envelope could not be loaded",
+                "envelope input could not be read",
+                2,
+                "Provide a readable envelope file with --envelope <file>.",
+            )
+        }
+    };
+    let env = match node::parse(&eb) {
+        Ok(v) => v,
+        Err(_) => {
+            return node_error(
+                json,
+                "envelope could not be parsed",
+                "strict envelope parsing failed",
+                2,
+                "Provide one valid node-envelope-v1 JSON object with --envelope <file>.",
+            )
+        }
+    };
     let binding = node::binding(&p);
     if node::validate(&env, &p, &binding).is_err() {
         return node_error(
@@ -567,7 +762,19 @@ fn node_command(args: &[String]) -> (String, i32) {
             "Fix the envelope binding or graph, then run node verification again.",
         );
     }
-    let report = match evidence::verify(&repo, &p) {
+    let mut store = match ledger::open(&ledger_path, &repo) {
+        Ok(v) => v,
+        Err(_) => {
+            return node_error(
+                json,
+                "ledger could not be opened",
+                "ledger open failed",
+                2,
+                "Provide a writable ledger path outside the repository and try again.",
+            )
+        }
+    };
+    let report = match evidence::verify_with_options(&repo, &p, &evidence::Options { relocate }) {
         Ok(v) => v,
         Err(e) => {
             return node_error(
@@ -589,18 +796,6 @@ fn node_command(args: &[String]) -> (String, i32) {
             reason: x.reason.clone(),
         })
         .collect();
-    let mut store = match ledger::open(&ledger_path, &repo) {
-        Ok(v) => v,
-        Err(_) => {
-            return node_error(
-                json,
-                "ledger could not be opened",
-                "ledger open failed",
-                2,
-                "Provide a writable ledger path outside the repository and try again.",
-            )
-        }
-    };
     if store
         .append(
             &sha256::hex(&sha256::digest(&eb)),
@@ -618,7 +813,7 @@ fn node_command(args: &[String]) -> (String, i32) {
             "Provide a writable append-only ledger path outside the repository.",
         );
     }
-    let details = eval
+    let mut details: Vec<String> = eval
         .results
         .iter()
         .map(|x| {
@@ -629,6 +824,11 @@ fn node_command(args: &[String]) -> (String, i32) {
             }
         })
         .collect();
+    // The reference appends the evidence diagnostics only when relocation was
+    // requested and the evaluation failed; they are diagnostic only.
+    if !eval.ok && relocate {
+        details.extend(evidence_issues(&report));
+    }
     if eval.ok {
         result(render(
             &ResultData {
@@ -680,7 +880,8 @@ fn help(args: &[String]) -> (String, i32) {
             "version" => "Usage: ownscout version\n\nPrints the OwnScout version.".into(),
             "contract" => "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.".into(),
             "evidence" => "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.".into(),
-            "node" => "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.".into(),
+            "ledger" => "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.".into(),
+            "node" => "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.".into(),
             _ => ROOT_USAGE.to_string(),
         };
     }
@@ -690,8 +891,14 @@ fn help(args: &[String]) -> (String, i32) {
     if args.len() >= 2 && args[0] == "evidence" && args[1] == "verify" {
         text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.".into();
     }
+    if args.len() >= 2 && args[0] == "ledger" && args[1] == "verify" {
+        text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.".into();
+    }
+    if args.len() >= 2 && args[0] == "node" && args[1] == "bind" {
+        text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.".into();
+    }
     if args.len() >= 2 && args[0] == "node" && args[1] == "verify" {
-        text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.".into();
+        text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun.".into();
     }
     (format!("{}\n", text), 0)
 }

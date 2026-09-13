@@ -7,7 +7,7 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const RootUsage =
     "OwnScout — local repository evidence checks\n\n" ++
-    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\n" ++
+    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\n" ++
     "Use \"ownscout <command> --help\" for command details.";
 
 pub const RunResult = struct { output: []u8, code: u8 };
@@ -24,11 +24,14 @@ fn usage(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
         if (std.mem.eql(u8, args[0], "version")) text = "Usage: ownscout version\n\nPrints the OwnScout version.";
         if (std.mem.eql(u8, args[0], "contract")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";
         if (std.mem.eql(u8, args[0], "evidence")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";
-        if (std.mem.eql(u8, args[0], "node")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.";
+        if (std.mem.eql(u8, args[0], "ledger")) text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.";
+        if (std.mem.eql(u8, args[0], "node")) text = "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.";
     }
     if (args.len >= 2 and std.mem.eql(u8, args[0], "contract") and std.mem.eql(u8, args[1], "validate")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "evidence") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";
-    if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.";
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "ledger") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.";
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "bind")) text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.";
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun.";
     return try std.fmt.allocPrint(allocator, "{s}\n", .{text});
 }
 
@@ -52,36 +55,74 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8) !RunResult {
     }
     if (std.mem.eql(u8, args[0], "contract")) return subcommand(allocator, args[1..], "contract");
     if (std.mem.eql(u8, args[0], "evidence")) return subcommand(allocator, args[1..], "evidence");
-    if (std.mem.eql(u8, args[0], "node")) return subcommand(allocator, args[1..], "node");
+    if (std.mem.eql(u8, args[0], "ledger")) return ledgerRun(allocator, args[1..]);
+    if (std.mem.eql(u8, args[0], "node")) return nodeRun(allocator, args[1..]);
     return fail(allocator, try std.fmt.allocPrint(allocator, "unknown command '{s}'", .{args[0]}), "ownscout --help", false);
 }
 
 fn subcommand(allocator: std.mem.Allocator, args: []const []const u8, name: []const u8) !RunResult {
     const json_output = has(args, "--json");
     if (args.len == 0) {
-        var next = std.ArrayList(u8).empty;
-        try next.appendSlice(allocator, "ownscout ");
-        try next.appendSlice(allocator, name);
-        try next.appendSlice(allocator, " --help");
-        return fail(allocator, if (std.mem.eql(u8, name, "contract")) "a contract subcommand is required" else if (std.mem.eql(u8, name, "evidence")) "an evidence subcommand is required" else "a node subcommand is required", try next.toOwnedSlice(allocator), false);
+        return fail(allocator, if (std.mem.eql(u8, name, "contract")) "a contract subcommand is required" else "an evidence subcommand is required", try std.fmt.allocPrint(allocator, "ownscout {s} --help", .{name}), false);
     }
     const wanted = if (std.mem.eql(u8, name, "contract")) "validate" else "verify";
     if (!std.mem.eql(u8, args[0], wanted)) {
-        var message = std.ArrayList(u8).empty;
-        try message.appendSlice(allocator, "unknown ");
-        try message.appendSlice(allocator, name);
-        try message.appendSlice(allocator, " subcommand '");
-        try message.appendSlice(allocator, args[0]);
-        try message.append(allocator, '\'');
-        var next = std.ArrayList(u8).empty;
-        try next.appendSlice(allocator, "ownscout ");
-        try next.appendSlice(allocator, name);
-        try next.appendSlice(allocator, " --help");
-        return fail(allocator, try message.toOwnedSlice(allocator), try next.toOwnedSlice(allocator), json_output);
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown {s} subcommand '{s}'", .{ name, args[0] }), try std.fmt.allocPrint(allocator, "ownscout {s} --help", .{name}), json_output);
     }
     if (std.mem.eql(u8, name, "contract")) return contractValidate(allocator, args[1..], json_output);
-    if (std.mem.eql(u8, name, "evidence")) return evidenceVerify(allocator, args[1..], json_output);
-    return nodeVerify(allocator, args[1..], json_output);
+    return evidenceVerify(allocator, args[1..], json_output);
+}
+
+fn nodeRun(allocator: std.mem.Allocator, args: []const []const u8) !RunResult {
+    if (args.len == 0) return fail(allocator, "a node subcommand is required", "ownscout node --help", false);
+    const json_output = has(args, "--json");
+    if (std.mem.eql(u8, args[0], "bind")) return nodeBind(allocator, args[1..], json_output);
+    if (std.mem.eql(u8, args[0], "verify")) return nodeVerify(allocator, args[1..], json_output);
+    return fail(allocator, try std.fmt.allocPrint(allocator, "unknown node subcommand '{s}'", .{args[0]}), "ownscout node --help", json_output);
+}
+
+fn ledgerRun(allocator: std.mem.Allocator, args: []const []const u8) !RunResult {
+    if (args.len == 0) return fail(allocator, "a ledger subcommand is required", "ownscout ledger --help", false);
+    const json_output = has(args, "--json");
+    if (!std.mem.eql(u8, args[0], "verify")) return fail(allocator, try std.fmt.allocPrint(allocator, "unknown ledger subcommand '{s}'", .{args[0]}), "ownscout ledger --help", json_output);
+    return ledgerVerify(allocator, args[1..], json_output);
+}
+
+fn nodeBind(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
+    var packet_path: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--packet")) {
+            if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, "--packet requires a value", "ownscout node bind --help", json_output);
+            packet_path = args[index + 1];
+            index += 1;
+            continue;
+        }
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout node bind --help", json_output);
+    }
+    if (packet_path == null or packet_path.?.len == 0) return fail(allocator, "missing required --packet value", "ownscout node bind --help", json_output);
+    const packet = loadNodePacket(allocator, packet_path.?) catch |err| {
+        if (err == error.NotFound or err == error.ReadFailed) {
+            const details = [_][]const u8{"packet input could not be read"};
+            return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable packet file with --packet <file>." }, json_output), .code = 2 };
+        }
+        const details = [_][]const u8{"strict packet decoding failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
+    };
+    const violations = try contract.validate(allocator, packet);
+    if (violations.len != 0) {
+        const details = try invalidPacketDetails(allocator, violations);
+        const summary = try std.fmt.allocPrint(allocator, "packet contract failed ({d} violation(s))", .{violations.len});
+        return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = false, .summary = summary, .details = details, .next_action = "Fix the packet contract, then run node binding again." }, json_output), .code = 1 };
+    }
+    const binding = canonicalBinding(allocator, packet) catch {
+        const details = [_][]const u8{"canonical packet binding failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = false, .summary = "packet binding could not be computed", .details = &details, .next_action = "Provide a valid packet-v1 document and try again." }, json_output), .code = 2 };
+    };
+    const details = [_][]const u8{try std.fmt.allocPrint(allocator, "{s}", .{&binding})};
+    return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = true, .summary = "packet binding computed", .details = &details, .next_action = "Use this as packet_binding_sha256 in a node-envelope-v1 document." }, json_output), .code = 0 };
 }
 
 const LoadError = error{NotFound, ReadFailed, InvalidJson, ObjectRequired, UnknownField, WrongType};
@@ -895,28 +936,7 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
             verified += 1;
             continue;
         }
-        const msg = switch (outcome.outcome) {
-            .verified => unreachable,
-            .invalid_path => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
-            .not_found => blk: {
-                var cwd_buf: [4096]u8 = undefined;
-                const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch 0;
-                break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd_buf[0..cwd_len], root, item.path });
-            },
-            .bad_hash => try std.fmt.allocPrint(allocator, "invalid SHA-256 content hash \"{s}\"", .{item.content_hash}),
-            .bad_range => |line_count| try std.fmt.allocPrint(allocator, "invalid line range {d}-{d} for {d} line(s)", .{ item.line_start, item.line_end, line_count }),
-            .hash_mismatch => |actual| blk: {
-                if (actual) |hash| {
-                    break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}, got {s}", .{ item.content_hash, hash });
-                }
-                break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}", .{item.content_hash});
-            },
-        };
-        const detail = if (outcome.clause.len != 0)
-            try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}{s}", .{ item.evidence_id, item.path, msg, outcome.clause })
-        else
-            try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg });
-        try issues.append(allocator, detail);
+        try issues.append(allocator, try evidenceIssue(allocator, root, item, outcome));
     }
     if (issues.items.len != 0) {
         const summary = try std.fmt.allocPrint(allocator, "evidence verification failed ({d} issue(s))", .{issues.items.len});
@@ -1147,6 +1167,32 @@ fn locationClause(allocator: std.mem.Allocator, data: []const u8, total_lines: u
     return try relocationClause(allocator, data, total_lines, line_start, line_end, expected);
 }
 
+/// The evidenceIssues detail for one failed or skipped span, matching
+/// internal/cli/adapter.go evidenceIssues.
+fn evidenceIssue(allocator: std.mem.Allocator, root: []const u8, item: contract.Evidence, outcome: VerifyResult) ![]const u8 {
+    const msg = switch (outcome.outcome) {
+        .verified => unreachable,
+        .invalid_path => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
+        .not_found => blk: {
+            var cwd_buf: [4096]u8 = undefined;
+            const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch 0;
+            break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd_buf[0..cwd_len], root, item.path });
+        },
+        .bad_hash => try std.fmt.allocPrint(allocator, "invalid SHA-256 content hash \"{s}\"", .{item.content_hash}),
+        .bad_range => |line_count| try std.fmt.allocPrint(allocator, "invalid line range {d}-{d} for {d} line(s)", .{ item.line_start, item.line_end, line_count }),
+        .hash_mismatch => |actual| blk: {
+            if (actual) |hash| {
+                break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}, got {s}", .{ item.content_hash, hash });
+            }
+            break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}", .{item.content_hash});
+        },
+    };
+    return if (outcome.clause.len != 0)
+        try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}{s}", .{ item.evidence_id, item.path, msg, outcome.clause })
+    else
+        try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg });
+}
+
 fn countNormalizedLines(data: []const u8) usize {
     if (data.len == 0) return 0;
     var count: usize = 0;
@@ -1184,16 +1230,21 @@ fn appendSelectedLines(data: []const u8, line_start: i64, line_end: i64, out: *s
 }
 
 fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
-    // Mirror the reference parseFlags: only the four valued flags and --json
-    // are accepted, so --relocate is rejected here exactly as before it existed.
+    // Mirror the reference parseFlags: the four valued flags, the --relocate
+    // switch, and --json.
     var repo_value: ?[]const u8 = null;
     var packet_value: ?[]const u8 = null;
     var envelope_value: ?[]const u8 = null;
     var ledger_value: ?[]const u8 = null;
+    var relocate = false;
     var index: usize = 0;
     while (index < args.len) : (index += 1) {
         const arg = args[index];
         if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--relocate")) {
+            relocate = true;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--repo") or std.mem.eql(u8, arg, "--packet") or std.mem.eql(u8, arg, "--envelope") or std.mem.eql(u8, arg, "--ledger")) {
             if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, try std.fmt.allocPrint(allocator, "{s} requires a value", .{arg}), "ownscout node verify --help", json_output);
             if (std.mem.eql(u8, arg, "--repo")) {
@@ -1295,7 +1346,18 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         const ledger_details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &ledger_details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     };
-    if (std.mem.indexOfScalar(bool, failed, true) != null) return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "node evaluation failed", .details = details.items, .next_action = "Refresh or correct the failed evidence, then run node verification again." }, json_output), .code = 1 };
+    if (std.mem.indexOfScalar(bool, failed, true) != null) {
+        // With --relocate the failed evaluation also reports every evidence
+        // issue, appended after the node details.
+        if (relocate) {
+            for (packet.evidence) |item| {
+                const outcome = try verifyEvidence(allocator, dir, item, true);
+                if (outcome.outcome == .verified) continue;
+                try details.append(allocator, try evidenceIssue(allocator, root, item, outcome));
+            }
+        }
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "node evaluation failed", .details = details.items, .next_action = "Refresh or correct the failed evidence, then run node verification again." }, json_output), .code = 1 };
+    }
     return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = true, .summary = "all nodes are evidence_current", .details = details.items, .next_action = "The node envelope is recorded and ready for its declared workflow." }, json_output), .code = 0 };
 }
 
@@ -1500,6 +1562,7 @@ fn visitNode(nodes: []const Node, index: usize, marks: []u8) !void {
 // ---------------------------------------------------------------------------
 
 const ledger_zero_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+const ledger_max_size = 1 << 20;
 const ledger_max_record_size = 64 << 10;
 const ledger_max_node_results = 4096;
 
@@ -1641,47 +1704,496 @@ fn appendGoJsonString(list: *std.ArrayList(u8), allocator: std.mem.Allocator, va
     try list.append(allocator, '"');
 }
 
-fn parseLedgerRecord(allocator: std.mem.Allocator, line: []const u8) !LedgerRecord {
-    // encoding/json coerces invalid UTF-8 to U+FFFD before decoding.
-    const normalized = try normalizeJsonUtf8(allocator, line);
-    const root = json.Parser.parse(allocator, normalized) catch return error.InvalidLedger;
-    if (root != .object) return error.InvalidLedger;
+/// A ledger audit summary: how many records validated and the tip hash.
+const LedgerSummary = struct { records: u64 = 0, tip: []const u8 = "" };
+const LedgerScan = union(enum) { ok: LedgerSummary, invalid: []const u8 };
+
+fn ledgerQuote(allocator: std.mem.Allocator, value: []const u8) []const u8 {
+    return quoteGoString(allocator, value) catch value;
+}
+
+/// The message of Go's ledger.validateIdentifier, or null when valid.
+fn ledgerIdentifierError(value: []const u8) ?[]const u8 {
+    if (value.len < 1 or value.len > 128) return "must contain 1-128 ASCII identifier characters";
+    for (value, 0..) |c, i| {
+        const alphanumeric = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9');
+        if (i == 0) {
+            if (!alphanumeric) return "must start with an ASCII alphanumeric character";
+            continue;
+        }
+        if (!alphanumeric and c != '.' and c != '_' and c != '-' and c != ':') return "contains an invalid character";
+    }
+    return null;
+}
+
+fn foldedLedgerField(key: []const u8, fields: []const []const u8) ?[]const u8 {
+    for (fields) |name| if (gofold.foldedEqual(key, name)) return name;
+    return null;
+}
+
+fn isUint64Token(number: []const u8) bool {
+    _ = std.fmt.parseUnsigned(u64, number, 10) catch return false;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Go's encoding/json scanner error messages, needed because a malformed ledger
+// line is reported with the reference's exact JSON syntax error text.
+// ---------------------------------------------------------------------------
+
+const GoScanState = enum {
+    begin_value,
+    begin_value_or_empty,
+    begin_string_or_empty,
+    begin_string,
+    end_value,
+    end_top,
+    in_string,
+    in_string_esc,
+    in_string_esc_u,
+    in_string_esc_u1,
+    in_string_esc_u12,
+    in_string_esc_u123,
+    neg,
+    one,
+    zero,
+    dot,
+    dot0,
+    e,
+    e_sign,
+    e0,
+    t,
+    tr,
+    tru,
+    f,
+    fa,
+    fal,
+    fals,
+    n,
+    nu,
+    nul,
+    failed,
+};
+
+const go_parse_object_key: u8 = 0;
+const go_parse_object_value: u8 = 1;
+const go_parse_array_value: u8 = 2;
+
+fn goQuoteChar(allocator: std.mem.Allocator, c: u8) ![]const u8 {
+    if (c == '\'') return "'\\''";
+    if (c == '"') return "'\"'";
+    var out = std.ArrayList(u8).empty;
+    try out.append(allocator, '\'');
+    try appendQuotedRune(&out, allocator, @as(u21, c));
+    try out.append(allocator, '\'');
+    return try out.toOwnedSlice(allocator);
+}
+
+fn isScanSpace(c: u8) bool {
+    return c == ' ' or c == '\t' or c == '\r' or c == '\n';
+}
+
+const GoScanner = struct {
+    state: GoScanState = .begin_value,
+    depth: usize = 0,
+    parse_state: [10000]u8 = undefined,
+    error_message: ?[]const u8 = null,
+    done: bool = false,
+
+    fn raise(self: *GoScanner, allocator: std.mem.Allocator, c: u8, context: []const u8) void {
+        self.state = .failed;
+        self.error_message = std.fmt.allocPrint(allocator, "invalid character {s} {s}", .{ goQuoteChar(allocator, c) catch "?", context }) catch "invalid character";
+    }
+
+    fn push(self: *GoScanner, allocator: std.mem.Allocator, c: u8, state: u8, next: GoScanState) void {
+        if (self.depth >= self.parse_state.len) {
+            self.raise(allocator, c, "exceeded max depth");
+            return;
+        }
+        self.parse_state[self.depth] = state;
+        self.depth += 1;
+        self.state = next;
+    }
+
+    fn pop(self: *GoScanner) void {
+        self.depth -= 1;
+        if (self.depth == 0) self.done = true else self.state = .end_value;
+    }
+
+    fn step(self: *GoScanner, allocator: std.mem.Allocator, c: u8) void {
+        while (true) {
+            switch (self.state) {
+                .begin_value => {
+                    if (isScanSpace(c)) return;
+                    switch (c) {
+                        '{' => self.push(allocator, c, go_parse_object_key, .begin_string_or_empty),
+                        '[' => self.push(allocator, c, go_parse_array_value, .begin_value_or_empty),
+                        '"' => self.state = .in_string,
+                        '-' => self.state = .neg,
+                        '0' => self.state = .zero,
+                        't' => self.state = .t,
+                        'f' => self.state = .f,
+                        'n' => self.state = .n,
+                        '1'...'9' => self.state = .one,
+                        else => self.raise(allocator, c, "looking for beginning of value"),
+                    }
+                    return;
+                },
+                .begin_value_or_empty => {
+                    if (isScanSpace(c)) return;
+                    if (c == ']') {
+                        self.state = .end_value;
+                        continue;
+                    }
+                    self.state = .begin_value;
+                    continue;
+                },
+                .begin_string_or_empty => {
+                    if (isScanSpace(c)) return;
+                    if (c == '}') {
+                        if (self.depth > 0) self.parse_state[self.depth - 1] = go_parse_object_value;
+                        self.state = .end_value;
+                        continue;
+                    }
+                    self.state = .begin_string;
+                    continue;
+                },
+                .begin_string => {
+                    if (isScanSpace(c)) return;
+                    if (c == '"') {
+                        self.state = .in_string;
+                        return;
+                    }
+                    self.raise(allocator, c, "looking for beginning of object key string");
+                    return;
+                },
+                .end_value => {
+                    if (self.depth == 0) {
+                        self.done = true;
+                        return;
+                    }
+                    if (isScanSpace(c)) return;
+                    const ps = self.parse_state[self.depth - 1];
+                    if (ps == go_parse_object_key) {
+                        if (c == ':') {
+                            self.parse_state[self.depth - 1] = go_parse_object_value;
+                            self.state = .begin_value;
+                            return;
+                        }
+                        self.raise(allocator, c, "after object key");
+                        return;
+                    } else if (ps == go_parse_object_value) {
+                        if (c == ',') {
+                            self.parse_state[self.depth - 1] = go_parse_object_key;
+                            self.state = .begin_string;
+                            return;
+                        }
+                        if (c == '}') {
+                            self.pop();
+                            return;
+                        }
+                        self.raise(allocator, c, "after object key:value pair");
+                        return;
+                    } else {
+                        if (c == ',') {
+                            self.state = .begin_value;
+                            return;
+                        }
+                        if (c == ']') {
+                            self.pop();
+                            return;
+                        }
+                        self.raise(allocator, c, "after array element");
+                        return;
+                    }
+                },
+                .end_top => {
+                    if (!isScanSpace(c)) self.raise(allocator, c, "after top-level value");
+                    return;
+                },
+                .in_string => {
+                    if (c == '"') {
+                        self.state = .end_value;
+                        return;
+                    }
+                    if (c == '\\') {
+                        self.state = .in_string_esc;
+                        return;
+                    }
+                    if (c < 0x20) {
+                        self.raise(allocator, c, "in string literal");
+                        return;
+                    }
+                    return;
+                },
+                .in_string_esc => {
+                    switch (c) {
+                        'b', 'f', 'n', 'r', 't', '\\', '/', '"' => self.state = .in_string,
+                        'u' => self.state = .in_string_esc_u,
+                        else => self.raise(allocator, c, "in string escape code"),
+                    }
+                    return;
+                },
+                .in_string_esc_u => {
+                    if (isHexDigit(c)) {
+                        self.state = .in_string_esc_u1;
+                    } else {
+                        self.raise(allocator, c, "in \\u hexadecimal character escape");
+                    }
+                    return;
+                },
+                .in_string_esc_u1 => {
+                    if (isHexDigit(c)) {
+                        self.state = .in_string_esc_u12;
+                    } else {
+                        self.raise(allocator, c, "in \\u hexadecimal character escape");
+                    }
+                    return;
+                },
+                .in_string_esc_u12 => {
+                    if (isHexDigit(c)) {
+                        self.state = .in_string_esc_u123;
+                    } else {
+                        self.raise(allocator, c, "in \\u hexadecimal character escape");
+                    }
+                    return;
+                },
+                .in_string_esc_u123 => {
+                    if (isHexDigit(c)) {
+                        self.state = .in_string;
+                    } else {
+                        self.raise(allocator, c, "in \\u hexadecimal character escape");
+                    }
+                    return;
+                },
+                .neg => {
+                    if (c == '0') {
+                        self.state = .zero;
+                        return;
+                    }
+                    if (c >= '1' and c <= '9') {
+                        self.state = .one;
+                        return;
+                    }
+                    self.raise(allocator, c, "in numeric literal");
+                    return;
+                },
+                .one => {
+                    if (c >= '0' and c <= '9') return;
+                    self.state = .zero;
+                    continue;
+                },
+                .zero => {
+                    if (c == '.') {
+                        self.state = .dot;
+                        return;
+                    }
+                    if (c == 'e' or c == 'E') {
+                        self.state = .e;
+                        return;
+                    }
+                    self.state = .end_value;
+                    continue;
+                },
+                .dot => {
+                    if (c >= '0' and c <= '9') {
+                        self.state = .dot0;
+                        return;
+                    }
+                    self.raise(allocator, c, "after decimal point in numeric literal");
+                    return;
+                },
+                .dot0 => {
+                    if (c >= '0' and c <= '9') return;
+                    if (c == 'e' or c == 'E') {
+                        self.state = .e;
+                        return;
+                    }
+                    self.state = .end_value;
+                    continue;
+                },
+                .e => {
+                    if (c == '+' or c == '-') {
+                        self.state = .e_sign;
+                        return;
+                    }
+                    self.state = .e_sign;
+                    continue;
+                },
+                .e_sign => {
+                    if (c >= '0' and c <= '9') {
+                        self.state = .e0;
+                        return;
+                    }
+                    self.raise(allocator, c, "in exponent of numeric literal");
+                    return;
+                },
+                .e0 => {
+                    if (c >= '0' and c <= '9') return;
+                    self.state = .end_value;
+                    continue;
+                },
+                .t => {
+                    if (c == 'r') self.state = .tr else self.raise(allocator, c, "in literal true (expecting 'r')");
+                    return;
+                },
+                .tr => {
+                    if (c == 'u') self.state = .tru else self.raise(allocator, c, "in literal true (expecting 'u')");
+                    return;
+                },
+                .tru => {
+                    if (c == 'e') self.state = .end_value else self.raise(allocator, c, "in literal true (expecting 'e')");
+                    return;
+                },
+                .f => {
+                    if (c == 'a') self.state = .fa else self.raise(allocator, c, "in literal false (expecting 'a')");
+                    return;
+                },
+                .fa => {
+                    if (c == 'l') self.state = .fal else self.raise(allocator, c, "in literal false (expecting 'l')");
+                    return;
+                },
+                .fal => {
+                    if (c == 's') self.state = .fals else self.raise(allocator, c, "in literal false (expecting 's')");
+                    return;
+                },
+                .fals => {
+                    if (c == 'e') self.state = .end_value else self.raise(allocator, c, "in literal false (expecting 'e')");
+                    return;
+                },
+                .n => {
+                    if (c == 'u') self.state = .nu else self.raise(allocator, c, "in literal null (expecting 'u')");
+                    return;
+                },
+                .nu => {
+                    if (c == 'l') self.state = .nul else self.raise(allocator, c, "in literal null (expecting 'l')");
+                    return;
+                },
+                .nul => {
+                    if (c == 'l') self.state = .end_value else self.raise(allocator, c, "in literal null (expecting 'l')");
+                    return;
+                },
+                .failed => return,
+            }
+        }
+    }
+};
+
+fn isHexDigit(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+}
+
+/// The first encoding/json syntax error message for data, or null when the
+/// scanner accepts a complete top-level value.
+fn goJsonSyntaxMessage(allocator: std.mem.Allocator, data: []const u8) ?[]const u8 {
+    var scanner = GoScanner{};
+    var index: usize = 0;
+    while (index < data.len and !scanner.done and scanner.error_message == null) : (index += 1) {
+        scanner.step(allocator, data[index]);
+    }
+    if (scanner.error_message) |message| return message;
+    if (!scanner.done) {
+        scanner.step(allocator, ' ');
+        if (scanner.error_message) |message| return message;
+        if (!scanner.done) return "unexpected end of JSON input";
+    }
+    return null;
+}
+
+/// decodeRecord for one trimmed ledger line: validateJSONObject followed by a
+/// strict typed decode. Returns null and sets error_out on failure.
+fn parseLedgerRecordDetailed(allocator: std.mem.Allocator, line: []const u8, error_out: *[]const u8) ?LedgerRecord {
+    const normalized = normalizeJsonUtf8(allocator, line) catch {
+        error_out.* = "malformed JSON";
+        return null;
+    };
+    if (goJsonSyntaxMessage(allocator, normalized)) |message| {
+        error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: {s}", .{message}) catch "malformed JSON";
+        return null;
+    }
+    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch |err| {
+        error_out.* = switch (err) {
+            error.TrailingData => "trailing data",
+            else => "malformed JSON",
+        };
+        return null;
+    };
+    if (root != .object) {
+        error_out.* = "record must be a JSON object";
+        return null;
+    }
+    // Structure pass, mirroring validateJSONObject's consumeObject.
+    var seen: std.ArrayList([]const u8) = .empty;
+    for (root.object) |field| {
+        for (seen.items) |previous| {
+            if (std.mem.eql(u8, previous, field.key)) {
+                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: duplicate JSON field {s}", .{ledgerQuote(allocator, field.key)}) catch "malformed JSON";
+                return null;
+            }
+        }
+        seen.append(allocator, field.key) catch {};
+        if (exactLedgerField(field.key, &ledger_record_fields) == null) {
+            if (foldedLedgerField(field.key, &ledger_record_fields)) |canonical| {
+                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: non-canonical JSON field {s}; use {s}", .{ ledgerQuote(allocator, field.key), ledgerQuote(allocator, canonical) }) catch "malformed JSON";
+            } else {
+                error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: unknown JSON field {s}", .{ledgerQuote(allocator, field.key)}) catch "malformed JSON";
+            }
+            return null;
+        }
+        if (std.mem.eql(u8, field.key, "node_results")) {
+            if (field.value != .array) {
+                error_out.* = "malformed JSON: node_results must be an array";
+                return null;
+            }
+            for (field.value.array) |item| {
+                if (item != .object) {
+                    error_out.* = "malformed JSON: node result must be a JSON object";
+                    return null;
+                }
+                var nested_seen: std.ArrayList([]const u8) = .empty;
+                for (item.object) |member| {
+                    for (nested_seen.items) |previous| {
+                        if (std.mem.eql(u8, previous, member.key)) {
+                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: duplicate JSON field {s}", .{ledgerQuote(allocator, member.key)}) catch "malformed JSON";
+                            return null;
+                        }
+                    }
+                    nested_seen.append(allocator, member.key) catch {};
+                    if (exactLedgerField(member.key, &ledger_node_result_fields) == null) {
+                        if (foldedLedgerField(member.key, &ledger_node_result_fields)) |canonical| {
+                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: non-canonical JSON field {s}; use {s}", .{ ledgerQuote(allocator, member.key), ledgerQuote(allocator, canonical) }) catch "malformed JSON";
+                        } else {
+                            error_out.* = std.fmt.allocPrint(allocator, "malformed JSON: unknown JSON field {s}", .{ledgerQuote(allocator, member.key)}) catch "malformed JSON";
+                        }
+                        return null;
+                    }
+                }
+            }
+        }
+    }
+    // Type pass, mirroring decoder.Decode(&record) with DisallowUnknownFields.
     var record = LedgerRecord{};
     for (root.object) |field| {
-        const canonical = exactLedgerField(field.key, &ledger_record_fields) orelse return error.InvalidLedger;
-        if (std.mem.eql(u8, canonical, "schema_version")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.schema_version = field.value.string;
-        } else if (std.mem.eql(u8, canonical, "seq")) {
-            if (field.value != .number) return error.InvalidLedger;
-            record.seq = std.fmt.parseUnsigned(u64, field.value.number, 10) catch return error.InvalidLedger;
-        } else if (std.mem.eql(u8, canonical, "prev_record_hash")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.prev_record_hash = field.value.string;
-        } else if (std.mem.eql(u8, canonical, "record_hash")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.record_hash = field.value.string;
-        } else if (std.mem.eql(u8, canonical, "envelope_sha256")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.envelope_sha256 = field.value.string;
-        } else if (std.mem.eql(u8, canonical, "packet_binding_sha256")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.packet_binding_sha256 = field.value.string;
-        } else if (std.mem.eql(u8, canonical, "ownscout_version")) {
-            if (field.value != .string) return error.InvalidLedger;
-            record.ownscout_version = field.value.string;
+        const canonical = exactLedgerField(field.key, &ledger_record_fields) orelse continue;
+        if (std.mem.eql(u8, canonical, "seq")) {
+            if (field.value != .number or !isUint64Token(field.value.number)) {
+                const value_name = if (field.value == .number) std.fmt.allocPrint(allocator, "number {s}", .{field.value.number}) catch "number" else jsonTypeName(field.value);
+                error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.seq of type uint64", .{value_name}) catch "malformed record";
+                return null;
+            }
+            record.seq = std.fmt.parseUnsigned(u64, field.value.number, 10) catch 0;
         } else if (std.mem.eql(u8, canonical, "node_results")) {
-            if (field.value != .array) return error.InvalidLedger;
-            const results = try allocator.alloc(LedgerNodeResult, field.value.array.len);
+            const results = allocator.alloc(LedgerNodeResult, field.value.array.len) catch return null;
             for (field.value.array, 0..) |item, i| {
-                if (item != .object) return error.InvalidLedger;
                 var node_result = LedgerNodeResult{ .node_id = "", .status = "" };
                 for (item.object) |member| {
-                    const name = exactLedgerField(member.key, &ledger_node_result_fields) orelse return error.InvalidLedger;
-                    if (member.value != .string) return error.InvalidLedger;
-                    if (std.mem.eql(u8, name, "node_id")) {
+                    if (member.value != .string) {
+                        error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.node_results.{s} of type string", .{ jsonTypeName(member.value), member.key }) catch "malformed record";
+                        return null;
+                    }
+                    if (std.mem.eql(u8, member.key, "node_id")) {
                         node_result.node_id = member.value.string;
-                    } else if (std.mem.eql(u8, name, "status")) {
+                    } else if (std.mem.eql(u8, member.key, "status")) {
                         node_result.status = member.value.string;
                     } else {
                         node_result.reason = member.value.string;
@@ -1690,30 +2202,195 @@ fn parseLedgerRecord(allocator: std.mem.Allocator, line: []const u8) !LedgerReco
                 results[i] = node_result;
             }
             record.node_results = results;
+        } else {
+            if (field.value != .string) {
+                error_out.* = std.fmt.allocPrint(allocator, "malformed record: json: cannot unmarshal {s} into Go struct field Record.{s} of type string", .{ jsonTypeName(field.value), field.key }) catch "malformed record";
+                return null;
+            }
+            if (std.mem.eql(u8, canonical, "schema_version")) {
+                record.schema_version = field.value.string;
+            } else if (std.mem.eql(u8, canonical, "prev_record_hash")) {
+                record.prev_record_hash = field.value.string;
+            } else if (std.mem.eql(u8, canonical, "record_hash")) {
+                record.record_hash = field.value.string;
+            } else if (std.mem.eql(u8, canonical, "envelope_sha256")) {
+                record.envelope_sha256 = field.value.string;
+            } else if (std.mem.eql(u8, canonical, "packet_binding_sha256")) {
+                record.packet_binding_sha256 = field.value.string;
+            } else if (std.mem.eql(u8, canonical, "ownscout_version")) {
+                record.ownscout_version = field.value.string;
+            }
         }
     }
     return record;
 }
 
-fn validateLedgerRecord(record: LedgerRecord, expected_seq: u64, expected_prev: []const u8) !void {
-    if (!std.mem.eql(u8, record.schema_version, "ownscout-ledger-v1")) return error.InvalidLedger;
-    if (record.seq != expected_seq) return error.InvalidLedger;
-    if (!std.mem.eql(u8, record.prev_record_hash, expected_prev)) return error.InvalidLedger;
-    if (!isLedgerSha256(record.prev_record_hash)) return error.InvalidLedger;
-    if (!isLedgerSha256(record.record_hash)) return error.InvalidLedger;
-    if (!isLedgerSha256(record.envelope_sha256)) return error.InvalidLedger;
-    if (!isLedgerSha256(record.packet_binding_sha256)) return error.InvalidLedger;
-    if (record.ownscout_version.len == 0) return error.InvalidLedger;
-    if (record.node_results.len == 0 or record.node_results.len > ledger_max_node_results) return error.InvalidLedger;
+/// validateRecord with Go's messages. Returns false and sets error_out.
+fn validateLedgerRecordDetailed(allocator: std.mem.Allocator, record: LedgerRecord, expected_seq: u64, expected_prev: []const u8, error_out: *[]const u8) bool {
+    if (!std.mem.eql(u8, record.schema_version, "ownscout-ledger-v1")) {
+        error_out.* = "schema_version must be \"ownscout-ledger-v1\"";
+        return false;
+    }
+    if (record.seq != expected_seq) {
+        error_out.* = std.fmt.allocPrint(allocator, "seq {d} does not follow expected sequence {d}", .{ record.seq, expected_seq }) catch "seq does not follow expected sequence";
+        return false;
+    }
+    if (!std.mem.eql(u8, record.prev_record_hash, expected_prev)) {
+        error_out.* = "prev_record_hash does not match hash chain";
+        return false;
+    }
+    if (!isLedgerSha256(record.prev_record_hash)) {
+        error_out.* = "prev_record_hash must be exactly 64 lowercase hexadecimal characters";
+        return false;
+    }
+    if (!isLedgerSha256(record.record_hash)) {
+        error_out.* = "record_hash must be exactly 64 lowercase hexadecimal characters";
+        return false;
+    }
+    if (!isLedgerSha256(record.envelope_sha256)) {
+        error_out.* = "envelope_sha256 must be exactly 64 lowercase hexadecimal characters";
+        return false;
+    }
+    if (!isLedgerSha256(record.packet_binding_sha256)) {
+        error_out.* = "packet_binding_sha256 must be exactly 64 lowercase hexadecimal characters";
+        return false;
+    }
+    if (record.ownscout_version.len == 0) {
+        error_out.* = "ownscout_version must be non-empty";
+        return false;
+    }
+    if (record.node_results.len == 0) {
+        error_out.* = "node_results must be non-empty";
+        return false;
+    }
+    if (record.node_results.len > ledger_max_node_results) {
+        error_out.* = "node_results exceeds 4096 results";
+        return false;
+    }
     if (hasNul(record.schema_version) or hasNul(record.prev_record_hash) or hasNul(record.record_hash) or
-        hasNul(record.envelope_sha256) or hasNul(record.packet_binding_sha256) or hasNul(record.ownscout_version)) return error.InvalidLedger;
+        hasNul(record.envelope_sha256) or hasNul(record.packet_binding_sha256) or hasNul(record.ownscout_version))
+    {
+        error_out.* = "record contains a NUL byte";
+        return false;
+    }
     for (record.node_results, 0..) |node_result, i| {
-        if (!validIdentifier(node_result.node_id)) return error.InvalidLedger;
-        if (!isLedgerStatus(node_result.status)) return error.InvalidLedger;
-        if (hasNul(node_result.node_id) or hasNul(node_result.status) or hasNul(node_result.reason)) return error.InvalidLedger;
-        for (record.node_results[0..i]) |previous| {
-            if (std.mem.eql(u8, previous.node_id, node_result.node_id)) return error.InvalidLedger;
+        if (ledgerIdentifierError(node_result.node_id)) |message| {
+            error_out.* = std.fmt.allocPrint(allocator, "node_results[{d}]: node_id: {s}", .{ i, message }) catch "node_results: node_id is invalid";
+            return false;
         }
+        if (!isLedgerStatus(node_result.status)) {
+            error_out.* = std.fmt.allocPrint(allocator, "node_results[{d}]: status {s} is invalid", .{ i, ledgerQuote(allocator, node_result.status) }) catch "node_results: status is invalid";
+            return false;
+        }
+        if (hasNul(node_result.node_id) or hasNul(node_result.status) or hasNul(node_result.reason)) {
+            error_out.* = std.fmt.allocPrint(allocator, "node_results[{d}]: contains a NUL byte", .{i}) catch "node_results contains a NUL byte";
+            return false;
+        }
+        for (record.node_results[0..i]) |previous| {
+            if (std.mem.eql(u8, previous.node_id, node_result.node_id)) {
+                error_out.* = std.fmt.allocPrint(allocator, "duplicate node_id {s}", .{ledgerQuote(allocator, node_result.node_id)}) catch "duplicate node_id";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/// validateLedger: audits raw ledger bytes, returning a summary or Go's error
+/// message for the first problem.
+fn validateLedgerData(allocator: std.mem.Allocator, data: []const u8) LedgerScan {
+    if (data.len != 0 and data[data.len - 1] != '\n') return .{ .invalid = "nonempty ledger must end with LF" };
+    if (data.len == 0) return .{ .ok = .{} };
+    var count: u64 = 0;
+    var last_hash: []const u8 = ledger_zero_hash;
+    var start: usize = 0;
+    while (start < data.len) {
+        const newline = std.mem.indexOfScalarPos(u8, data, start, '\n') orelse return .{ .invalid = "nonempty ledger must end with LF" };
+        const trimmed = trimGoSpace(data[start..newline]);
+        start = newline + 1;
+        if (trimmed.len == 0) return .{ .invalid = "empty or blank line" };
+        if (trimmed.len > ledger_max_record_size + 1) return .{ .invalid = "read line: bufio.Scanner: token too long" };
+        var parse_error: []const u8 = "malformed JSON";
+        const record = parseLedgerRecordDetailed(allocator, trimmed, &parse_error) orelse {
+            return .{ .invalid = std.fmt.allocPrint(allocator, "line {d}: {s}", .{ count + 1, parse_error }) catch "line: malformed JSON" };
+        };
+        const expected_seq = count + 1;
+        const expected_prev = if (count == 0) ledger_zero_hash else last_hash;
+        var record_error: []const u8 = "invalid record";
+        if (!validateLedgerRecordDetailed(allocator, record, expected_seq, expected_prev, &record_error)) {
+            return .{ .invalid = std.fmt.allocPrint(allocator, "line {d}: {s}", .{ count + 1, record_error }) catch "line: invalid record" };
+        }
+        const expected_hash = ledgerRecordHash(allocator, record) catch {
+            return .{ .invalid = std.fmt.allocPrint(allocator, "line {d}: record_hash does not match canonical record", .{count + 1}) catch "line: record_hash does not match canonical record" };
+        };
+        if (!std.mem.eql(u8, record.record_hash, &expected_hash)) {
+            return .{ .invalid = std.fmt.allocPrint(allocator, "line {d}: record_hash does not match canonical record", .{count + 1}) catch "line: record_hash does not match canonical record" };
+        }
+        last_hash = record.record_hash;
+        count += 1;
+    }
+    return .{ .ok = .{ .records = count, .tip = if (count == 0) "" else last_hash } };
+}
+
+fn absolutePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (std.fs.path.isAbsolute(path)) return std.fs.path.resolve(allocator, &.{path});
+    var buffer: [4096]u8 = undefined;
+    const cwd_len = try std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &buffer);
+    return std.fs.path.resolve(allocator, &.{ buffer[0..cwd_len], path });
+}
+
+fn ledgerVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
+    var ledger_path: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--ledger")) {
+            if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, "--ledger requires a value", "ownscout ledger verify --help", json_output);
+            ledger_path = args[index + 1];
+            index += 1;
+            continue;
+        }
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout ledger verify --help", json_output);
+    }
+    if (ledger_path == null or ledger_path.?.len == 0) return fail(allocator, "missing required --ledger value", "ownscout ledger verify --help", json_output);
+    const path = absolutePath(allocator, ledger_path.?) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": resolve ledger path failed", .{ledger_path.?});
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger could not be read", .details = &details, .next_action = "Provide a readable ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": lstat {s}: no such file or directory", .{ path, path });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger could not be read", .details = &details, .next_action = "Provide a readable ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    if (stat.kind != .file) {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": not a regular file", .{path});
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger could not be read", .details = &details, .next_action = "Provide a readable ledger file with --ledger <file>." }, json_output), .code = 2 };
+    }
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(ledger_max_size + 1)) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": ledger exceeds {d} bytes", .{ path, ledger_max_size });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger could not be read", .details = &details, .next_action = "Provide a readable ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    if (data.len > ledger_max_size) {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": ledger exceeds {d} bytes", .{ path, ledger_max_size });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger could not be read", .details = &details, .next_action = "Provide a readable ledger file with --ledger <file>." }, json_output), .code = 2 };
+    }
+    switch (validateLedgerData(allocator, data)) {
+        .invalid => |message| {
+            const detail = try std.fmt.allocPrint(allocator, "validate ledger \"{s}\": {s}", .{ path, message });
+            const details = [_][]const u8{detail};
+            return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = false, .summary = "ledger verification failed", .details = &details, .next_action = "Repair the ledger, then run ledger verification again." }, json_output), .code = 1 };
+        },
+        .ok => |summary| {
+            const tip = if (summary.tip.len == 0) "none" else summary.tip;
+            const detail = try std.fmt.allocPrint(allocator, "{d} record(s), tip {s}", .{ summary.records, tip });
+            const details = [_][]const u8{detail};
+            return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = true, .summary = "ledger is intact", .details = &details, .next_action = "The ledger chain is intact." }, json_output), .code = 0 };
+        },
     }
 }
 
@@ -1794,24 +2471,12 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     };
     var count: u64 = 0;
     var last_hash: []const u8 = ledger_zero_hash;
-    if (old.len != 0) {
-        if (old[old.len - 1] != '\n') return error.InvalidLedger;
-        var start: usize = 0;
-        while (start < old.len) {
-            const newline = std.mem.indexOfScalarPos(u8, old, start, '\n') orelse return error.InvalidLedger;
-            const trimmed = trimGoSpace(old[start..newline]);
-            start = newline + 1;
-            if (trimmed.len == 0) return error.InvalidLedger;
-            if (trimmed.len > ledger_max_record_size + 1) return error.InvalidLedger;
-            const record = try parseLedgerRecord(allocator, trimmed);
-            const expected_seq = count + 1;
-            const expected_prev = if (count == 0) ledger_zero_hash else last_hash;
-            try validateLedgerRecord(record, expected_seq, expected_prev);
-            const expected_hash = try ledgerRecordHash(allocator, record);
-            if (!std.mem.eql(u8, record.record_hash, &expected_hash)) return error.InvalidLedger;
-            last_hash = record.record_hash;
-            count += 1;
-        }
+    switch (validateLedgerData(allocator, old)) {
+        .invalid => return error.InvalidLedger,
+        .ok => |summary| {
+            count = summary.records;
+            last_hash = if (summary.records == 0) ledger_zero_hash else summary.tip;
+        },
     }
     const results = try ledgerResults(allocator, details);
     const seq = count + 1;
@@ -1826,7 +2491,8 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
         .ownscout_version = "0.1.0",
         .node_results = results,
     };
-    try validateLedgerRecord(pending, seq, previous);
+    var pending_error: []const u8 = "invalid record";
+    if (!validateLedgerRecordDetailed(allocator, pending, seq, previous, &pending_error)) return error.InvalidLedger;
     const record_hash = try ledgerRecordHash(allocator, pending);
     const final = LedgerRecord{
         .schema_version = pending.schema_version,
@@ -2010,7 +2676,7 @@ test "relocation is diagnostic only and gated by the option" {
     try std.testing.expectEqualStrings("", plain.clause);
 }
 
-test "relocate is accepted only by evidence verify" {
+test "relocate is accepted by evidence verify and node verify" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -2020,13 +2686,15 @@ test "relocate is accepted only by evidence verify" {
     try std.testing.expectEqual(@as(u8, 2), missing.code);
     try std.testing.expect(std.mem.indexOf(u8, missing.output, "both --repo <dir> and --packet <file> are required") != null);
 
+    // contract validate still rejects it.
     const contract_flag = try run(allocator, &.{ "contract", "validate", "--packet", "absent.json", "--relocate" });
     try std.testing.expectEqual(@as(u8, 2), contract_flag.code);
     try std.testing.expect(std.mem.indexOf(u8, contract_flag.output, "unknown flag or argument '--relocate'") != null);
 
+    // node verify accepts it too, then reports its first missing required flag.
     const node_flag = try run(allocator, &.{ "node", "verify", "--relocate" });
     try std.testing.expectEqual(@as(u8, 2), node_flag.code);
-    try std.testing.expect(std.mem.indexOf(u8, node_flag.output, "unknown flag or argument '--relocate'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, node_flag.output, "missing required --repo value") != null);
 }
 
 test "unknown field names are quoted like Go strconv.Quote" {
@@ -2435,6 +3103,98 @@ test "ledger validation rejects malformed framing" {
         try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = frame, .flags = .{ .truncate = true, .permissions = .default_file } });
         try std.testing.expectError(error.InvalidLedger, appendLedger(allocator, path, envelope, binding, &details));
     }
+}
+
+test "ledger verify reports intact, invalid, and unreadable ledgers" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/ledger.jsonl", .{tmp.sub_path});
+    const envelope = [_]u8{'a'} ** 64;
+    const binding = [_]u8{'b'} ** 64;
+    const details = [_][]const u8{"node \"build\": evidence_current"};
+
+    try appendLedger(allocator, path, envelope, binding, &details);
+    const ok = try run(allocator, &.{ "ledger", "verify", "--ledger", path, "--json" });
+    try std.testing.expectEqual(@as(u8, 0), ok.code);
+    try std.testing.expect(std.mem.indexOf(u8, ok.output, "\"summary\":\"ledger is intact\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ok.output, "1 record(s), tip ") != null);
+
+    // A malformed line is a validation failure with the reference JSON message.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "garbage.jsonl", .data = "not a ledger record\n" });
+    const garbage_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/garbage.jsonl", .{tmp.sub_path});
+    const bad = try run(allocator, &.{ "ledger", "verify", "--ledger", garbage_path });
+    try std.testing.expectEqual(@as(u8, 1), bad.code);
+    try std.testing.expect(std.mem.indexOf(u8, bad.output, "ledger verification failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bad.output, "line 1: malformed JSON: invalid character 'o' in literal null (expecting 'u')") != null);
+
+    // A forged record hash is a validation failure.
+    const seed = try std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20));
+    const marker = "\"record_hash\":\"";
+    const hash_start = std.mem.indexOf(u8, seed, marker).? + marker.len;
+    const zeros = [_]u8{'0'} ** 64;
+    const forged = try replaceFirst(allocator, seed, seed[hash_start .. hash_start + 64], &zeros);
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "forged.jsonl", .data = forged });
+    const forged_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/forged.jsonl", .{tmp.sub_path});
+    const forged_result = try run(allocator, &.{ "ledger", "verify", "--ledger", forged_path, "--json" });
+    try std.testing.expectEqual(@as(u8, 1), forged_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, forged_result.output, "record_hash does not match canonical record") != null);
+
+    // Missing and non-regular files are read failures.
+    const absent_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/absent.jsonl", .{tmp.sub_path});
+    const absent = try run(allocator, &.{ "ledger", "verify", "--ledger", absent_path, "--json" });
+    try std.testing.expectEqual(@as(u8, 2), absent.code);
+    try std.testing.expect(std.mem.indexOf(u8, absent.output, "ledger could not be read") != null);
+    try std.testing.expect(std.mem.indexOf(u8, absent.output, "no such file or directory") != null);
+    const directory = try run(allocator, &.{ "ledger", "verify", "--ledger", dir_path, "--json" });
+    try std.testing.expectEqual(@as(u8, 2), directory.code);
+    try std.testing.expect(std.mem.indexOf(u8, directory.output, "not a regular file") != null);
+
+    // Dispatch and required flag.
+    const missing = try run(allocator, &.{ "ledger", "verify" });
+    try std.testing.expectEqual(@as(u8, 2), missing.code);
+    try std.testing.expect(std.mem.indexOf(u8, missing.output, "missing required --ledger value") != null);
+    const none = try run(allocator, &.{"ledger"});
+    try std.testing.expectEqual(@as(u8, 2), none.code);
+    try std.testing.expect(std.mem.indexOf(u8, none.output, "a ledger subcommand is required") != null);
+    const unknown = try run(allocator, &.{ "ledger", "bogus" });
+    try std.testing.expectEqual(@as(u8, 2), unknown.code);
+    try std.testing.expect(std.mem.indexOf(u8, unknown.output, "unknown ledger subcommand 'bogus'") != null);
+}
+
+test "node bind reports decode, contract, and dispatch outcomes" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "empty.json", .data = "{}" });
+    const empty_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/empty.json", .{tmp.sub_path});
+    const contract_fail = try run(allocator, &.{ "node", "bind", "--packet", empty_path });
+    try std.testing.expectEqual(@as(u8, 1), contract_fail.code);
+    try std.testing.expect(std.mem.indexOf(u8, contract_fail.output, "packet contract failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contract_fail.output, "then run node binding again") != null);
+
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "dup.json", .data = "{\"packet_id\":\"a\",\"packet_id\":\"b\"}" });
+    const dup_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/dup.json", .{tmp.sub_path});
+    const decode_fail = try run(allocator, &.{ "node", "bind", "--packet", dup_path, "--json" });
+    try std.testing.expectEqual(@as(u8, 2), decode_fail.code);
+    try std.testing.expect(std.mem.indexOf(u8, decode_fail.output, "strict packet decoding failed") != null);
+
+    const missing = try run(allocator, &.{ "node", "bind" });
+    try std.testing.expectEqual(@as(u8, 2), missing.code);
+    try std.testing.expect(std.mem.indexOf(u8, missing.output, "missing required --packet value") != null);
+
+    const none = try run(allocator, &.{"node"});
+    try std.testing.expectEqual(@as(u8, 2), none.code);
+    try std.testing.expect(std.mem.indexOf(u8, none.output, "a node subcommand is required") != null);
+    const unknown = try run(allocator, &.{ "node", "bogus" });
+    try std.testing.expectEqual(@as(u8, 2), unknown.code);
+    try std.testing.expect(std.mem.indexOf(u8, unknown.output, "unknown node subcommand 'bogus'") != null);
 }
 
 test "CLI exposes stable help and version output" {
