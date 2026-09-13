@@ -89,21 +89,10 @@ pub(crate) fn fold_name(name: &str) -> String {
 }
 
 // canonical_field resolves a JSON key to the declared field it names. The
-// contract/evidence decoder (Go's encoding/json adapter) looks for an exact
-// match first and only then falls back to a case-folded one; the strict
-// node-packet decoder (Go's nodepacket) matches exact names only.
-fn canonical_field<'a>(key: &str, allowed: &[&'a str], fold: bool) -> Option<&'a str> {
-    if let Some(field) = allowed.iter().find(|field| **field == key) {
-        return Some(field);
-    }
-    if !fold {
-        return None;
-    }
-    let folded = fold_name(key);
-    allowed
-        .iter()
-        .find(|field| fold_name(field) == folded)
-        .copied()
+// strict decoder matches exact field names only; the former case-fold fallback
+// was retired with the decoder unification.
+fn canonical_field<'a>(key: &str, allowed: &[&'a str]) -> Option<&'a str> {
+    allowed.iter().find(|field| **field == key).copied()
 }
 
 // go_quote renders a string the way Go's strconv.Quote does.
@@ -314,7 +303,6 @@ fn string(map: &std::collections::BTreeMap<&str, &Value>, key: &str) -> Result<S
 fn string_value(value: &Value, path: &str) -> Result<String, String> {
     match value {
         Value::String(v) => Ok(v.clone()),
-        Value::Null => Ok(String::new()),
         v => Err(type_error(path, "string", v)),
     }
 }
@@ -338,7 +326,6 @@ fn integer_value(value: &Value, path: &str) -> Result<i64, String> {
         Value::Number(v) => v
             .parse()
             .map_err(|_| type_error(path, expected, &Value::Number(v.clone()))),
-        Value::Null => Ok(0),
         v => Err(type_error(path, expected, v)),
     }
 }
@@ -355,7 +342,6 @@ fn integer_at(
 fn boolean_value(value: &Value, path: &str) -> Result<bool, String> {
     match value {
         Value::Bool(v) => Ok(*v),
-        Value::Null => Ok(false),
         v => Err(type_error(path, "bool", v)),
     }
 }
@@ -385,7 +371,6 @@ fn strings_value(value: &Value, path: &str) -> Result<Option<Vec<String>>, Strin
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Some),
-        Value::Null => Ok(None),
         v => Err(type_error(path, "[]string", v)),
     }
 }
@@ -406,15 +391,13 @@ fn type_error(path: &str, expected: &str, value: &Value) -> String {
 }
 // object_fields returns a nested object's fields in document order. Callers
 // walk them once, checking each key as they reach it, so that unknown-field and
-// type errors are reported in the order the reference reports them. Null
-// decodes as an absent object.
+// type errors are reported in the order the reference reports them.
 fn object_fields<'a>(
     value: &'a Value,
     path: &str,
     expected: &str,
 ) -> Result<&'a [(String, Value)], String> {
     match value {
-        Value::Null => Ok(&[]),
         Value::Object(fields) => Ok(fields),
         _ => Err(type_error(path, expected, value)),
     }
@@ -436,15 +419,10 @@ const PACKET_FIELDS: &[&str] = &[
     "packet_hash",
 ];
 
-pub fn decode(data: &[u8]) -> Result<Packet, String> {
-    decode_packet(data, true)
-}
-
-// decode_strict mirrors internal/nodepacket.Decode, the wire-shape decoder used
-// on the node command boundary: input must be valid UTF-8 with no unpaired
+// decode_strict mirrors internal/nodepacket.Decode, the single strict wire-shape
+// boundary shared by every command: input must be valid UTF-8 with no unpaired
 // surrogate escapes, field names match exactly, and duplicate keys, unknown
-// keys, explicit nulls and values of the wrong JSON type are rejected. The
-// contract/evidence path keeps encoding/json behaviour via `decode`.
+// keys, explicit nulls and values of the wrong JSON type are rejected.
 pub fn decode_strict(data: &[u8]) -> Result<Packet, String> {
     if data.len() > 1 << 20 {
         return Err("nodepacket: packet: input exceeds 1 MiB".into());
@@ -458,25 +436,17 @@ pub fn decode_strict(data: &[u8]) -> Result<Packet, String> {
     let value =
         crate::json::parse(data).map_err(|_| "nodepacket: packet: invalid JSON".to_string())?;
     check_strict(&value)?;
-    build_packet(&value, false)
+    build_packet(&value)
 }
 
-fn decode_packet(data: &[u8], fold: bool) -> Result<Packet, String> {
-    if data.len() > 1 << 20 {
-        return Err("nodepacket: packet: input exceeds 1 MiB".into());
-    }
-    let value = crate::json::parse(data).map_err(|e| format!("nodepacket: packet: {}", e))?;
-    build_packet(&value, fold)
-}
-
-fn build_packet(value: &Value, fold: bool) -> Result<Packet, String> {
+fn build_packet(value: &Value) -> Result<Packet, String> {
     let raw_fields = object(value)?;
     // Resolve each key to its declared field, in document order, validating as
     // we go. The resolved map is keyed by the declared name so the construction
     // below works for case-variant keys too.
     let mut map = std::collections::BTreeMap::new();
     for (key, value) in raw_fields {
-        let Some(field) = canonical_field(key, PACKET_FIELDS, fold) else {
+        let Some(field) = canonical_field(key, PACKET_FIELDS) else {
             return Err(unknown_field(key));
         };
         match field {
@@ -485,46 +455,46 @@ fn build_packet(value: &Value, fold: bool) -> Result<Packet, String> {
                 string_value(value, &format!("Packet.{}", field))?;
             }
             "freshness" => {
-                parse_freshness(value, fold)?;
+                parse_freshness(value)?;
             }
             "authorization" => {
-                parse_authorization(value, fold)?;
+                parse_authorization(value)?;
             }
             "budget" => {
-                parse_budget(value, fold)?;
+                parse_budget(value)?;
             }
             "evidence" => {
-                parse_evidence(value, fold)?;
+                parse_evidence(value)?;
             }
             "degradations" => {
                 strings_value(value, "Packet.degradations")?;
             }
             "provenance" => {
-                parse_provenance(value, fold)?;
+                parse_provenance(value)?;
             }
             _ => return Err(unknown_field(key)),
         }
         map.insert(field, value);
     }
     let freshness = match map.get("freshness") {
-        Some(v) => parse_freshness(v, fold)?,
+        Some(v) => parse_freshness(v)?,
         None => Freshness::default(),
     };
     let authorization = match map.get("authorization") {
-        Some(v) => parse_authorization(v, fold)?,
+        Some(v) => parse_authorization(v)?,
         None => Authorization::default(),
     };
     let budget = match map.get("budget") {
-        Some(v) => parse_budget(v, fold)?,
+        Some(v) => parse_budget(v)?,
         None => Budget::default(),
     };
     let evidence = match map.get("evidence") {
-        Some(v) => parse_evidence(v, fold)?,
+        Some(v) => parse_evidence(v)?,
         None => None,
     };
     let degradations = strings(&map, "degradations")?;
     let provenance = match map.get("provenance") {
-        Some(v) => parse_provenance(v, fold)?,
+        Some(v) => parse_provenance(v)?,
         None => Provenance::default(),
     };
     Ok(Packet {
@@ -775,11 +745,11 @@ const FRESHNESS_FIELDS: &[&str] = &[
     "is_current",
     "checked_at",
 ];
-fn parse_freshness(v: &Value, fold: bool) -> Result<Freshness, String> {
+fn parse_freshness(v: &Value) -> Result<Freshness, String> {
     let raw = object_fields(v, "Packet.freshness", "contract.Freshness")?;
     let mut out = Freshness::default();
     for (key, value) in raw {
-        let Some(field) = canonical_field(key, FRESHNESS_FIELDS, fold) else {
+        let Some(field) = canonical_field(key, FRESHNESS_FIELDS) else {
             return Err(unknown_field(key));
         };
         match field {
@@ -795,11 +765,11 @@ fn parse_freshness(v: &Value, fold: bool) -> Result<Freshness, String> {
     Ok(out)
 }
 const AUTHORIZATION_FIELDS: &[&str] = &["level", "reason"];
-fn parse_authorization(v: &Value, fold: bool) -> Result<Authorization, String> {
+fn parse_authorization(v: &Value) -> Result<Authorization, String> {
     let raw = object_fields(v, "Packet.authorization", "contract.Authorization")?;
     let mut out = Authorization::default();
     for (key, value) in raw {
-        let Some(field) = canonical_field(key, AUTHORIZATION_FIELDS, fold) else {
+        let Some(field) = canonical_field(key, AUTHORIZATION_FIELDS) else {
             return Err(unknown_field(key));
         };
         match field {
@@ -811,11 +781,11 @@ fn parse_authorization(v: &Value, fold: bool) -> Result<Authorization, String> {
     Ok(out)
 }
 const BUDGET_FIELDS: &[&str] = &["max_evidence", "used_evidence", "max_bytes", "used_bytes"];
-fn parse_budget(v: &Value, fold: bool) -> Result<Budget, String> {
+fn parse_budget(v: &Value) -> Result<Budget, String> {
     let raw = object_fields(v, "Packet.budget", "contract.Budget")?;
     let mut out = Budget::default();
     for (key, value) in raw {
-        let Some(field) = canonical_field(key, BUDGET_FIELDS, fold) else {
+        let Some(field) = canonical_field(key, BUDGET_FIELDS) else {
             return Err(unknown_field(key));
         };
         match field {
@@ -832,7 +802,7 @@ fn parse_budget(v: &Value, fold: bool) -> Result<Budget, String> {
     }
     Ok(out)
 }
-fn parse_evidence(v: &Value, fold: bool) -> Result<Option<Vec<Evidence>>, String> {
+fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
     const EVIDENCE_FIELDS: &[&str] = &[
         "evidence_id",
         "kind",
@@ -847,30 +817,28 @@ fn parse_evidence(v: &Value, fold: bool) -> Result<Option<Vec<Evidence>>, String
     ];
     let items = match v {
         Value::Array(v) => v,
-        Value::Null => return Ok(None),
         _ => return Err(type_error("Packet.evidence", "[]contract.Evidence", v)),
     };
     let mut out = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let path = format!("Packet.evidence.{}", index);
         let m = match item {
-            Value::Null => std::collections::BTreeMap::new(),
             Value::Object(fields) => {
                 let mut m = std::collections::BTreeMap::new();
                 for (key, value) in fields {
-                    let Some(field) = canonical_field(key, EVIDENCE_FIELDS, fold) else {
+                    let Some(field) = canonical_field(key, EVIDENCE_FIELDS) else {
                         return Err(unknown_field(key));
                     };
                     let field_path = format!("{}.{}", path, field);
                     match field {
                         "evidence_id" | "kind" | "path" | "commit" | "source" | "content_hash"
                         | "collected_at" | "verifier_status" => {
-                            if !matches!(value, Value::String(_) | Value::Null) {
+                            if !matches!(value, Value::String(_)) {
                                 return Err(type_error(&field_path, "string", value));
                             }
                         }
                         "line_start" | "line_end" => {
-                            if !matches!(value, Value::Number(_) | Value::Null) {
+                            if !matches!(value, Value::Number(_)) {
                                 return Err(type_error(&field_path, "int", value));
                             }
                         }
@@ -902,11 +870,11 @@ fn parse_evidence(v: &Value, fold: bool) -> Result<Option<Vec<Evidence>>, String
     Ok(Some(out))
 }
 const PROVENANCE_FIELDS: &[&str] = &["collector", "tool", "version", "tool_version"];
-fn parse_provenance(v: &Value, fold: bool) -> Result<Provenance, String> {
+fn parse_provenance(v: &Value) -> Result<Provenance, String> {
     let raw = object_fields(v, "Packet.provenance", "contract.Provenance")?;
     let mut out = Provenance::default();
     for (key, value) in raw {
-        let Some(field) = canonical_field(key, PROVENANCE_FIELDS, fold) else {
+        let Some(field) = canonical_field(key, PROVENANCE_FIELDS) else {
             return Err(unknown_field(key));
         };
         match field {
@@ -953,49 +921,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decode_reports_the_first_error_in_document_order() {
-        fn decode_err(data: &[u8]) -> String {
-            match decode(data) {
-                Ok(_) => panic!("expected a decode error for {:?}", data),
-                Err(e) => e,
-            }
-        }
-        // An unknown field before the badly-typed one wins.
-        let unknown_first = br#"{"budget":{"aaa_unknown":1,"max_evidence":"notanint"}}"#;
-        assert_eq!(
-            decode_err(unknown_first),
-            "unknown field \"aaa_unknown\""
-        );
-        // A badly-typed field before the unknown one wins.
-        let unknown_last = br#"{"budget":{"max_evidence":"notanint","zzz_unknown":1}}"#;
-        assert_eq!(
-            decode_err(unknown_last),
-            "type mismatch|Packet.budget.max_evidence|int|string"
-        );
-        // The same precedence holds at the top level.
-        assert_eq!(
-            decode_err(br#"{"packet_id":123,"zzz_unknown":1}"#),
-            "type mismatch|Packet.packet_id|string|number"
-        );
-        assert_eq!(
-            decode_err(br#"{"zzz_unknown":1,"packet_id":123}"#),
-            "unknown field \"zzz_unknown\""
-        );
-        // A nested unknown field still wins over a later top-level type error,
-        // because the reference walks depth-first in document order.
-        assert_eq!(
-            decode_err(br#"{"budget":{"aaa_unknown":1},"packet_id":123}"#),
-            "unknown field \"aaa_unknown\""
-        );
-    }
-
-    fn decode_error(data: &[u8]) -> String {
-        match decode(data) {
-            Ok(_) => panic!("expected a decode error for {:?}", data),
-            Err(e) => e,
-        }
-    }
     fn decode_strict_error(data: &[u8]) -> String {
         match decode_strict(data) {
             Ok(_) => panic!("expected a strict decode error for {:?}", data),
@@ -1004,66 +929,45 @@ mod tests {
     }
 
     #[test]
-    fn case_variant_field_names_fold_only_on_the_contract_path() {
-        // The encoding/json adapter folds a key to its declared field.
-        assert!(decode(br#"{"SCHEMA_VERSION":"v1","packet_id":"p"}"#).is_ok());
-        // The strict nodepacket decoder matches exact names only.
+    fn case_variant_field_names_are_rejected() {
+        // The single strict decoder matches exact field names only.
         assert_eq!(
             decode_strict_error(br#"{"SCHEMA_VERSION":"v1"}"#),
             "nodepacket: packet: unknown field"
         );
-        // Nested fields fold as well.
-        assert!(decode(br#"{"evidence":[{"LINE_START":1}]}"#).is_ok());
         assert!(decode_strict(br#"{"evidence":[{"LINE_START":1}]}"#).is_err());
-        // A non-ASCII case variant folds within non-ASCII and cannot equal the
-        // ASCII tag, on either path.
-        assert_eq!(
-            decode_error("{\"\u{f6}utcome\":1}".as_bytes()),
-            "unknown field \"\u{f6}utcome\""
-        );
+        assert!(decode_strict("{\"\u{f6}utcome\":1}".as_bytes()).is_err());
     }
 
     #[test]
-    fn decode_substitutes_unpaired_surrogates() {
-        fn decoded(data: &[u8]) -> Packet {
-            match decode(data) {
-                Ok(p) => p,
-                Err(e) => panic!("decode failed: {e}"),
+    fn json_parse_substitutes_unpaired_surrogates() {
+        // The JSON value parser (still used by the envelope path) keeps Go's
+        // U+FFFD substitution; the packet boundary rejects these before
+        // parsing them.
+        fn parsed_string(data: &[u8]) -> String {
+            match crate::json::parse(data) {
+                Ok(Value::String(s)) => s,
+                other => panic!("expected a string, got {other:?}"),
             }
         }
-        assert_eq!(decoded(br#"{"packet_id":"\uD800"}"#).packet_id, "\u{FFFD}");
-        assert_eq!(decoded(br#"{"packet_id":"\uDC00"}"#).packet_id, "\u{FFFD}");
-        // A non-partner escape after a high surrogate is not consumed.
-        assert_eq!(
-            decoded(br#"{"packet_id":"\uD800\u0041"}"#).packet_id,
-            "\u{FFFD}A"
-        );
-        // Two high surrogates yield two replacement runes.
-        assert_eq!(
-            decoded(br#"{"packet_id":"\uD800\uD800"}"#).packet_id,
-            "\u{FFFD}\u{FFFD}"
-        );
-        // A valid pair still combines.
-        assert_eq!(
-            decoded(br#"{"packet_id":"\uD83C\uDF89"}"#).packet_id,
-            "\u{1F389}"
-        );
+        assert_eq!(parsed_string(br#""\uD800""#), "\u{FFFD}");
+        assert_eq!(parsed_string(br#""\uDC00""#), "\u{FFFD}");
+        assert_eq!(parsed_string(br#""\uD800\u0041""#), "\u{FFFD}A");
+        assert_eq!(parsed_string(br#""\uD800\uD800""#), "\u{FFFD}\u{FFFD}");
+        assert_eq!(parsed_string(br#""\uD83C\uDF89""#), "\u{1F389}");
     }
 
     #[test]
-    fn decode_strict_matches_the_node_packet_decoder() {
-        // Contract validation tolerates a duplicate key (last wins); the strict
-        // decoder rejects it.
-        assert!(decode(br#"{"packet_id":"a","packet_id":"b"}"#).is_ok());
+    fn decode_strict_is_the_single_decoder() {
+        // One strict boundary: duplicate keys, explicit nulls, invalid UTF-8
+        // and unpaired surrogate escapes are all rejected.
         assert!(decode_strict(br#"{"packet_id":"a","packet_id":"b"}"#).is_err());
-        // Explicit null is rejected.
         assert!(decode_strict(br#"{"issued_at":null}"#).is_err());
-        // Raw invalid UTF-8 is rejected.
         assert!(decode_strict(b"{\"packet_id\":\"\xff\"}").is_err());
-        // Unpaired surrogate escapes are rejected...
         assert!(decode_strict(br#"{"packet_id":"\uD800"}"#).is_err());
         assert!(decode_strict(br#"{"packet_id":"\uDC00"}"#).is_err());
-        // ...but a valid pair and a literal escaped backslash are accepted.
+        assert!(decode_strict(b"{\"\xf0\x9f\":1}").is_err());
+        // A valid surrogate pair and a literal escaped backslash are accepted.
         assert!(decode_strict(br#"{"packet_id":"\uD83C\uDF89"}"#).is_ok());
         assert!(decode_strict(br#"{"packet_id":"\\uD800"}"#).is_ok());
     }
@@ -1078,24 +982,5 @@ mod tests {
         // Other non-ASCII runes are left alone; Go folds them within non-ASCII,
         // so neither form can equal an ASCII field name.
         assert_eq!(fold_name("\u{f6}utcome"), "\u{f6}UTCOME");
-    }
-
-    #[test]
-    fn invalid_utf8_field_name_yields_one_replacement_per_byte() {
-        // A truncated four-byte sequence is two invalid bytes, so two U+FFFD.
-        assert_eq!(
-            decode_error(b"{\"\xf0\x9f\":1}"),
-            "unknown field \"\u{fffd}\u{fffd}\""
-        );
-        // A truncated three-byte sequence behaves the same way.
-        assert_eq!(
-            decode_error(b"{\"\xe0\xa0\":1}"),
-            "unknown field \"\u{fffd}\u{fffd}\""
-        );
-        // A well-formed non-ASCII name stays literal.
-        assert_eq!(
-            decode_error("{\"caf\u{e9}\":1}".as_bytes()),
-            "unknown field \"caf\u{e9}\""
-        );
     }
 }

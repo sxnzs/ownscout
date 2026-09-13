@@ -377,7 +377,7 @@ fn abs_clean(path: &str) -> PathBuf {
 }
 
 // go_errno renders a std::io::Error the way Go's PathError renders the errno.
-fn go_errno(e: &std::io::Error) -> String {
+pub(crate) fn go_errno(e: &std::io::Error) -> String {
     let text = e.to_string();
     let base = text.split(" (os error").next().unwrap_or(&text);
     let mut chars = base.chars();

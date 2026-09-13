@@ -81,9 +81,10 @@ fn contract_command(args: &[String]) -> (String, i32) {
             "ownscout contract validate --help",
         );
     };
-    let p = match load_packet(&path) {
+    let p = match load_packet_validation(&path) {
         Ok(v) => v,
-        Err(e) => return load_error(json, &e),
+        Err(PacketError::Read(e)) => return load_error(json, &e),
+        Err(PacketError::Decode) => return load_decode_error(json, "contract validate"),
     };
     let violations = contract::validate(&p);
     if !violations.is_empty() {
@@ -140,107 +141,43 @@ fn load_error(json: bool, detail: &str) -> (String, i32) {
 // but did not decode, because the node path reports the two differently.
 enum PacketError {
     Read(String),
-    Decode(String),
+    Decode,
 }
 
-fn load_packet(path: &str) -> Result<packet::Packet, String> {
-    load_packet_typed(path).map_err(|e| match e {
-        PacketError::Read(detail) | PacketError::Decode(detail) => detail,
-    })
+// load_packet_validation is the strict packet boundary shared by contract and
+// evidence. Go reads the packet through readBounded first, so an oversized
+// input is a read failure ("packet could not be loaded"), not a decode failure.
+fn load_packet_validation(path: &str) -> Result<packet::Packet, PacketError> {
+    let data = read_bounded(path).map_err(PacketError::Read)?;
+    packet::decode_strict(&data).map_err(|_| PacketError::Decode)
 }
 
-// load_packet_typed decodes a packet the way the contract/evidence adapter
-// does: encoding/json semantics, including case-folded field names.
-fn load_packet_typed(path: &str) -> Result<packet::Packet, PacketError> {
-    let data = fs::read(path).map_err(|e| {
-        PacketError::Read(if e.kind() == std::io::ErrorKind::NotFound {
-            format!("packet file {:?} does not exist", path)
-        } else {
-            format!("read packet {:?}: {}", path, e)
-        })
-    })?;
-    let trimmed = trim_json_space(&data);
-    let value = crate::json::parse(trimmed)
-        .map_err(|_| PacketError::Decode(format!("packet {:?} is not valid JSON", path)))?;
-    if !matches!(value, crate::json::Value::Object(_)) {
-        return Err(PacketError::Decode(format!(
-            "packet {:?} must contain a JSON object",
-            path
-        )));
+// read_bounded mirrors the reference's readBounded: the same 1 MiB cap and the
+// same error text, so an oversize packet is a read failure rather than a decode
+// failure.
+fn read_bounded(path: &str) -> Result<Vec<u8>, String> {
+    let quoted = crate::packet::go_quote(path);
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Err(format!("packet file {} does not exist", quoted));
+            }
+            return Err(format!("open packet {}: {}", quoted, ledger::go_errno(&e)));
+        }
+    };
+    if data.len() > 1 << 20 {
+        return Err("packet exceeds 1048576 byte input limit".into());
     }
-    packet::decode(trimmed)
-        .map_err(|e| PacketError::Decode(format!("packet {:?} {}", path, packet_decode_error(&e))))
-}
-
-// load_packet_strict decodes a packet the way the node command boundary does,
-// using the strict nodepacket decoder. Go reads the packet with a 1 MiB bound
-// first, so an oversize input is a read failure rather than a decode failure.
-// read_bounded mirrors the reference's readBounded on the node command
-// boundary: a missing, unreadable or oversize (over 1 MiB) file is a read
-// failure rather than a decode failure.
-fn read_bounded(path: &str) -> Result<Vec<u8>, ()> {
-    match fs::read(path) {
-        Ok(data) if data.len() <= 1 << 20 => Ok(data),
-        _ => Err(()),
-    }
+    Ok(data)
 }
 
 fn load_packet_strict(path: &str) -> Result<packet::Packet, PacketError> {
     let data = read_bounded(path)
         .map_err(|_| PacketError::Read("packet input could not be read".into()))?;
-    packet::decode_strict(&data).map_err(PacketError::Decode)
+    packet::decode_strict(&data).map_err(|_| PacketError::Decode)
 }
 
-fn trim_json_space(data: &[u8]) -> &[u8] {
-    let start = data
-        .iter()
-        .position(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
-        .unwrap_or(data.len());
-    let end = data
-        .iter()
-        .rposition(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
-        .map_or(start, |i| i + 1);
-    &data[start..end]
-}
-
-fn packet_decode_error(error: &str) -> String {
-    if let Some(name) = error.strip_prefix("unknown field ") {
-        return format!(
-            "contains an unknown JSON field: json: unknown field {}",
-            name
-        );
-    }
-    if let Some(details) = error.strip_prefix("type mismatch|") {
-        let mut parts = details.split('|');
-        let path = parts.next().unwrap_or("");
-        let expected = parts.next().unwrap_or("");
-        let actual = match parts.next().unwrap_or("") {
-            "array" => "array",
-            "object" => "object",
-            "string" => "string",
-            "number" => "number",
-            "bool" => "bool",
-            _ => "null",
-        };
-        let evidence_item = path
-            .strip_prefix("Packet.evidence.")
-            .and_then(|index| index.parse::<usize>().ok())
-            .is_some();
-        let detail = if evidence_item {
-            format!(
-                "json: cannot unmarshal {} into {} of type {}",
-                actual, path, expected
-            )
-        } else {
-            format!(
-                "json: cannot unmarshal {} into Go struct field {} of type {}",
-                actual, path, expected
-            )
-        };
-        return format!("is not valid JSON: {}", detail);
-    }
-    format!("is not valid JSON: {}", error)
-}
 fn result(v: (String, i32)) -> (String, i32) {
     v
 }
@@ -320,9 +257,10 @@ fn evidence_command(args: &[String]) -> (String, i32) {
             "ownscout evidence verify --help",
         );
     };
-    let p = match load_packet(&path) {
+    let p = match load_packet_validation(&path) {
         Ok(v) => v,
-        Err(e) => return load_evidence_error(json, &e),
+        Err(PacketError::Read(e)) => return load_evidence_error(json, &e),
+        Err(PacketError::Decode) => return load_decode_error(json, "evidence verify"),
     };
     let violations = contract::validate(&p);
     if !violations.is_empty() {
@@ -396,6 +334,20 @@ fn load_evidence_error(json: bool, d: &str) -> (String, i32) {
             summary: "packet could not be loaded".into(),
             details: vec![d.into()],
             next_action: "Provide a readable JSON packet with --packet <file>.".into(),
+        },
+        json,
+        2,
+    ))
+}
+
+fn load_decode_error(json: bool, command: &str) -> (String, i32) {
+    result(render(
+        &ResultData {
+            command: command.into(),
+            ok: false,
+            summary: "packet could not be decoded".into(),
+            details: vec!["strict packet decoding failed".into()],
+            next_action: "Provide one valid packet-v1 JSON object with --packet <file>.".into(),
         },
         json,
         2,
@@ -559,7 +511,7 @@ fn node_bind_command(args: &[String], json: bool) -> (String, i32) {
     };
     let data = match read_bounded(&path) {
         Ok(data) => data,
-        Err(()) => {
+        Err(_) => {
             return result(render(
                 &ResultData {
                     command: "node bind".into(),
@@ -700,7 +652,7 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
                 "Provide a readable packet file with --packet <file>.",
             )
         }
-        Err(PacketError::Decode(_)) => {
+        Err(PacketError::Decode) => {
             return node_error(
                 json,
                 "packet could not be decoded",
@@ -730,7 +682,7 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
     }
     let eb = match read_bounded(&envelope_path) {
         Ok(v) => v,
-        Err(()) => {
+        Err(_) => {
             return node_error(
                 json,
                 "envelope could not be loaded",

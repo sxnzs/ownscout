@@ -106,35 +106,32 @@ fn packet_decode_rejects_strict_json_errors() {
         br#"{"freshness":[]}"#.as_slice(),
         br#"{"evidence":[{"evidence_id":1}]}"#.as_slice(),
     ] {
-        assert!(packet::decode(input).is_err(), "accepted {:?}", input);
+        assert!(packet::decode_strict(input).is_err(), "accepted {:?}", input);
     }
-    assert!(packet::decode(b"null").is_err());
-    assert!(packet::decode(&vec![b' '; (1 << 20) + 1]).is_err());
+    assert!(packet::decode_strict(b"null").is_err());
+    assert!(packet::decode_strict(&vec![b' '; (1 << 20) + 1]).is_err());
 }
 
 #[test]
-fn packet_decode_accepts_compatibility_nulls_and_rejects_nested_unknowns() {
-    let p = packet::decode(
-        br#"{"packet_id":null,"schema_version":null,"repo_root":null,"head_commit":null,
-        "request_id":null,"issued_at":null,"outcome":null,
-        "degradations":null,"packet_hash":null}"#,
-    )
-    .unwrap();
-    assert_eq!(p.packet_id, "");
-    assert!(p.evidence.is_none());
-    assert!(packet::decode(br#"{"freshness":{"extra":true}}"#).is_err());
+fn packet_decode_is_strict_everywhere() {
+    // The retired lenient adapter tolerated nulls, duplicate keys, case
+    // variants and unpaired surrogate escapes; the single strict boundary
+    // rejects all of them.
+    for input in [
+        br#"{"packet_id":null}"#.as_slice(),
+        br#"{"packet_id":"first","packet_id":"last"}"#.as_slice(),
+        br#"{"SCHEMA_VERSION":"v1"}"#.as_slice(),
+        br#"{"freshness":{"extra":true}}"#.as_slice(),
+        br#"{"packet_id":"\uD800"}"#.as_slice(),
+        b"{\"packet_id\":\"\xff\"}".as_slice(),
+    ] {
+        assert!(packet::decode_strict(input).is_err(), "accepted {:?}", input);
+    }
     assert_eq!(
-        packet::decode(br#"{"packet_id":"first","packet_id":"last"}"#)
+        packet::decode_strict(br#"{"packet_id":"p"}"#)
             .unwrap()
             .packet_id,
-        "last"
-    );
-    // encoding/json substitutes U+FFFD for an unpaired surrogate escape.
-    assert_eq!(
-        packet::decode(br#"{"packet_id":"\uD800"}"#)
-            .unwrap()
-            .packet_id,
-        "\u{FFFD}"
+        "p"
     );
 }
 
