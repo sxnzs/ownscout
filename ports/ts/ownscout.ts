@@ -338,8 +338,37 @@ function safePath(root:string, raw:string):string {
   let cur=root; for (const c of rel.split(path.sep)) { if (!c || c===".") continue; cur=path.join(cur,c); const st=fs.lstatSync(cur); if (st.isSymbolicLink()) throw new Error(`evidence path "${raw}" contains a symlink`); }
   return full;
 }
-function verifyEvidence(repo:string,p:AnyObj):{ok:boolean;results:Verification[];verified:number;failed:number;skipped:number} {
-  const root=repoRoot(repo), results:Verification[]=[];
+// Line counting and range hashing mirror the reference: a "\r\n" pair is one
+// terminator, a final terminator adds no trailing line, hashing joins the
+// selected lines with "\n" and appends a final "\n" for non-empty content,
+// and all bytes are raw — the file is never decoded as text.
+function countLines(data:Buffer):number {
+  if (data.length===0) return 0;
+  let count=0, i=0;
+  while ((i=data.indexOf(10,i))!==-1) { count++; i++; }
+  if (data[data.length-1]!==10) count++;
+  return count;
+}
+function hashSelectedLines(data:Buffer,lineStart:number,lineEnd:number):string {
+  const h=createHash("sha256");
+  let line=1, start=0, firstNonEmpty=false;
+  while (line<=lineEnd && start<data.length) {
+    const nl=data.indexOf(10,start);
+    let end, next=-1;
+    if (nl===-1) { end=data.length; }
+    else { end=nl; next=nl+1; if (end>start && data[end-1]===13) end--; }
+    if (line>=lineStart) {
+      if (line>lineStart) h.update("\n");
+      h.update(data.subarray(start,end));
+      if (line===lineStart) firstNonEmpty=end>start;
+    }
+    if (next===-1) break;
+    start=next; line++;
+  }
+  if (lineEnd>lineStart || firstNonEmpty) h.update("\n");
+  return h.digest("hex");
+}
+function verifyEvidence(repo:string,p:AnyObj):{ok:boolean;results:Verification[];verified:number;failed:number;skipped:number} {  const root=repoRoot(repo), results:Verification[]=[];
   for (const e of p.evidence||[]) {
     const r:Verification={evidence_id:e.evidence_id,path:e.path,status:"failed",expected_hash:e.content_hash,line_start:e.line_start,line_end:e.line_end};
     try {
@@ -349,13 +378,12 @@ function verifyEvidence(repo:string,p:AnyObj):{ok:boolean;results:Verification[]
         throw x;
       }
       const st=fs.lstatSync(fp); if (!st.isFile() || st.isSymbolicLink()) throw new Error(`evidence path "${e.path}" is not a regular file`);
-      const text=fs.readFileSync(fp).toString().replace(/\r\n/g,"\n"), lines=text===""?[]:text.split("\n");
-      if (lines.at(-1)==="") lines.pop();
-      if (e.line_start<1 || e.line_end<e.line_start || e.line_end>lines.length) throw new Error(`invalid line range ${e.line_start}-${e.line_end} for ${lines.length} line(s)`);
+      const data=fs.readFileSync(fp);
+      const total=countLines(data);
+      if (e.line_start<1 || e.line_end<e.line_start || e.line_end>total) throw new Error(`invalid line range ${e.line_start}-${e.line_end} for ${total} line(s)`);
       let expected=e.content_hash; if (expected.startsWith("sha256:")) expected=expected.slice(7);
       if (!/^[0-9a-fA-F]{64}$/.test(expected)) throw new Error(`invalid SHA-256 content hash "${e.content_hash}"`);
-      const selected=lines.slice(e.line_start-1,e.line_end).join("\n")+(lines.slice(e.line_start-1,e.line_end).length?"\n":"");
-      r.actual_hash=sha256(selected); if (r.actual_hash!==expected.toLowerCase()) throw new Error(`content hash mismatch: expected ${e.content_hash}, got ${r.actual_hash}`);
+      r.actual_hash=hashSelectedLines(data,e.line_start,e.line_end); if (r.actual_hash!==expected.toLowerCase()) throw new Error(`content hash mismatch: expected ${e.content_hash}, got ${r.actual_hash}`);
       r.status="verified";
     } catch (x:any) { r.message=x.message; }
     results.push(r);

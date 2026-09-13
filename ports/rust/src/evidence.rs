@@ -88,17 +88,13 @@ fn one(root: &Path, e: &Evidence) -> Verification {
             return r;
         }
     };
-    let text = String::from_utf8_lossy(&data).replace("\r\n", "\n");
-    let mut lines: Vec<&str> = text.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop();
-    }
-    if e.line_start < 1 || e.line_end < e.line_start || e.line_end as usize > lines.len() {
+    let line_count = count_lines(&data);
+    if e.line_start < 1 || e.line_end < e.line_start || e.line_end as usize > line_count {
         r.message = format!(
             "invalid line range {}-{} for {} line(s)",
             e.line_start,
             e.line_end,
-            lines.len()
+            line_count
         );
         return r;
     }
@@ -111,11 +107,9 @@ fn one(root: &Path, e: &Evidence) -> Verification {
         r.message = format!("invalid SHA-256 content hash {:?}", e.content_hash);
         return r;
     }
-    let selected = format!(
-        "{}\n",
-        lines[(e.line_start - 1) as usize..e.line_end as usize].join("\n")
-    );
-    r.actual_hash = sha256::hex(&sha256::digest(selected.as_bytes()));
+    let mut selected: Vec<u8> = Vec::new();
+    append_selected_lines(&data, e.line_start as usize, e.line_end as usize, &mut selected);
+    r.actual_hash = sha256::hex(&sha256::digest(&selected));
     if r.actual_hash != expected.to_ascii_lowercase() {
         r.message = format!(
             "content hash mismatch: expected {}, got {}",
@@ -125,6 +119,57 @@ fn one(root: &Path, e: &Evidence) -> Verification {
     }
     r.status = "verified".into();
     r
+}
+
+// Line counting and range hashing mirror the reference: a "\r\n" pair is one
+// terminator, a final terminator adds no trailing line, hashing joins the
+// selected lines with "\n" and appends a final "\n" for non-empty content,
+// and all bytes are raw — the file is never decoded as text.
+fn count_lines(data: &[u8]) -> usize {
+    if data.is_empty() {
+        return 0;
+    }
+    let mut count = data.iter().filter(|&&b| b == b'\n').count();
+    if *data.last().unwrap() != b'\n' {
+        count += 1;
+    }
+    count
+}
+
+fn append_selected_lines(data: &[u8], line_start: usize, line_end: usize, out: &mut Vec<u8>) {
+    let mut first_line_non_empty = false;
+    let mut line = 1usize;
+    let mut start = 0usize;
+    while line <= line_end && start < data.len() {
+        let nl = data[start..].iter().position(|&b| b == b'\n');
+        let mut content_end = match nl {
+            Some(k) => start + k,
+            None => data.len(),
+        };
+        let terminated = nl.is_some();
+        if terminated && content_end > start && data[content_end - 1] == b'\r' {
+            content_end -= 1;
+        }
+        if line >= line_start {
+            if line > line_start {
+                out.push(b'\n');
+            }
+            out.extend_from_slice(&data[start..content_end]);
+            if line == line_start {
+                first_line_non_empty = content_end > start;
+            }
+        }
+        match nl {
+            Some(k) => {
+                start += k + 1;
+                line += 1;
+            }
+            None => break,
+        }
+    }
+    if line_end > line_start || first_line_non_empty {
+        out.push(b'\n');
+    }
 }
 fn safe_path(root: &Path, raw: &str) -> Result<PathBuf, String> {
     let p = Path::new(raw);

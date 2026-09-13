@@ -438,29 +438,29 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
     var verified: usize = 0;
     var issues: std.ArrayList([]const u8) = .empty;
     for (packet.evidence) |item| {
-        const issue = verifyEvidence(allocator, root, dir, item) catch |err| {
-            const msg = switch (err) {
-                error.InvalidPath => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
-                error.NotFound => blk: {
-                    var cwd_buf: [4096]u8 = undefined;
-                    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch 0;
-                    break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd_buf[0..cwd_len], root, item.path });
-                },
-                error.BadHash => try std.fmt.allocPrint(allocator, "invalid SHA-256 content hash \"{s}\"", .{item.content_hash}),
-                error.BadRange => try std.fmt.allocPrint(allocator, "invalid line range {d}-{d} for 3 line(s)", .{ item.line_start, item.line_end }),
-                error.HashMismatch => blk: {
-                    const actual = computeEvidenceHash(allocator, dir, item) catch null;
-                    if (actual) |hash| {
-                        break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}, got {s}", .{ item.content_hash, hash });
-                    }
-                    break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}", .{item.content_hash});
-                },
-                else => try std.fmt.allocPrint(allocator, "cannot verify evidence file \"{s}\"", .{item.path}),
-            };
-            try issues.append(allocator, try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg }));
+        const outcome = try verifyEvidence(allocator, dir, item);
+        if (outcome == .verified) {
+            verified += 1;
             continue;
+        }
+        const msg = switch (outcome) {
+            .verified => unreachable,
+            .invalid_path => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
+            .not_found => blk: {
+                var cwd_buf: [4096]u8 = undefined;
+                const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch 0;
+                break :blk try std.fmt.allocPrint(allocator, "cannot access evidence path \"{s}\": lstat {s}/{s}/{s}: no such file or directory", .{ item.path, cwd_buf[0..cwd_len], root, item.path });
+            },
+            .bad_hash => try std.fmt.allocPrint(allocator, "invalid SHA-256 content hash \"{s}\"", .{item.content_hash}),
+            .bad_range => |line_count| try std.fmt.allocPrint(allocator, "invalid line range {d}-{d} for {d} line(s)", .{ item.line_start, item.line_end, line_count }),
+            .hash_mismatch => |actual| blk: {
+                if (actual) |hash| {
+                    break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}, got {s}", .{ item.content_hash, hash });
+                }
+                break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}", .{item.content_hash});
+            },
         };
-        if (issue) verified += 1;
+        try issues.append(allocator, try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg }));
     }
     if (issues.items.len != 0) {
         const summary = try std.fmt.allocPrint(allocator, "evidence verification failed ({d} issue(s))", .{issues.items.len});
@@ -485,64 +485,80 @@ fn repositoryError(allocator: std.mem.Allocator, repo: []const u8, json_output: 
     return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
 }
 
-const VerifyError = error{InvalidPath, NotFound, BadHash, HashMismatch, BadRange, OutOfMemory};
+// Evidence verification mirrors the reference: files are read raw with no
+// size limit, a "\r\n" pair is one terminator, a final terminator adds no
+// trailing line, hashing joins the selected lines with "\n" and appends a
+// final "\n" for non-empty content, and one read feeds both the range check
+// and the digest (no re-read on mismatch).
+const VerifyOutcome = union(enum) {
+    verified,
+    invalid_path,
+    not_found,
+    bad_hash,
+    /// Carries the real line count for the error message.
+    bad_range: usize,
+    /// Carries the computed digest when it could be computed.
+    hash_mismatch: ?[]const u8,
+};
 
-fn verifyEvidence(allocator: std.mem.Allocator, root: []const u8, dir: std.Io.Dir, item: contract.Evidence) VerifyError!bool {
-    if (item.path.len == 0 or std.fs.path.isAbsolute(item.path) or std.mem.indexOf(u8, item.path, "..") != null) return error.InvalidPath;
-    const path = std.fs.path.join(allocator, &.{ root, item.path }) catch return error.NotFound;
-    const data = dir.readFileAlloc(std.Options.debug_io, item.path, allocator, .limited(1 << 20)) catch return error.NotFound;
-    if (item.line_start < 1 or item.line_end < item.line_start) return error.BadRange;
-    var line: i64 = 1;
-    var start: usize = 0;
-    var selected: std.ArrayList(u8) = .empty;
-    var i: usize = 0;
-    while (i <= data.len) : (i += 1) {
-        if (i == data.len or data[i] == '\n') {
-            if (line >= item.line_start and line <= item.line_end) {
-                var end = i;
-                if (end > start and data[end - 1] == '\r') end -= 1;
-                try selected.appendSlice(allocator, data[start..end]);
-                try selected.append(allocator, '\n');
-            }
-            line += 1;
-            start = i + 1;
-        }
-    }
-    const line_count = line - 1;
-    if (item.line_end > line_count) return error.BadRange;
-    const actual = computeEvidenceHash(allocator, dir, item) catch return error.BadRange;
+const VerifyError = error{OutOfMemory};
+
+fn verifyEvidence(allocator: std.mem.Allocator, dir: std.Io.Dir, item: contract.Evidence) VerifyError!VerifyOutcome {
+    if (item.path.len == 0 or std.fs.path.isAbsolute(item.path) or std.mem.indexOf(u8, item.path, "..") != null) return .invalid_path;
+    const data = dir.readFileAlloc(std.Options.debug_io, item.path, allocator, .unlimited) catch return .not_found;
+    const line_count = countNormalizedLines(data);
+    if (item.line_start < 1 or item.line_end < item.line_start or item.line_end > @as(i64, @intCast(line_count))) return .{ .bad_range = line_count };
     var expected = item.content_hash;
     if (std.mem.startsWith(u8, expected, "sha256:")) expected = expected[7..];
-    if (expected.len != 64) return error.BadHash;
+    if (expected.len != 64) return .bad_hash;
     for (expected) |c| {
-        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) return error.BadHash;
+        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) return .bad_hash;
     }
-    if (!std.ascii.eqlIgnoreCase(expected, &actual)) return error.HashMismatch;
-    _ = path;
-    return true;
-}
-
-fn computeEvidenceHash(allocator: std.mem.Allocator, dir: std.Io.Dir, item: contract.Evidence) ![64]u8 {
-    const data = try dir.readFileAlloc(std.Options.debug_io, item.path, allocator, .limited(1 << 20));
-    var line: i64 = 1;
-    var start: usize = 0;
     var selected: std.ArrayList(u8) = .empty;
-    var i: usize = 0;
-    while (i <= data.len) : (i += 1) {
-        if (i == data.len or data[i] == '\n') {
-            if (line >= item.line_start and line <= item.line_end) {
-                var end = i;
-                if (end > start and data[end - 1] == '\r') end -= 1;
-                try selected.appendSlice(allocator, data[start..end]);
-                try selected.append(allocator, '\n');
-            }
-            line += 1;
-            start = i + 1;
-        }
-    }
+    try appendSelectedLines(data, item.line_start, item.line_end, &selected, allocator);
     var digest: [32]u8 = undefined;
     Sha256.hash(selected.items, &digest, .{});
-    return std.fmt.bytesToHex(digest, .lower);
+    const actual = std.fmt.bytesToHex(digest, .lower);
+    if (!std.ascii.eqlIgnoreCase(expected, &actual)) {
+        return .{ .hash_mismatch = try allocator.dupe(u8, &actual) };
+    }
+    return .verified;
+}
+
+fn countNormalizedLines(data: []const u8) usize {
+    if (data.len == 0) return 0;
+    var count: usize = 0;
+    var offset: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, data, offset, '\n')) |index| {
+        count += 1;
+        offset = index + 1;
+    }
+    if (data[data.len - 1] != '\n') count += 1;
+    return count;
+}
+
+fn appendSelectedLines(data: []const u8, line_start: i64, line_end: i64, out: *std.ArrayList(u8), allocator: std.mem.Allocator) error{OutOfMemory}!void {
+    var first_line_non_empty = false;
+    var line: i64 = 1;
+    var start: usize = 0;
+    while (line <= line_end and start < data.len) {
+        const nl: ?usize = std.mem.indexOfScalarPos(u8, data, start, '\n');
+        var content_end: usize = data.len;
+        if (nl) |index| {
+            content_end = index;
+            if (content_end > start and data[content_end - 1] == '\r') content_end -= 1;
+        }
+        if (line >= line_start) {
+            if (line > line_start) try out.append(allocator, '\n');
+            try out.appendSlice(allocator, data[start..content_end]);
+            if (line == line_start) first_line_non_empty = content_end > start;
+        }
+        if (nl) |index| {
+            start = index + 1;
+            line += 1;
+        } else break;
+    }
+    if (line_end > line_start or first_line_non_empty) try out.append(allocator, '\n');
 }
 
 fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
@@ -604,12 +620,13 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         var node_failed = false;
         for (node.evidence_ids) |id| {
             const item = findEvidence(packet.evidence, id) orelse continue;
-            _ = verifyEvidence(allocator, root, dir, item) catch {
+            const outcome = try verifyEvidence(allocator, dir, item);
+            if (outcome != .verified) {
                 const detail = try std.fmt.allocPrint(allocator, "node \"{s}\": failed (evidence \"{s}\" is missing or not verified)", .{ node.node_id, id });
                 try details.append(allocator, detail);
                 node_failed = true;
                 break;
-            };
+            }
         }
         if (!node_failed) {
             try details.append(allocator, try std.fmt.allocPrint(allocator, "node \"{s}\": evidence_current", .{node.node_id}));
@@ -895,8 +912,12 @@ test "evidence verification hashes selected lines and normalizes CRLF" {
         .line_start = 2, .line_end = 2, .source = "test", .content_hash = &hash,
         .collected_at = "now", .verifier_status = "verified",
     };
-    try std.testing.expect(try verifyEvidence(arena.allocator(), ".", tmp.dir, item));
-    try std.testing.expectError(VerifyError.HashMismatch, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 2, .line_end = 2, .source = "test", .content_hash = &([_]u8{'0'} ** 64), .collected_at = "now", .verifier_status = "verified" }));
+    const outcome = try verifyEvidence(arena.allocator(), tmp.dir, item);
+    try std.testing.expect(outcome == .verified);
+    const mismatch = verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 2, .line_end = 2, .source = "test", .content_hash = &([_]u8{'0'} ** 64), .collected_at = "now", .verifier_status = "verified" }) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+    };
+    try std.testing.expectEqualStrings(&hash, mismatch.hash_mismatch orelse "missing");
 }
 
 test "evidence verification rejects unsafe paths and invalid ranges" {
@@ -906,8 +927,9 @@ test "evidence verification rejects unsafe paths and invalid ranges" {
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "source.txt", .data = "one\n" });
     const base = contract.Evidence{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 1, .line_end = 1, .source = "test", .content_hash = "", .collected_at = "now", .verifier_status = "verified" };
-    try std.testing.expectError(VerifyError.InvalidPath, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = "../source.txt", .commit = base.commit, .line_start = base.line_start, .line_end = base.line_end, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }));
-    try std.testing.expectError(VerifyError.BadRange, verifyEvidence(arena.allocator(), ".", tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = base.path, .commit = base.commit, .line_start = 3, .line_end = 3, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }));
+    const invalid = try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = "../source.txt", .commit = base.commit, .line_start = base.line_start, .line_end = base.line_end, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status });
+    try std.testing.expect(invalid == .invalid_path);
+    try std.testing.expectEqual(@as(usize, 1), (try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = base.path, .commit = base.commit, .line_start = 3, .line_end = 3, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status })).bad_range);
 }
 
 test "envelope validation rejects duplicate nodes and cycles" {
