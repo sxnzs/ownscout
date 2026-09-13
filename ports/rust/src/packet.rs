@@ -279,7 +279,7 @@ fn lower_bound<T: Ord>(values: &[T], needle: T) -> usize {
     }
 }
 
-fn go_is_print(c: char) -> bool {
+pub(crate) fn go_is_print(c: char) -> bool {
     let r = c as u32;
     if r <= 0xFF {
         if (0x20..=0x7E).contains(&r) {
