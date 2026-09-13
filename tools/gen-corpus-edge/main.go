@@ -552,8 +552,52 @@ func run() error {
 		spec{"node-edge-missing-flags-human", []string{"node", "verify"}},
 		spec{"node-edge-missing-flags-json", []string{"node", "verify", "--json"}},
 		spec{"node-edge-missing-flags-partial-json", []string{"node", "verify", "--json", "--repo", "fixtures/repo"}},
-		spec{"node-edge-unknown-flag-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--relocate", "--json"}},
+		spec{"node-edge-unknown-flag-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--bogus", "--json"}},
 	)
+	// node bind exposes the canonical packet binding so an envelope can be
+	// produced without importing internal/node. Cases cover the strict decode
+	// boundary (duplicate key), the contract path (violations, exit 1), a
+	// usage error, and both renderings of success.
+	cases = append(cases,
+		spec{"node-edge-bind-human", []string{"node", "bind", "--packet", "fixtures/packet-valid.json"}},
+		spec{"node-edge-bind-json", []string{"node", "bind", "--packet", "fixtures/packet-valid.json", "--json"}},
+		spec{"node-edge-bind-contract-fail-human", []string{"node", "bind", "--packet", "fixtures/edge/contract-invalid-schema.json"}},
+		spec{"node-edge-bind-decode-fail-json", []string{"node", "bind", "--packet", "fixtures/edge/packet-edge-node-duplicate-key.json", "--json"}},
+		spec{"node-edge-bind-missing-flag-human", []string{"node", "bind"}},
+	)
+	// ledger verify audits the hash chain read-only: no lock, no repository,
+	// no file creation. Cases cover a valid seed ledger, a corrupt one (exit
+	// 1) and a missing file (exit 2).
+	cases = append(cases,
+		spec{"ledger-edge-verify-human", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-seed.jsonl"}},
+		spec{"ledger-edge-verify-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-seed.jsonl", "--json"}},
+		spec{"ledger-edge-verify-garbage-human", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-garbage.jsonl"}},
+		spec{"ledger-edge-verify-garbage-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-garbage.jsonl", "--json"}},
+		spec{"ledger-edge-verify-absent-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-absent.jsonl", "--json"}},
+		spec{"ledger-edge-no-subcommand", []string{"ledger"}},
+		spec{"ledger-edge-unknown-subcommand", []string{"ledger", "bogus"}},
+	)
+	// node verify --relocate: the failure details gain the evidence issue
+	// lines with their relocation clauses; without the flag nothing changes.
+	relocateData, err := os.ReadFile(filepath.Join(edge, "packet-evidence-relocate-moved.json"))
+	if err != nil {
+		return err
+	}
+	relocateID, relocateBinding, err := bindingFor(relocateData)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(edge, "envelope-relocate-moved.json"), baseEnvelope(relocateID, relocateBinding)); err != nil {
+		return err
+	}
+	relocateNode := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-evidence-relocate-moved.json",
+		"--envelope", "fixtures/edge/envelope-relocate-moved.json", "--ledger", "ledger.jsonl"}
+	cases = append(cases,
+		spec{"node-edge-relocate-off-human", relocateNode},
+		spec{"node-edge-relocate-on-human", append(append([]string{}, relocateNode...), "--relocate")},
+		spec{"node-edge-relocate-on-json", append(append([]string{}, relocateNode...), "--relocate", "--json")},
+	)
+
 	cases = append(cases,
 		spec{"contract-edge-nonutf8-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json"}},
 		spec{"contract-edge-nonutf8-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json", "--json"}},

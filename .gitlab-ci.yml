@@ -27,6 +27,7 @@ reference:
     - go vet ./...
     - go test ./...
     - go build -o bin/ownscout ./cmd/ownscout
+    - make corpus-check
 
 ports:
   stage: ports

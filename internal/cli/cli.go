@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,7 +28,9 @@ Usage:
   ownscout version
   ownscout contract validate --packet <file> [--json]
   ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
-  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]
+  ownscout ledger verify --ledger <file> [--json]
+  ownscout node bind --packet <file> [--json]
+  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]
 
 Use "ownscout <command> --help" for command details.`
 
@@ -59,6 +62,8 @@ func Run(args []string, out io.Writer) int {
 		return runContract(args[1:], out)
 	case "evidence":
 		return runEvidence(args[1:], out)
+	case "ledger":
+		return runLedger(args[1:], out)
 	case "node":
 		return runNode(args[1:], out)
 	default:
@@ -70,32 +75,127 @@ func runNode(args []string, out io.Writer) int {
 	if len(args) == 0 {
 		return usageFailureWithJSON(out, "a node subcommand is required", "ownscout node --help", false)
 	}
-	if args[0] != "verify" {
+	switch args[0] {
+	case "bind":
+		return runNodeBind(args[1:], out)
+	case "verify":
+		flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{
+			"--repo":     true,
+			"--packet":   true,
+			"--envelope": true,
+			"--ledger":   true,
+		}, "--relocate")
+		if err != nil {
+			return usageFailureWithJSON(out, err.Error(), "ownscout node verify --help", hasJSON(args))
+		}
+		for _, flag := range []string{"--repo", "--packet", "--envelope", "--ledger"} {
+			if flags[flag] == "" {
+				return usageFailureWithJSON(out, "missing required "+flag+" value", "ownscout node verify --help", jsonOutput)
+			}
+		}
+
+		data, code := verifyNodeEnvelope(flags["--repo"], flags["--packet"], flags["--envelope"], flags["--ledger"], flags["--relocate"] != "")
+		return result(out, jsonOutput, data, code)
+	default:
 		return usageFailureWithJSON(out, "unknown node subcommand "+quote(args[0]), "ownscout node --help", hasJSON(args))
 	}
-	flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{
-		"--repo":     true,
-		"--packet":   true,
-		"--envelope": true,
-		"--ledger":   true,
-	})
+}
+
+func runNodeBind(args []string, out io.Writer) int {
+	flags, jsonOutput, err := parseFlags(args, map[string]bool{"--packet": true})
 	if err != nil {
-		return usageFailureWithJSON(out, err.Error(), "ownscout node verify --help", hasJSON(args))
+		return usageFailureWithJSON(out, err.Error(), "ownscout node bind --help", hasJSON(args))
 	}
-	for _, flag := range []string{"--repo", "--packet", "--envelope", "--ledger"} {
-		if flags[flag] == "" {
-			return usageFailureWithJSON(out, "missing required "+flag+" value", "ownscout node verify --help", jsonOutput)
-		}
+	packetPath := flags["--packet"]
+	if packetPath == "" {
+		return usageFailureWithJSON(out, "missing required --packet value", "ownscout node bind --help", jsonOutput)
 	}
 
-	data, code := verifyNodeEnvelope(flags["--repo"], flags["--packet"], flags["--envelope"], flags["--ledger"])
-	return result(out, jsonOutput, data, code)
+	packetBytes, err := readBounded(packetPath, "packet", nodepacket.MaxInputBytes)
+	if err != nil {
+		return result(out, jsonOutput, commandError("node bind", "packet could not be loaded", "packet input could not be read", "Provide a readable packet file with --packet <file>."), 2)
+	}
+	packet, violations := nodepacket.DecodeValid(packetBytes)
+	if len(violations) != 0 {
+		if len(violations) == 1 && violations[0].Rule == nodepacket.RuleDecode {
+			return result(out, jsonOutput, commandError("node bind", "packet could not be decoded", "strict packet decoding failed", "Provide one valid packet-v1 JSON object with --packet <file>."), 2)
+		}
+		return result(out, jsonOutput, resultData{
+			Command:    "node bind",
+			OK:         false,
+			Summary:    fmt.Sprintf("packet contract failed (%d violation(s))", len(violations)),
+			Details:    packetViolationDetails(violations),
+			NextAction: "Fix the packet contract, then run node binding again.",
+		}, 1)
+	}
+
+	binding, err := node.CanonicalPacketBinding(packet)
+	if err != nil {
+		return result(out, jsonOutput, commandError("node bind", "packet binding could not be computed", "canonical packet binding failed", "Provide a valid packet-v1 document and try again."), 2)
+	}
+	return result(out, jsonOutput, resultData{
+		Command:    "node bind",
+		OK:         true,
+		Summary:    "packet binding computed",
+		Details:    []string{binding},
+		NextAction: "Use this as packet_binding_sha256 in a node-envelope-v1 document.",
+	}, 0)
+}
+
+func runLedger(args []string, out io.Writer) int {
+	if len(args) == 0 {
+		return usageFailureWithJSON(out, "a ledger subcommand is required", "ownscout ledger --help", false)
+	}
+	if args[0] != "verify" {
+		return usageFailureWithJSON(out, "unknown ledger subcommand "+quote(args[0]), "ownscout ledger --help", hasJSON(args))
+	}
+	flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{"--ledger": true})
+	if err != nil {
+		return usageFailureWithJSON(out, err.Error(), "ownscout ledger verify --help", hasJSON(args))
+	}
+	ledgerPath := flags["--ledger"]
+	if ledgerPath == "" {
+		return usageFailureWithJSON(out, "missing required --ledger value", "ownscout ledger verify --help", jsonOutput)
+	}
+
+	summary, err := ledger.Verify(ledgerPath)
+	if err != nil {
+		var validationErr *ledger.ValidationError
+		if errors.As(err, &validationErr) {
+			return result(out, jsonOutput, resultData{
+				Command:    "ledger verify",
+				OK:         false,
+				Summary:    "ledger verification failed",
+				Details:    []string{err.Error()},
+				NextAction: "Repair the ledger, then run ledger verification again.",
+			}, 1)
+		}
+		return result(out, jsonOutput, resultData{
+			Command:    "ledger verify",
+			OK:         false,
+			Summary:    "ledger could not be read",
+			Details:    []string{err.Error()},
+			NextAction: "Provide a readable ledger file with --ledger <file>.",
+		}, 2)
+	}
+	tip := summary.Tip
+	if tip == "" {
+		tip = "none"
+	}
+	return result(out, jsonOutput, resultData{
+		Command:    "ledger verify",
+		OK:         true,
+		Summary:    "ledger is intact",
+		Details:    []string{fmt.Sprintf("%d record(s), tip %s", summary.Records, tip)},
+		NextAction: "The ledger chain is intact.",
+	}, 0)
 }
 
 // verifyNodeEnvelope is deliberately a data-producing function. The ledger
 // close is deferred until every path has been decided, while output is emitted
 // only after that close has succeeded or produced its own error.
-func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string) (data resultData, code int) {
+func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, relocateOption ...bool) (data resultData, code int) {
+	relocate := len(relocateOption) > 0 && relocateOption[0]
 	packetBytes, err := readBounded(packetPath, "packet", nodepacket.MaxInputBytes)
 	if err != nil {
 		return nodeError("packet could not be loaded", "packet input could not be read", "Provide a readable packet file with --packet <file>."), 2
@@ -143,7 +243,7 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string) (
 		}
 	}()
 
-	report, err := evidence.VerifyPacket(repoPath, packet)
+	report, err := evidence.VerifyPacketWithOptions(repoPath, packet, evidence.Options{Relocate: relocate})
 	if err != nil {
 		return nodeError("repository could not be checked", "repository evidence verification could not run", "Provide a readable repository directory with --repo <dir>."), 2
 	}
@@ -166,6 +266,9 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string) (
 
 	details := nodeResultDetails(evaluation.Results)
 	if !evaluation.OK {
+		if relocate {
+			details = append(details, evidenceIssues(report)...)
+		}
 		return resultData{
 			Command:    "node verify",
 			OK:         false,
@@ -183,8 +286,12 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string) (
 	}, 0
 }
 
+func commandError(command, summary, detail, next string) resultData {
+	return resultData{Command: command, OK: false, Summary: summary, Details: []string{detail}, NextAction: next}
+}
+
 func nodeError(summary, detail, next string) resultData {
-	return resultData{Command: "node verify", OK: false, Summary: summary, Details: []string{detail}, NextAction: next}
+	return commandError("node verify", summary, detail, next)
 }
 
 func nodeResultDetails(results []node.Result) []string {
@@ -300,8 +407,10 @@ func writeHelp(args []string, out io.Writer) int {
 			text = "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules."
 		case "evidence":
 			text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository."
+		case "ledger":
+			text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it."
 		case "node":
-			text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results."
+			text = "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence."
 		}
 	}
 	if len(args) >= 2 && args[0] == "contract" && args[1] == "validate" {
@@ -310,8 +419,14 @@ func writeHelp(args []string, out io.Writer) int {
 	if len(args) >= 2 && args[0] == "evidence" && args[1] == "verify" {
 		text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun."
 	}
+	if len(args) >= 2 && args[0] == "ledger" && args[1] == "verify" {
+		text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file."
+	}
+	if len(args) >= 2 && args[0] == "node" && args[1] == "bind" {
+		text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file."
+	}
 	if len(args) >= 2 && args[0] == "node" && args[1] == "verify" {
-		text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun."
+		text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun."
 	}
 	writeHuman(out, text)
 	return 0

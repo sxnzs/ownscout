@@ -239,6 +239,60 @@ func (s *Store) Close() error {
 	return errors.Join(unlockErr, closeErr)
 }
 
+// Summary is the read-only result of auditing a ledger file.
+type Summary struct {
+	Records int
+	Tip     string
+}
+
+// ValidationError indicates that a ledger was readable but failed the same
+// chain validation used by Open. It lets callers distinguish an invalid ledger
+// from an I/O failure without changing the validation error text.
+type ValidationError struct {
+	Err error
+}
+
+func (e *ValidationError) Error() string { return e.Err.Error() }
+func (e *ValidationError) Unwrap() error { return e.Err }
+
+// Verify audits a ledger without opening it for append. It takes no lock,
+// requires no repository, and never creates or modifies the ledger path.
+// Missing and unreadable files are returned as ordinary I/O errors; a readable
+// file that fails validateLedger is returned as a ValidationError.
+func Verify(path string) (Summary, error) {
+	ledgerPath, err := filepath.Abs(path)
+	if err != nil {
+		return Summary{}, fmt.Errorf("resolve ledger path: %w", err)
+	}
+	ledgerPath = filepath.Clean(ledgerPath)
+
+	file, err := os.Open(ledgerPath)
+	if err != nil {
+		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, int64(maxLedgerSize)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, readErr)
+	}
+	if closeErr != nil {
+		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, closeErr)
+	}
+	if len(data) > maxLedgerSize {
+		return Summary{}, fmt.Errorf("read ledger %q: ledger exceeds %d bytes", ledgerPath, maxLedgerSize)
+	}
+
+	last, count, err := validateLedger(data)
+	if err != nil {
+		return Summary{}, &ValidationError{Err: fmt.Errorf("validate ledger %q: %w", ledgerPath, err)}
+	}
+	summary := Summary{Records: count}
+	if count != 0 {
+		summary.Tip = last.RecordHash
+	}
+	return summary, nil
+}
+
 func resolveRepoRoot(path string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {

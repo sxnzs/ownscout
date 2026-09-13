@@ -2006,12 +2006,205 @@
         "fixtures/envelope-valid.json",
         "--ledger",
         "ledger.jsonl",
-        "--relocate",
+        "--bogus",
         "--json"
       ],
       "exitCode": 2,
       "name": "node-edge-unknown-flag-json",
-      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"unknown flag or argument '--relocate'\",\"details\":[\"usage: ownscout node verify --help\"],\"next_action\":\"Run 'ownscout node verify --help'.\"}\n"
+      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"unknown flag or argument '--bogus'\",\"details\":[\"usage: ownscout node verify --help\"],\"next_action\":\"Run 'ownscout node verify --help'.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/packet-valid.json"
+      ],
+      "exitCode": 0,
+      "name": "node-edge-bind-human",
+      "stdout": "OK: packet binding computed\n  - 63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\nNext action: Use this as packet_binding_sha256 in a node-envelope-v1 document.\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "node-edge-bind-json",
+      "stdout": "{\"command\":\"node bind\",\"ok\":true,\"summary\":\"packet binding computed\",\"details\":[\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\"],\"next_action\":\"Use this as packet_binding_sha256 in a node-envelope-v1 document.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/edge/contract-invalid-schema.json"
+      ],
+      "exitCode": 1,
+      "name": "node-edge-bind-contract-fail-human",
+      "stdout": "ERROR: packet contract failed (1 violation(s))\n  - schema_version: schema_version: must be v1\nNext action: Fix the packet contract, then run node binding again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/edge/packet-edge-node-duplicate-key.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-bind-decode-fail-json",
+      "stdout": "{\"command\":\"node bind\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-bind-missing-flag-human",
+      "stdout": "error: missing required --packet value\nNext action: run 'ownscout node bind --help'.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-seed.jsonl"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-human",
+      "stdout": "OK: ledger is intact\n  - 1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\nNext action: The ledger chain is intact.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-seed.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":true,\"summary\":\"ledger is intact\",\"details\":[\"1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\"],\"next_action\":\"The ledger chain is intact.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-garbage.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-verify-garbage-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-garbage.jsonl\": line 1: malformed JSON: invalid character 'o' in literal null (expecting 'u')\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-garbage.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-verify-garbage-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-garbage.jsonl\\\": line 1: malformed JSON: invalid character 'o' in literal null (expecting 'u')\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-absent.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-verify-absent-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger could not be read\",\"details\":[\"read ledger \\\"{{DIR}}/fixtures/edge/ledger-absent.jsonl\\\": open {{DIR}}/fixtures/edge/ledger-absent.jsonl: no such file or directory\"],\"next_action\":\"Provide a readable ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "ledger"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-no-subcommand",
+      "stdout": "error: a ledger subcommand is required\nNext action: run 'ownscout ledger --help'.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "bogus"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-unknown-subcommand",
+      "stdout": "error: unknown ledger subcommand 'bogus'\nNext action: run 'ownscout ledger --help'.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--envelope",
+        "fixtures/edge/envelope-relocate-moved.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"445d5a11a25eab1f654e136c50eafd57a7d9490dbb484b46e00b05183c08f673\",\"envelope_sha256\":\"9376603c862eb70ac32506fec27373518ad32a67cb9c9d11ea6b57902faaf7ba\",\"packet_binding_sha256\":\"d6964313a1c45d8676a34210de7d7a2ad27ffeb64433117883cf67bb193be3e2\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-relocate-off-human",
+      "stdout": "ERROR: node evaluation failed\n  - node \"a\": failed (evidence \"evidence-1\" is missing or not verified)\n  - node \"b\": blocked (dependency \"a\" is not evidence_current)\nNext action: Refresh or correct the failed evidence, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--envelope",
+        "fixtures/edge/envelope-relocate-moved.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"445d5a11a25eab1f654e136c50eafd57a7d9490dbb484b46e00b05183c08f673\",\"envelope_sha256\":\"9376603c862eb70ac32506fec27373518ad32a67cb9c9d11ea6b57902faaf7ba\",\"packet_binding_sha256\":\"d6964313a1c45d8676a34210de7d7a2ad27ffeb64433117883cf67bb193be3e2\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-relocate-on-human",
+      "stdout": "ERROR: node evaluation failed\n  - node \"a\": failed (evidence \"evidence-1\" is missing or not verified)\n  - node \"b\": blocked (dependency \"a\" is not evidence_current)\n  - evidence \"evidence-1\" (\"drift.txt\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)\nNext action: Refresh or correct the failed evidence, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--envelope",
+        "fixtures/edge/envelope-relocate-moved.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"445d5a11a25eab1f654e136c50eafd57a7d9490dbb484b46e00b05183c08f673\",\"envelope_sha256\":\"9376603c862eb70ac32506fec27373518ad32a67cb9c9d11ea6b57902faaf7ba\",\"packet_binding_sha256\":\"d6964313a1c45d8676a34210de7d7a2ad27ffeb64433117883cf67bb193be3e2\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-relocate-on-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"node evaluation failed\",\"details\":[\"node \\\"a\\\": failed (evidence \\\"evidence-1\\\" is missing or not verified)\",\"node \\\"b\\\": blocked (dependency \\\"a\\\" is not evidence_current)\",\"evidence \\\"evidence-1\\\" (\\\"drift.txt\\\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)\"],\"next_action\":\"Refresh or correct the failed evidence, then run node verification again.\"}\n"
     },
     {
       "args": [
