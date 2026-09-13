@@ -16,15 +16,17 @@ ancestors (with the macOS `/var` system-link exception), pinned by the
 following links; the residual `Open` hardening (link count 1, parent identity,
 resolved-path equality, `flock`) is still not ported and has no corpus case.
 
-## 1. Packet open/read failures use a fixed detail
+## 1. Uncommon packet read failures keep a generic detail
 
-`internal/cli/adapter.go` `readBounded` returns the underlying OS error, so the
-reference prints e.g.
-`open packet "p": open p: permission denied` or
-`read packet "d": read d: is a directory`. This port collapses every non-missing
-read failure to `read packet "<path>" failed`. A missing file
-(`packet file "<path>" does not exist`) retains the loaded shape. The 1 MiB cap
-is a strict decode failure and uses the generic decode response.
+`internal/cli/packet.go` `readBounded` returns the underlying OS error. The
+shapes the reference actually produces now match byte-for-byte: a directory
+input (`read packet "d": read d: is a directory`), permission denied
+(`open packet "p": open p: permission denied`), a missing file
+(`packet file "<path>" does not exist`) and the 1 MiB cap
+(`packet exceeds 1048576 byte input limit`, reported as the loaded shape, not a
+decode failure). An OS read error outside those shapes (an I/O error) is
+collapsed to `read packet "<path>": read <path> failed` instead of the strerror
+text; no corpus case reaches it.
 
 ## 2. Append failures report the Open wording — fixed
 

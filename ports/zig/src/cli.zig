@@ -30,6 +30,7 @@ fn usage(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
     if (args.len >= 2 and std.mem.eql(u8, args[0], "contract") and std.mem.eql(u8, args[1], "validate")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "evidence") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "ledger") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.";
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "ledger") and std.mem.eql(u8, args[1], "rotate")) text = "Usage: ownscout ledger rotate --ledger <file> [--json]\n\nAudits the chain, then renames the ledger to <file>.<tip8> so the next verification starts a fresh chain.\n\nNext action: provide --ledger with a readable, non-empty ledger file.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "bind")) text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun.";
     return try std.fmt.allocPrint(allocator, "{s}\n", .{text});
@@ -105,8 +106,9 @@ fn nodeBind(allocator: std.mem.Allocator, args: []const []const u8, json_output:
     }
     if (packet_path == null or packet_path.?.len == 0) return fail(allocator, "missing required --packet value", "ownscout node bind --help", json_output);
     const packet = loadNodePacket(allocator, packet_path.?) catch |err| {
-        if (err == error.NotFound or err == error.ReadFailed) {
-            const details = [_][]const u8{"packet input could not be read"};
+        if (err == error.NotFound or err == error.ReadFailed or err == error.TooBig or err == error.IsDir or err == error.AccessDenied) {
+            const detail = try readDetail(allocator, "packet", packet_path.?, err);
+            const details = [_][]const u8{detail};
             return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable packet file with --packet <file>." }, json_output), .code = 2 };
         }
         const details = [_][]const u8{"strict packet decoding failed"};
@@ -126,7 +128,7 @@ fn nodeBind(allocator: std.mem.Allocator, args: []const []const u8, json_output:
     return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = true, .summary = "packet binding computed", .details = &details, .next_action = "Use this as packet_binding_sha256 in a node-envelope-v1 document." }, json_output), .code = 0 };
 }
 
-const LoadError = error{ NotFound, ReadFailed, TooBig, WrongType };
+const LoadError = error{ NotFound, ReadFailed, TooBig, IsDir, AccessDenied, WrongType };
 
 /// nodepacket.MaxInputBytes: the inclusive packet size limit, including whitespace.
 const max_packet_bytes: usize = 1 << 20;
@@ -253,6 +255,8 @@ fn loadNodePacket(allocator: std.mem.Allocator, path: []const u8) LoadError!cont
     const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(max_packet_bytes + 1)) catch |err| switch (err) {
         error.FileNotFound => return error.NotFound,
         error.StreamTooLong => return error.TooBig,
+        error.IsDir => return error.IsDir,
+        error.AccessDenied => return error.AccessDenied,
         else => return error.ReadFailed,
     };
     if (data.len > max_packet_bytes) return error.TooBig;
@@ -601,20 +605,30 @@ fn invalidPacketDetails(allocator: std.mem.Allocator, violations: []const contra
     return try details.toOwnedSlice(allocator);
 }
 
+/// Go's readBounded error text: a missing file and the 1 MiB cap have fixed
+/// wording, while an open/read failure surfaces the OS error. The directory and
+/// permission-denied texts match Go's PathError for the shapes the reference
+/// produces.
+fn readDetail(allocator: std.mem.Allocator, kind: []const u8, path: []const u8, err: LoadError) ![]const u8 {
+    return switch (err) {
+        error.NotFound => try std.fmt.allocPrint(allocator, "{s} file \"{s}\" does not exist", .{ kind, path }),
+        error.TooBig => try std.fmt.allocPrint(allocator, "{s} exceeds {d} byte input limit", .{ kind, max_packet_bytes }),
+        error.IsDir => try std.fmt.allocPrint(allocator, "read {s} \"{s}\": read {s}: is a directory", .{ kind, path, path }),
+        error.AccessDenied => try std.fmt.allocPrint(allocator, "open {s} \"{s}\": open {s}: permission denied", .{ kind, path, path }),
+        else => try std.fmt.allocPrint(allocator, "read {s} \"{s}\": read {s} failed", .{ kind, path, path }),
+    };
+}
+
 /// The strict packet boundary shared by every command: a read failure is
 /// "packet could not be loaded"; any decode rejection is "packet could not be
 /// decoded". Mirrors loadPacket plus isDecodeFailure in internal/cli/adapter.go.
 fn packetLoadFailure(allocator: std.mem.Allocator, command: []const u8, path: []const u8, err: LoadError, json_output: bool) !RunResult {
-    if (err == error.NotFound or err == error.ReadFailed) {
-        const detail = if (err == error.NotFound)
-            try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{path})
-        else
-            try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{path});
+    if (err == error.NotFound or err == error.ReadFailed or err == error.TooBig or err == error.IsDir or err == error.AccessDenied) {
+        const detail = try readDetail(allocator, "packet", path, err);
         const details = [_][]const u8{detail};
         return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable JSON packet with --packet <file>." }, json_output), .code = 2 };
     }
-    // All strict decoder failures, including the size limit, use one generic
-    // response and never expose packet data or decoder diagnostics.
+    // A strict decoder rejection never exposes packet data or diagnostics.
     const details = [_][]const u8{"strict packet decoding failed"};
     return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
 }
@@ -1017,10 +1031,11 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
     const envelope_path = envelope_value.?;
     const ledger_path = ledger_value.?;
     const packet = loadNodePacket(allocator, packet_path) catch |err| {
-        // Every strict decoder rejection, including an oversized packet, is
-        // generic; only filesystem failures retain the loaded shape.
-        if (err == error.NotFound or err == error.ReadFailed) {
-            const details = [_][]const u8{"packet input could not be read"};
+        // A strict decoder rejection is generic; a filesystem failure surfaces
+        // the same readBounded text the reference prints.
+        if (err == error.NotFound or err == error.ReadFailed or err == error.TooBig or err == error.IsDir or err == error.AccessDenied) {
+            const detail = try readDetail(allocator, "packet", packet_path, err);
+            const details = [_][]const u8{detail};
             return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable packet file with --packet <file>." }, json_output), .code = 2 };
         }
         const details = [_][]const u8{"strict packet decoding failed"};
@@ -1032,10 +1047,23 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         const summary = try std.fmt.allocPrint(allocator, "packet contract failed ({d} violation(s))", .{violations.len});
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = summary, .details = details, .next_action = "Fix the packet contract, then run node verification again." }, json_output), .code = 2 };
     }
-    const envelope_data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, envelope_path, allocator, .limited(1 << 20)) catch {
-        const details = [_][]const u8{"envelope input could not be read"};
+    const envelope_data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, envelope_path, allocator, .limited(max_packet_bytes + 1)) catch |err| {
+        const load_err: LoadError = switch (err) {
+            error.FileNotFound => error.NotFound,
+            error.StreamTooLong => error.TooBig,
+            error.IsDir => error.IsDir,
+            error.AccessDenied => error.AccessDenied,
+            else => error.ReadFailed,
+        };
+        const detail = try readDetail(allocator, "envelope", envelope_path, load_err);
+        const details = [_][]const u8{detail};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "envelope could not be loaded", .details = &details, .next_action = "Provide a readable envelope file with --envelope <file>." }, json_output), .code = 2 };
     };
+    if (envelope_data.len > max_packet_bytes) {
+        const detail = try readDetail(allocator, "envelope", envelope_path, error.TooBig);
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "envelope could not be loaded", .details = &details, .next_action = "Provide a readable envelope file with --envelope <file>." }, json_output), .code = 2 };
+    }
     const envelope = parseEnvelope(allocator, envelope_data) catch {
         const details = [_][]const u8{"strict envelope parsing failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "envelope could not be parsed", .details = &details, .next_action = "Provide one valid node-envelope-v1 JSON object with --envelope <file>." }, json_output), .code = 2 };
@@ -3056,7 +3084,7 @@ test "strict node decoding accepts the exact valid shape" {
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, frac_path));
 }
 
-test "oversized packets are generic decode failures for packet commands" {
+test "oversized packets report the read cap, not a decode failure" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -3070,15 +3098,19 @@ test "oversized packets are generic decode failures for packet commands" {
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "oversized.json", .data = data });
     const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/oversized.json", .{tmp.sub_path});
 
-    const contract_result = try run(allocator, &.{ "contract", "validate", "--packet", path, "--json" });
-    try std.testing.expectEqual(@as(u8, 2), contract_result.code);
-    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "strict packet decoding failed") != null);
-    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "oversized.json") == null);
-
-    const evidence_result = try run(allocator, &.{ "evidence", "verify", "--repo", ".", "--packet", path, "--json" });
-    try std.testing.expectEqual(@as(u8, 2), evidence_result.code);
-    try std.testing.expect(std.mem.indexOf(u8, evidence_result.output, "strict packet decoding failed") != null);
-    try std.testing.expect(std.mem.indexOf(u8, evidence_result.output, "oversized.json") == null);
+    // readBounded reports the cap before any decode, so the reference's
+    // "packet could not be loaded" shape wins over the generic decode response.
+    for ([_][]const u8{ "contract", "evidence" }) |command| {
+        const args: []const []const u8 = if (std.mem.eql(u8, command, "contract"))
+            &.{ "contract", "validate", "--packet", path, "--json" }
+        else
+            &.{ "evidence", "verify", "--repo", ".", "--packet", path, "--json" };
+        const response = try run(allocator, args);
+        try std.testing.expectEqual(@as(u8, 2), response.code);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "packet could not be loaded") != null);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "packet exceeds 1048576 byte input limit") != null);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "strict packet decoding failed") == null);
+    }
 }
 
 test "envelope validation rejects duplicate nodes and cycles" {
