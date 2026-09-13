@@ -17,7 +17,23 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))  # spec/parity -> repo root
 FIXTURES = os.path.join(HERE, "fixtures")
+
+
+def newest_source_mtime():
+    """The newest mtime among the Go sources the reference is built from."""
+    newest = 0.0
+    for base in ("internal", "cmd"):
+        for root, _, files in os.walk(os.path.join(REPO, base)):
+            for name in files:
+                if name.endswith(".go"):
+                    newest = max(newest, os.path.getmtime(os.path.join(root, name)))
+    for name in ("go.mod", "go.sum"):
+        path = os.path.join(REPO, name)
+        if os.path.exists(path):
+            newest = max(newest, os.path.getmtime(path))
+    return newest
 
 PACKET_CASES = [
     ["contract", "validate", "--packet", "fixtures/mutated.json"],
@@ -199,6 +215,12 @@ def main():
         if not os.path.exists(binary) or not os.access(binary, os.X_OK):
             print("fuzz: {} binary is missing or not executable: {}".format(label, binary))
             return 2
+    # A stale reference reports divergences the candidate does not have, which
+    # costs a lane real time and can send it chasing a bug that is not there.
+    # make fuzz-sweep rebuilds both binaries first; a bare call does not.
+    if os.path.getmtime(reference) < newest_source_mtime():
+        print("fuzz: WARNING: the reference binary is older than the Go sources; "
+              "run `make reference` first or every divergence below may be false")
 
     rng = random.Random(args.seed)
     # The ledger phase draws from its own stream, so adding it left every
