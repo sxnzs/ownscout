@@ -1,0 +1,41 @@
+{
+  "authorization": {
+    "level": "autonomous"
+  },
+  "budget": {
+    "max_bytes": 1000,
+    "max_evidence": 1,
+    "used_bytes": 12,
+    "used_evidence": 1
+  },
+  "degradations": [],
+  "evidence": [
+    {
+      "collected_at": "2026-09-05T00:00:00Z",
+      "commit": "deadbeef",
+      "content_hash": "sha256:15be1ea9ba76241f644c9162c71ba97565e409c82cd78725461a3f36072dae4b",
+      "evidence_id": "evidence-1",
+      "kind": "source",
+      "line_end": 1,
+      "line_start": 1,
+      "path": "trailcr.txt",
+      "source": "test fixture",
+      "verifier_status": "verified"
+    }
+  ],
+  "freshness": {
+    "head_commit": "deadbeef",
+    "status": "current"
+  },
+  "head_commit": "deadbeef",
+  "issued_at": "2026-09-05T00:00:00Z",
+  "outcome": "complete",
+  "packet_hash": "packet-hash",
+  "packet_id": "packet-1",
+  "provenance": {
+    "tool": "test"
+  },
+  "repo_root": "testdata/repo",
+  "request_id": "request-1",
+  "schema_version": "v1"
+}
