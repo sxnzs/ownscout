@@ -1,20 +1,20 @@
 # OwnScout language ports
 
 Three independent, standard-library-only ports of the Go reference in `internal/`,
-all verified byte-for-byte against the same recorded oracle.
+all verified byte-for-byte against the same golden corpus.
 
 ## Status (2026-09-13)
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 140/140 | 128 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 140/140 | 24 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 140/140 | 24 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 150/150 | 128 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 150/150 | 24 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 150/150 | 24 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 69 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
 verification hashes cited ranges in place (no intermediate copies), with a
-differential oracle kept in the test package, and `evidence verify --relocate`
+differential reference kept in the test package, and `evidence verify --relocate`
 re-resolves a failed span against its recorded content fingerprint.
 
 ## How to verify
@@ -35,7 +35,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 140 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge corpus: 150 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
@@ -43,9 +43,9 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   outcomes: moved, absent, shrunken file, and budget-stopped, and the
   unknown-field surface: Go `%q` quoting of a field name across `\x`, `\u` and
   `\U` widths, and which of two decode errors in one nested object is reported).
-- Oracle mutation test: four deliberately broken reference builds fail the
-  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 125/140, 74/140, 138/140 and
-  138/140), so a pass is meaningful. The quoting and precedence cases cannot be
+- Golden corpus mutation test: four deliberately broken reference builds fail the
+  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 134/150, 79/150, 148/150 and
+  148/150), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
   `encoding/json`; they are validated instead by all three ports failing them
   before the fix (TypeScript 6, Rust 8, Zig 8 of the new cases).
@@ -110,7 +110,7 @@ The fix needs three escape widths - `\xNN` for control bytes and DEL, `\uNNNN` u
 to U+FFFF, `\UNNNNNNNN` above it - with printable runes left literal, and the
 unknown-field check interleaved with the type checks so document order decides.
 Twelve cases pin it (`contract-edge-unknown-*` and
-`contract-edge-precedence-*`). All three ports pass 140/140 and fuzz seed 13 is
+`contract-edge-precedence-*`). All three ports pass 150/150 and fuzz seed 13 is
 clean; the `DIVERGENCES.md` files they had been recorded in are gone.
 
 ### Case folding, raw UTF-8 and null elements (seeds 3-21)
@@ -131,10 +131,29 @@ inherited by the reference from `encoding/json`:
   reference reports 12.
 
 Eight cases pin these (`contract-edge-case-top`, `-case-nested`,
-`-null-evidence-element`, `-unknown-badutf8`), taking the corpus to 140. These
+`-null-evidence-element`, `-unknown-badutf8`), taking the corpus to 150. These
 were found by sweeping seeds, not by the single seed 13 that the earlier rounds
 used - the fuzzer's coverage is seed-dependent, so a clean seed 13 is not
 evidence that a port is exact.
+
+### Node-envelope identifier validation (seed 24)
+
+The next class was not about case at all. Identifiers are validated as
+1-128 bytes, alphanumeric with `.`, `_`, `-` and `:` allowed only after the first
+character, and while the corpus covered a null `node_id` it had no character,
+length or leading-character case. Seed 24 reached the gap with an `envelope_id`
+of `env%lope-1`.
+
+TypeScript already validated every identifier; Rust and Zig validated `node_id`
+but not `envelope_id`, so both accepted an envelope the reference rejects. Eight
+cases pin the rule (`node-edge-identifier-*`).
+
+### What this says about the gate
+
+Five divergence classes in a row were reachable only at seeds the gate does not
+run. A single seed is not a verification strategy: the cheap fix is to sweep a
+range of seeds in CI rather than pick one, and to treat "clean at seed N" as
+evidence about seed N only.
 
 ## Port design
 
@@ -164,7 +183,7 @@ evidence that a port is exact.
 ## Commits
 
 Parity layer: `caee7f2` corpus, `0b9d247` edge corpus, `ced66f3` verifier,
-`1c5dcc5` ledger chaining, `0dcb0e9` oracle mutation test, `497e91b` fuzzer,
+`1c5dcc5` ledger chaining, `0dcb0e9` corpus mutation test, `497e91b` fuzzer,
 `2c8e247` all-ports grader, `27d81ff` Makefile, `b61f237` layout.
 Ports: `59d701b` TypeScript, `e5c3c9d` Rust, `9c62f3b` Zig, `aeb2357`/ `c7b2f3a`
 tests, `9c2f069` fuzz fix.

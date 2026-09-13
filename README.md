@@ -8,7 +8,7 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 140/140" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20140%2F140-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 150/150" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20150%2F150-2ea043?style=flat-square"></a>
   <a href="#verification"><img alt="245 tests passing" src="https://img.shields.io/badge/tests-245%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
@@ -180,7 +180,7 @@ standard-library-only reimplementations reproduce its stdout, exit codes and
 ledger bytes exactly.
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="Go reference records the oracle; TypeScript, Rust and Zig replay it" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Go reference records the golden corpus; TypeScript, Rust and Zig replay it" width="100%">
 </p>
 
 | Port | Binary | Build | Tests | Dependencies |
@@ -207,19 +207,19 @@ A port is only interesting if a passing grade means something. Here is how
 parity is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 140 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 150 edge cases" width="100%">
 </p>
 
-- **Recorded oracle.** The Go reference records 28 base cases and 140 hardening
+- **Golden corpus.** The Go reference records 28 base cases and 150 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
   ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
   empty selected line, and evidence files beyond 1 MiB, and the anchor
   re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
   Every port replays them byte-for-byte.
-- **Mutation-tested oracle.** Four deliberately broken reference builds fail
-  the corpora (base 26/28, 20/28, 28/28 and 28/28; edge 125/140, 74/140, 138/140
-  and 138/140), so a pass is evidence, not a formality. The newest mutant strips
+- **Mutation-tested corpus.** Four deliberately broken reference builds fail
+  the corpora (base 26/28, 20/28, 28/28 and 28/28; edge 134/150, 79/150, 148/150
+  and 148/150), so a pass is evidence, not a formality. The newest mutant strips
   the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
   see, which is why the edge corpus exists.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
@@ -228,7 +228,7 @@ parity is established.
   `degradations` must count as *absent* for the required-field rule but still
   trigger the "complete packet requires at least one evidence entry" rule.
 - **Protected paths.** The verifier fails if anything outside `ports/` is
-  modified, so a port lane cannot quietly patch the oracle.
+  modified, so a port lane cannot quietly patch the corpus.
 
 Run it yourself:
 
@@ -253,7 +253,7 @@ ports/
   ts/  rust/  zig/   independent reimplementations
 plans/               design notes, including the DeltaDB primitive study
 spec/
-  parity/            the oracle: corpora, harness, verifier, fuzzer
+  parity/            the golden corpora, replay harness, verifier, fuzzer
 specs/               packet-v1 and node-envelope-v1 documents
 docs/
   assets/            the visuals used in this README

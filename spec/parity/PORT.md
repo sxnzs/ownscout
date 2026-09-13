@@ -2,7 +2,7 @@
 
 This directory records the exact behavior a port must reproduce. The Go
 implementation under `internal/` is the reference; `corpus.json` is the
-oracle. Read the Go source — it is the specification.
+golden corpus. Read the Go source — it is the specification.
 
 ## What to build
 
@@ -32,7 +32,7 @@ Commands:
 - `1` contract failure, evidence failure, or node graph failure after append
 - `2` usage error, malformed input, missing file, or repository/ledger I/O
 
-## The oracle
+## The golden corpus
 
 ```
 python3 spec/parity/harness.py --bin ports/<lang>/<binary>
@@ -59,7 +59,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (140 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (150 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), an in-repository ledger rejection, the raw-byte evidence shapes
@@ -83,17 +83,17 @@ Run it with the same harness:
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
 ```
 
-## Oracle validation
+## Golden corpus validation
 
 The corpus was mutation-tested against three deliberately broken reference builds:
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 125/140 |
-| `next_action` renamed to `nextAction` | 20/28 | 74/140 |
-| final newline always appended to the hashed evidence range | 28/28 | 138/140 |
-| `\r` stripped without its `\n` in the relocation path | 28/28 | 138/140 |
-| unmutated reference | 28/28 | 140/140 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 134/150 |
+| `next_action` renamed to `nextAction` | 20/28 | 79/150 |
+| final newline always appended to the hashed evidence range | 28/28 | 148/150 |
+| `\r` stripped without its `\n` in the relocation path | 28/28 | 148/150 |
+| unmutated reference | 28/28 | 150/150 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the
@@ -110,7 +110,7 @@ re-measured against the current 120-case set.
   unknown fields rejected, no trailing JSON, 1 MiB inclusive limit, valid UTF-8.
 - **Contract validation** (`internal/contract/contract.go`) and the
   outcome -> action table in `specs/packet-v1.md`. Violation ordering and the
-  human/JSON rendering are part of the oracle.
+  human/JSON rendering are part of the contract.
 - **Evidence verification** (`internal/evidence/evidence.go`): resolve the repo
   root, confine evidence paths inside it (reject `..` and symlink escape),
   re-hash the current working-tree file, normalize line endings, compare the
@@ -123,7 +123,7 @@ re-measured against the current 120-case set.
   fit and an 8 MiB cap on the total window bytes hashed. It is diagnostic only:
   status, counters, exit code and ledger bytes are unchanged, and a moved span
   stays `failed`. The three clauses - relocates, not found elsewhere, stopped on
-  the byte budget - are part of the oracle.
+  the byte budget - are part of the contract.
 - **node-envelope-v1** (`internal/node/`): the same strict-parse rules, a
   canonical packet binding digest, graph validation (duplicate ids and
   references, missing/self dependencies, cycles, size limits), deterministic
