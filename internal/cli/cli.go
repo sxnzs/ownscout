@@ -249,7 +249,7 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 
 	report, err := evidence.VerifyPacketWithOptions(repoPath, packet, evidence.Options{Relocate: relocate})
 	if err != nil {
-		return nodeError("repository could not be checked", "repository evidence verification could not run", "Provide a readable repository directory with --repo <dir>."), 2
+		return nodeError("repository could not be checked", err.Error(), "Provide a readable repository directory with --repo <dir>."), 2
 	}
 
 	evaluation := node.EvaluateEnvelope(env, packet, binding, report)
