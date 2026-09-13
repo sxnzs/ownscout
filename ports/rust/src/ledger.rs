@@ -149,6 +149,16 @@ impl Store {
         if s.len() + 1 > 65536 {
             return Err("record exceeds 65536 bytes".into());
         }
+        // The whole-ledger cap is checked again at append time: a ledger that
+        // was under 1 MiB at open must not grow past it with this record.
+        let size = self
+            .file
+            .metadata()
+            .map_err(|e| format!("stat ledger before append: {}", e))?
+            .len() as usize;
+        if size > MAX_LEDGER_SIZE || s.len() + 1 > MAX_LEDGER_SIZE - size {
+            return Err("ledger exceeds 1048576 bytes".into());
+        }
         self.file
             .write_all(s.as_bytes())
             .and_then(|_| self.file.write_all(b"\n"))
