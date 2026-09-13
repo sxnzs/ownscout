@@ -23,6 +23,9 @@ PACKET_CASES = [
     ["contract", "validate", "--packet", "fixtures/mutated.json"],
     ["contract", "validate", "--packet", "fixtures/mutated.json", "--json"],
     ["evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/mutated.json", "--json"],
+    # bind shares the strict decode boundary; a port that kept leniency on
+    # only this command would otherwise slip the packet-mutation phase.
+    ["node", "bind", "--packet", "fixtures/mutated.json", "--json"],
 ]
 ENVELOPE_CASES = [
     ["node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",

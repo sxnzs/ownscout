@@ -133,7 +133,13 @@ re-measured against the current 120-case set.
   topological evaluation with lexicographic tie-breaking, and an append-only
   JSONL ledger outside the repository with SHA-256 hash chaining
   (`internal/ledger/ledger.go`). The ledger has no timestamps and its exact
-  bytes are compared, so it must be reproduced byte-for-byte.
+  bytes are compared, so it must be reproduced byte-for-byte. The 1 MiB cap is
+  a rotation point: a full ledger surfaces as `ledger is full` with the
+  archive-aside recovery text, and `ledger verify` audits any file read-only
+  (non-regular paths rejected before open).
+- **node bind** (`internal/cli/cli.go`): the canonical packet binding digest,
+  computed at the shared strict boundary — contract violations exit 1, decode
+  failures exit 2 with the generic detail.
 - **Path safety**: repository and ledger paths are resolved, symlink ancestors
   are rejected where the Go code rejects them, and inputs are size-bounded.
 
