@@ -570,72 +570,382 @@ const RECORD_FIELDS: &[&str] = &[
 const NODE_RESULT_FIELDS: &[&str] = &["node_id", "status", "reason"];
 
 fn decode_record(data: &[u8]) -> Result<Record, String> {
-    // Go's validateJSONObject scans syntax first, then field shape.
-    let end = match go_scan(data) {
-        Ok(end) => end,
-        Err(e) => return Err(format!("malformed JSON: {}", e)),
+    go_validate_object(data)?;
+    let value = crate::json::parse(data).map_err(|e| format!("malformed JSON: {}", e))?;
+    let Value::Object(fields) = &value else {
+        return Err("record must be a JSON object".into());
     };
-    let rest = &data[end..];
-    if rest.iter().any(|b| !is_json_space(*b)) {
-        return match go_scan(rest) {
+    build_record(fields)
+}
+
+// go_validate_object reproduces the reference decode preflight: decoding the
+// document with the record's field set, then rejecting trailing data. Go 1.27
+// ships the encoding/json v2 implementation, whose token order and error text
+// differ from older releases, so this walks the document token by token the way
+// json.Decoder does.
+fn go_validate_object(data: &[u8]) -> Result<(), String> {
+    let mut dec = GoDec { data, pos: 0 };
+    match dec.token() {
+        Ok(GoTok::Delim(b'{')) => {}
+        Ok(_) => return Err("record must be a JSON object".into()),
+        Err(e) => return Err(format!("malformed JSON: {}", e)),
+    }
+    dec.consume_object(Some(RECORD_FIELDS))
+        .map_err(|e| format!("malformed JSON: {}", e))?;
+    dec.skip_ws();
+    if dec.pos < dec.data.len() {
+        return match dec.token() {
             Ok(_) => Err("trailing data".into()),
             Err(e) => Err(format!("trailing data: {}", e)),
         };
     }
-    let first = data
-        .iter()
-        .position(|b| !is_json_space(*b))
-        .unwrap_or(data.len());
-    if data.get(first) != Some(&b'{') {
-        return Err("record must be a JSON object".into());
-    }
-    let value =
-        crate::json::parse(data).map_err(|e| format!("malformed JSON: {}", e))?;
-    let Value::Object(fields) = &value else {
-        return Err("record must be a JSON object".into());
-    };
-    check_record_object(fields).map_err(|e| format!("malformed JSON: {}", e))?;
-    build_record(fields)
+    Ok(())
 }
 
-fn check_record_object(fields: &[(String, Value)]) -> Result<(), String> {
-    let mut seen: Vec<&str> = Vec::new();
-    for (key, value) in fields {
-        if seen.contains(&key.as_str()) {
-            return Err(format!(
-                "duplicate JSON field {}",
-                crate::packet::go_quote(key)
-            ));
+enum GoTok {
+    Delim(u8),
+    Str(String),
+    Other,
+}
+
+struct GoDec<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> GoDec<'a> {
+    fn skip_ws(&mut self) {
+        while self.pos < self.data.len() && is_json_space(self.data[self.pos]) {
+            self.pos += 1;
         }
-        seen.push(key.as_str());
-        if !RECORD_FIELDS.contains(&key.as_str()) {
-            return Err(non_canonical_or_unknown(key, RECORD_FIELDS));
+    }
+    fn peek(&self) -> Option<u8> {
+        self.data.get(self.pos).copied()
+    }
+    fn err_at(&self, pos: usize, context: &str) -> String {
+        format!("invalid character {} {}", quote_at(self.data, pos), context)
+    }
+
+    // token reads one value token, the way Decoder.Token does in a value slot.
+    fn token(&mut self) -> Result<GoTok, String> {
+        self.skip_ws();
+        let c = match self.peek() {
+            Some(c) => c,
+            None => return Err("EOF".into()),
+        };
+        match c {
+            b'{' => {
+                self.pos += 1;
+                Ok(GoTok::Delim(b'{'))
+            }
+            b'[' => {
+                self.pos += 1;
+                Ok(GoTok::Delim(b'['))
+            }
+            b'"' => Ok(GoTok::Str(self.string()?)),
+            b't' => {
+                self.literal(b"true")?;
+                Ok(GoTok::Other)
+            }
+            b'f' => {
+                self.literal(b"false")?;
+                Ok(GoTok::Other)
+            }
+            b'n' => {
+                self.literal(b"null")?;
+                Ok(GoTok::Other)
+            }
+            b'-' | b'0'..=b'9' => {
+                self.number()?;
+                Ok(GoTok::Other)
+            }
+            _ => Err(self.err_at(self.pos, "looking for beginning of value")),
         }
-        if key == "node_results" {
-            let Value::Array(items) = value else {
-                return Err("node_results must be an array".into());
+    }
+
+    fn literal(&mut self, word: &[u8]) -> Result<(), String> {
+        for (index, expected) in word.iter().enumerate() {
+            let c = match self.peek() {
+                Some(c) => c,
+                None => return Err("unexpected EOF".into()),
             };
-            for item in items {
-                let Value::Object(inner) = item else {
-                    return Err("node result must be a JSON object".into());
-                };
-                let mut seen_inner: Vec<&str> = Vec::new();
-                for (inner_key, _) in inner {
-                    if seen_inner.contains(&inner_key.as_str()) {
-                        return Err(format!(
-                            "duplicate JSON field {}",
-                            crate::packet::go_quote(inner_key)
-                        ));
+            if c != *expected {
+                return Err(self.err_at(self.pos, literal_context(word, index)));
+            }
+            self.pos += 1;
+        }
+        Ok(())
+    }
+
+    fn number(&mut self) -> Result<(), String> {
+        if self.peek() == Some(b'-') {
+            self.pos += 1;
+        }
+        match self.peek() {
+            None => return Err("unexpected EOF".into()),
+            Some(b'0') => self.pos += 1,
+            Some(b'1'..=b'9') => self.digits(),
+            Some(_) => return Err(self.err_at(self.pos, "in numeric literal")),
+        }
+        if self.peek() == Some(b'.') {
+            self.pos += 1;
+            match self.peek() {
+                None => return Err("unexpected EOF".into()),
+                Some(b'0'..=b'9') => self.digits(),
+                Some(_) => return Err(self.err_at(self.pos, "in numeric literal")),
+            }
+        }
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            self.pos += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            match self.peek() {
+                None => return Err("unexpected EOF".into()),
+                Some(b'0'..=b'9') => self.digits(),
+                Some(_) => return Err(self.err_at(self.pos, "in numeric literal")),
+            }
+        }
+        Ok(())
+    }
+
+    fn digits(&mut self) {
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.pos += 1;
+        }
+    }
+
+    fn string(&mut self) -> Result<String, String> {
+        self.pos += 1;
+        let mut out = String::new();
+        loop {
+            let c = match self.peek() {
+                Some(c) => c,
+                None => return Err("unexpected EOF".into()),
+            };
+            self.pos += 1;
+            match c {
+                b'"' => return Ok(out),
+                b'\\' => {
+                    let escape = self.pos - 1;
+                    let e = match self.peek() {
+                        Some(e) => e,
+                        None => return Err("unexpected EOF".into()),
+                    };
+                    self.pos += 1;
+                    match e {
+                        b'"' => out.push('"'),
+                        b'\\' => out.push('\\'),
+                        b'/' => out.push('/'),
+                        b'b' => out.push('\u{8}'),
+                        b'f' => out.push('\u{c}'),
+                        b'n' => out.push('\n'),
+                        b'r' => out.push('\r'),
+                        b't' => out.push('\t'),
+                        b'u' => {
+                            let mut digits = [0u8; 4];
+                            let mut seen = 0usize;
+                            for slot in digits.iter_mut() {
+                                match self.peek() {
+                                    Some(d) => {
+                                        *slot = d;
+                                        seen += 1;
+                                        self.pos += 1;
+                                    }
+                                    None => break,
+                                }
+                            }
+                            if seen < 4 || !digits.iter().all(|d| d.is_ascii_hexdigit()) {
+                                return Err(format!(
+                                    "invalid escape sequence `{}` in string",
+                                    String::from_utf8_lossy(&self.data[escape..self.pos])
+                                ));
+                            }
+                            let value =
+                                digits.iter().fold(0u32, |acc, d| acc * 16 + hex_digit(*d));
+                            out.push(char::from_u32(value).unwrap_or('\u{FFFD}'));
+                        }
+                        _ => {
+                            return Err(format!(
+                                "invalid escape sequence `{}` in string",
+                                String::from_utf8_lossy(&self.data[escape..self.pos])
+                            ))
+                        }
                     }
-                    seen_inner.push(inner_key.as_str());
-                    if !NODE_RESULT_FIELDS.contains(&inner_key.as_str()) {
-                        return Err(non_canonical_or_unknown(inner_key, NODE_RESULT_FIELDS));
+                }
+                c if c < 0x20 => return Err(self.err_at(self.pos - 1, "in string")),
+                _ => {
+                    let start = self.pos - 1;
+                    while self.pos < self.data.len() && self.data[self.pos] >= 0x80 {
+                        self.pos += 1;
                     }
+                    out.push_str(&String::from_utf8_lossy(&self.data[start..self.pos]));
                 }
             }
         }
     }
-    Ok(())
+
+    // after_comma applies the reference's comma rule: a closing delimiter right
+    // after a comma is reported against the comma itself.
+    fn after_comma(&mut self) -> Result<(), String> {
+        let comma = self.pos;
+        self.pos += 1;
+        self.skip_ws();
+        match self.peek() {
+            Some(b']') | Some(b'}') => Err(self.err_at(comma, "looking for beginning of value")),
+            _ => Ok(()),
+        }
+    }
+
+    fn consume_value(&mut self) -> Result<(), String> {
+        match self.token()? {
+            GoTok::Delim(b'{') => self.consume_object(None),
+            GoTok::Delim(b'[') => self.consume_array(),
+            _ => Ok(()),
+        }
+    }
+
+    fn consume_array(&mut self) -> Result<(), String> {
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(b']') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                None => return Err("unexpected end of JSON input".into()),
+                _ => {}
+            }
+            self.consume_value()?;
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("unexpected end of JSON input".into()),
+                Some(b',') => self.after_comma()?,
+                Some(b']') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                Some(_) => return Err(self.err_at(self.pos, "after array element")),
+            }
+        }
+    }
+
+    fn consume_object(&mut self, allowed: Option<&[&str]>) -> Result<(), String> {
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("unexpected end of JSON input".into()),
+                Some(b'}') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                _ => {}
+            }
+            let key = match self.token()? {
+                GoTok::Str(key) => key,
+                _ => return Err("object member name must be a string".into()),
+            };
+            if seen.contains(&key) {
+                return Err(format!(
+                    "duplicate JSON field {}",
+                    crate::packet::go_quote(&key)
+                ));
+            }
+            seen.push(key.clone());
+            if let Some(allowed) = allowed {
+                if !allowed.contains(&key.as_str()) {
+                    return Err(non_canonical_or_unknown(&key, allowed));
+                }
+            }
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("EOF".into()),
+                Some(b':') => self.pos += 1,
+                Some(_) => return Err(self.err_at(self.pos, "after object key")),
+            }
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("EOF".into()),
+                Some(b'}') => return Err("missing value after object key".into()),
+                Some(b']') => return Err(self.err_at(self.pos, "after object key:value pair")),
+                _ => {}
+            }
+            if allowed.is_some() && key == "node_results" {
+                self.consume_node_results()?;
+            } else {
+                self.consume_value()?;
+            }
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("unexpected end of JSON input".into()),
+                Some(b',') => self.after_comma()?,
+                Some(b'}') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                Some(_) => return Err(self.err_at(self.pos, "after object key:value pair")),
+            }
+        }
+    }
+
+    fn consume_node_result(&mut self) -> Result<(), String> {
+        match self.token()? {
+            GoTok::Delim(b'{') => self.consume_object(Some(NODE_RESULT_FIELDS)),
+            _ => Err("node result must be a JSON object".into()),
+        }
+    }
+
+    fn consume_node_results(&mut self) -> Result<(), String> {
+        match self.token()? {
+            GoTok::Delim(b'[') => {}
+            _ => return Err("node_results must be an array".into()),
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(b']') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                None => return Err("unexpected end of JSON input".into()),
+                _ => {}
+            }
+            self.consume_node_result()?;
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("unexpected end of JSON input".into()),
+                Some(b',') => self.after_comma()?,
+                Some(b']') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                Some(_) => return Err(self.err_at(self.pos, "after array element")),
+            }
+        }
+    }
+}
+
+fn literal_context(word: &[u8], index: usize) -> &'static str {
+    match (word, index) {
+        (b"true", 1) => "in literal true (expecting 'r')",
+        (b"true", 2) => "in literal true (expecting 'u')",
+        (b"true", _) => "in literal true (expecting 'e')",
+        (b"false", 1) => "in literal false (expecting 'a')",
+        (b"false", 2) => "in literal false (expecting 'l')",
+        (b"false", 3) => "in literal false (expecting 's')",
+        (b"false", _) => "in literal false (expecting 'e')",
+        (_, 1) => "in literal null (expecting 'u')",
+        (_, _) => "in literal null (expecting 'l')",
+    }
+}
+
+fn hex_digit(d: u8) -> u32 {
+    match d {
+        b'0'..=b'9' => (d - b'0') as u32,
+        b'a'..=b'f' => (d - b'a' + 10) as u32,
+        _ => (d - b'A' + 10) as u32,
+    }
 }
 
 fn non_canonical_or_unknown(key: &str, allowed: &[&str]) -> String {
@@ -683,8 +993,10 @@ fn build_record(fields: &[(String, Value)]) -> Result<Record, String> {
         None => 0,
         Some(Value::Null) => 0,
         Some(Value::Number(n)) => n.parse::<u64>().map_err(|_| {
-            "malformed record: json: cannot unmarshal number into Go struct field Record.seq of type uint64"
-                .to_string()
+            format!(
+                "malformed record: json: cannot unmarshal number {} into Go struct field Record.seq of type uint64",
+                n
+            )
         })?,
         Some(v) => {
             return Err(format!(
@@ -698,7 +1010,7 @@ fn build_record(fields: &[(String, Value)]) -> Result<Record, String> {
         Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => {
             let mut out = Vec::new();
-            for item in items {
+            for (index, item) in items.iter().enumerate() {
                 match item {
                     Value::Object(inner) => {
                         let inner_field =
@@ -709,8 +1021,9 @@ fn build_record(fields: &[(String, Value)]) -> Result<Record, String> {
                                 Some(Value::String(s)) => Ok(s.clone()),
                                 Some(Value::Null) => Ok(String::new()),
                                 Some(v) => Err(format!(
-                                    "malformed record: json: cannot unmarshal {} into Go struct field NodeResult.node_results.{} of type string",
+                                    "malformed record: json: cannot unmarshal {} into Go struct field Record.node_results.{}.{} of type string",
                                     value_kind(v),
+                                    index,
                                     name
                                 )),
                             }
@@ -759,221 +1072,49 @@ fn is_json_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r')
 }
 
-fn quote_char(c: u8) -> String {
-    if c == b'\'' {
-        return "'\\''".into();
+// quote_at renders the character at an error position the way the reference
+// does: a valid UTF-8 rune is quoted as a rune (strconv.QuoteRune), while an
+// invalid byte is quoted as \\xNN.
+fn quote_at(data: &[u8], pos: usize) -> String {
+    let Some(&b) = data.get(pos) else {
+        return "''".into();
+    };
+    if b < 0x80 {
+        return quote_rune(b as char);
     }
-    if c == b'"' {
-        return "'\"'".into();
+    let valid = match std::str::from_utf8(&data[pos..]) {
+        Ok(text) => text.len(),
+        Err(error) => error.valid_up_to(),
+    };
+    if valid > 0 {
+        if let Some(c) = std::str::from_utf8(&data[pos..pos + valid])
+            .ok()
+            .and_then(|text| text.chars().next())
+        {
+            return quote_rune(c);
+        }
     }
-    let ch = char::from_u32(c as u32).unwrap_or('\u{FFFD}');
-    let quoted = crate::packet::go_quote(&ch.to_string());
-    format!("'{}'", &quoted[1..quoted.len() - 1])
+    format!("'\\x{:02x}'", b)
 }
 
-fn go_scan(data: &[u8]) -> Result<usize, String> {
-    let mut scanner = GoScan { data, pos: 0 };
-    scanner.value()?;
-    Ok(scanner.pos)
-}
-
-// GoScan reproduces the syntax errors of Go's encoding/json scanner for the
-// single JSON value on a ledger line.
-struct GoScan<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> GoScan<'a> {
-    fn skip_ws(&mut self) {
-        while self.pos < self.data.len() && is_json_space(self.data[self.pos]) {
-            self.pos += 1;
+fn quote_rune(c: char) -> String {
+    let mut inner = String::new();
+    match c {
+        '\'' => inner.push_str("\\'"),
+        '\\' => inner.push_str("\\\\"),
+        c if crate::packet::go_is_print(c) => inner.push(c),
+        '\u{07}' => inner.push_str("\\a"),
+        '\u{08}' => inner.push_str("\\b"),
+        '\u{0c}' => inner.push_str("\\f"),
+        '\n' => inner.push_str("\\n"),
+        '\r' => inner.push_str("\\r"),
+        '\t' => inner.push_str("\\t"),
+        '\u{0b}' => inner.push_str("\\v"),
+        c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+            inner.push_str(&format!("\\x{:02x}", c as u32))
         }
+        c if (c as u32) < 0x10000 => inner.push_str(&format!("\\u{:04x}", c as u32)),
+        c => inner.push_str(&format!("\\U{:08x}", c as u32)),
     }
-    fn err(&self, c: u8, context: &str) -> String {
-        format!("invalid character {} {}", quote_char(c), context)
-    }
-    // eof_space reproduces Go's eof() calling step with a space byte.
-    fn eof_space(&self, context: &str) -> String {
-        self.err(b' ', context)
-    }
-    fn eof(&self) -> String {
-        "unexpected end of JSON input".into()
-    }
-    fn value(&mut self) -> Result<(), String> {
-        self.skip_ws();
-        let c = match self.data.get(self.pos) {
-            Some(&c) => c,
-            None => return Err(self.eof()),
-        };
-        match c {
-            b'{' => self.object(),
-            b'[' => self.array(),
-            b'"' => self.string(),
-            b't' => self.literal(b"true"),
-            b'f' => self.literal(b"false"),
-            b'n' => self.literal(b"null"),
-            b'-' | b'0'..=b'9' => self.number(),
-            _ => Err(self.err(c, "looking for beginning of value")),
-        }
-    }
-    fn literal(&mut self, word: &[u8]) -> Result<(), String> {
-        for (index, expected) in word.iter().enumerate() {
-            let context = match (word, index) {
-                (b"true", 1) => "in literal true (expecting 'r')",
-                (b"true", 2) => "in literal true (expecting 'u')",
-                (b"true", _) => "in literal true (expecting 'e')",
-                (b"false", 1) => "in literal false (expecting 'a')",
-                (b"false", 2) => "in literal false (expecting 'l')",
-                (b"false", 3) => "in literal false (expecting 's')",
-                (b"false", _) => "in literal false (expecting 'e')",
-                (_, 1) => "in literal null (expecting 'u')",
-                (_, _) => "in literal null (expecting 'l')",
-            };
-            match self.data.get(self.pos) {
-                Some(&c) if c == *expected => self.pos += 1,
-                Some(&c) => return Err(self.err(c, context)),
-                None => return Err(self.eof_space(context)),
-            }
-        }
-        Ok(())
-    }
-    fn string(&mut self) -> Result<(), String> {
-        self.pos += 1;
-        loop {
-            let c = match self.data.get(self.pos) {
-                Some(&c) => c,
-                None => return Err(self.eof()),
-            };
-            self.pos += 1;
-            match c {
-                b'"' => return Ok(()),
-                b'\\' => {
-                    let escape = match self.data.get(self.pos) {
-                        Some(&e) => e,
-                        None => return Err(self.eof_space("in string escape code")),
-                    };
-                    self.pos += 1;
-                    match escape {
-                        b'b' | b'f' | b'n' | b'r' | b't' | b'\\' | b'/' | b'"' => {}
-                        b'u' => {
-                            for _ in 0..4 {
-                                let digit = match self.data.get(self.pos) {
-                                    Some(&d) => d,
-                                    None => {
-                                        return Err(
-                                            self.eof_space("in \\u hexadecimal character escape")
-                                        )
-                                    }
-                                };
-                                if !digit.is_ascii_hexdigit() {
-                                    return Err(
-                                        self.err(digit, "in \\u hexadecimal character escape")
-                                    );
-                                }
-                                self.pos += 1;
-                            }
-                        }
-                        other => return Err(self.err(other, "in string escape code")),
-                    }
-                }
-                c if c < 0x20 => return Err(self.err(c, "in string literal")),
-                _ => {}
-            }
-        }
-    }
-    fn number(&mut self) -> Result<(), String> {
-        if self.data[self.pos] == b'-' {
-            self.pos += 1;
-            match self.data.get(self.pos) {
-                Some(b'0') => self.pos += 1,
-                Some(b'1'..=b'9') => self.digits(),
-                Some(&c) => return Err(self.err(c, "in numeric literal")),
-                None => return Err(self.eof_space("in numeric literal")),
-            }
-        } else if self.data[self.pos] == b'0' {
-            self.pos += 1;
-        } else {
-            self.digits();
-        }
-        if self.data.get(self.pos) == Some(&b'.') {
-            self.pos += 1;
-            match self.data.get(self.pos) {
-                Some(b'0'..=b'9') => self.digits(),
-                Some(&c) => return Err(self.err(c, "after decimal point in numeric literal")),
-                None => return Err(self.eof_space("after decimal point in numeric literal")),
-            }
-        }
-        if matches!(self.data.get(self.pos), Some(b'e' | b'E')) {
-            self.pos += 1;
-            if matches!(self.data.get(self.pos), Some(b'+' | b'-')) {
-                self.pos += 1;
-            }
-            match self.data.get(self.pos) {
-                Some(b'0'..=b'9') => self.digits(),
-                Some(&c) => return Err(self.err(c, "in exponent of numeric literal")),
-                None => return Err(self.eof_space("in exponent of numeric literal")),
-            }
-        }
-        Ok(())
-    }
-    fn digits(&mut self) {
-        while matches!(self.data.get(self.pos), Some(b'0'..=b'9')) {
-            self.pos += 1;
-        }
-    }
-    fn object(&mut self) -> Result<(), String> {
-        self.pos += 1;
-        self.skip_ws();
-        if self.data.get(self.pos) == Some(&b'}') {
-            self.pos += 1;
-            return Ok(());
-        }
-        loop {
-            self.skip_ws();
-            match self.data.get(self.pos) {
-                Some(b'"') => self.string()?,
-                Some(&c) => return Err(self.err(c, "looking for beginning of object key string")),
-                None => return Err(self.eof()),
-            }
-            self.skip_ws();
-            match self.data.get(self.pos) {
-                Some(b':') => self.pos += 1,
-                Some(&c) => return Err(self.err(c, "after object key")),
-                None => return Err(self.eof()),
-            }
-            self.value()?;
-            self.skip_ws();
-            match self.data.get(self.pos) {
-                Some(b',') => self.pos += 1,
-                Some(b'}') => {
-                    self.pos += 1;
-                    return Ok(());
-                }
-                Some(&c) => return Err(self.err(c, "after object key:value pair")),
-                None => return Err(self.eof()),
-            }
-        }
-    }
-    fn array(&mut self) -> Result<(), String> {
-        self.pos += 1;
-        self.skip_ws();
-        if self.data.get(self.pos) == Some(&b']') {
-            self.pos += 1;
-            return Ok(());
-        }
-        loop {
-            self.value()?;
-            self.skip_ws();
-            match self.data.get(self.pos) {
-                Some(b',') => self.pos += 1,
-                Some(b']') => {
-                    self.pos += 1;
-                    return Ok(());
-                }
-                Some(&c) => return Err(self.err(c, "after array element")),
-                None => return Err(self.eof()),
-            }
-        }
-    }
+    format!("'{}'", inner)
 }
