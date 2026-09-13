@@ -174,13 +174,13 @@ OwnScout is designed to be boring in exactly the ways that matter:
 
 ## Language ports
 
-This repository is also a study in **behavioural parity across languages**. The
+This repository is also a study in **trace equivalence across languages**. The
 Go implementation in `internal/` is the specification; three independent,
 standard-library-only reimplementations reproduce its stdout, exit codes and
 ledger bytes exactly.
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="Go reference records the reference corpus; TypeScript, Rust and Zig replay it" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Go reference records the trace corpus; TypeScript, Rust and Zig replay it" width="100%">
 </p>
 
 | Port | Binary | Build | Tests | Dependencies |
@@ -204,31 +204,31 @@ status is [docs/PORTS.md](docs/PORTS.md).
 ## Verification
 
 A port is only interesting if a passing grade means something. Here is how
-parity is established.
+equivalence is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 150 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Trace-equivalence matrix: every port passes 28 base and 150 edge cases" width="100%">
 </p>
 
-- **Reference corpus.** The Go reference records 28 base cases and 150 hardening
+- **Recorded traces.** The Go reference records 28 base cases and 150 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
   ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
   empty selected line, and evidence files beyond 1 MiB, and the anchor
   re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
   Every port replays them byte-for-byte.
-- **Mutation-tested corpus.** Four deliberately broken reference builds fail
-  the corpora (base 26/28, 20/28, 28/28 and 28/28; edge 134/150, 79/150, 148/150
+- **Mutation-tested traces.** Four deliberately broken reference builds fail
+  the trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 134/150, 79/150, 148/150
   and 148/150), so a pass is evidence, not a formality. The newest mutant strips
   the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
-  see, which is why the edge corpus exists.
+  see, which is why the edge trace corpus exists.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
   compares the reference against a candidate. It is what caught a real shared
   defect in all three ports: an explicit JSON `null` for `evidence` or
   `degradations` must count as *absent* for the required-field rule but still
   trigger the "complete packet requires at least one evidence entry" rule.
 - **Protected paths.** The verifier fails if anything outside `ports/` is
-  modified, so a port lane cannot quietly patch the corpus.
+  modified, so a port lane cannot quietly patch the trace corpus.
 
 Run it yourself:
 
@@ -253,7 +253,7 @@ ports/
   ts/  rust/  zig/   independent reimplementations
 plans/               design notes, including the DeltaDB primitive study
 spec/
-  parity/            the reference corpora, replay harness, verifier, fuzzer
+  parity/            the recorded trace corpora, replay harness, verifier, fuzzer
 specs/               packet-v1 and node-envelope-v1 documents
 docs/
   assets/            the visuals used in this README

@@ -3,7 +3,7 @@
 Three independent, standard-library-only ports of the Go reference in
 `internal/`: TypeScript (`ports/ts`), Rust (`ports/rust`) and Zig
 (`ports/zig`). All three reproduce the reference CLI's stdout, exit codes and
-ledger bytes exactly, graded against the reference corpus in `spec/parity/`.
+ledger bytes exactly, graded against the recorded trace corpus in `spec/parity/`.
 
 The contract every port must satisfy is `spec/parity/PORT.md`; the recorded
 status table and verification evidence are in `docs/PORTS.md`.
@@ -12,11 +12,11 @@ status table and verification evidence are in `docs/PORTS.md`.
 
 | Tool | Version used | Needed for |
 |---|---|---|
-| Go | 1.26+ | the reference CLI and the corpus tools |
+| Go | 1.26+ | the reference CLI and the trace-corpus tools |
 | Node | 24 (runs `.ts` directly via type stripping) | TypeScript port |
 | Rust | stable, edition 2021 | Rust port |
 | Zig | 0.16.0 | Zig port |
-| Python | 3.8+ | the parity harness |
+| Python | 3.8+ | the replay harness |
 
 ## Build
 
@@ -66,10 +66,10 @@ spec/parity/status.sh         # compact per-port status, never fails
 make fuzz                     # differential fuzzing vs a freshly built reference
 ```
 
-`verify-all.sh` grades every port against both corpora (28 base cases, 150 edge
+`verify-all.sh` grades every port against both trace corpora (28 base cases, 150 edge
 cases), runs that port's own test suite, and then fails if anything outside
 `ports/` was modified. Commit unrelated changes before running it.
 
-The reference corpus itself is mutation-tested: three deliberately broken reference builds
-fail the corpora, so a passing harness is meaningful rather than vacuous. See
+The trace corpus itself is mutation-tested: three deliberately broken reference builds
+fail the trace corpora, so a passing harness is meaningful rather than vacuous. See
 `docs/PORTS.md` for those numbers.

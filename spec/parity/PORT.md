@@ -2,7 +2,7 @@
 
 This directory records the exact behavior a port must reproduce. The Go
 implementation under `internal/` is the reference; `corpus.json` is the
-reference corpus. Read the Go source — it is the specification.
+recorded trace corpus. Read the Go source — it is the specification.
 
 ## What to build
 
@@ -32,7 +32,7 @@ Commands:
 - `1` contract failure, evidence failure, or node graph failure after append
 - `2` usage error, malformed input, missing file, or repository/ledger I/O
 
-## The reference corpus
+## The trace corpus
 
 ```
 python3 spec/parity/harness.py --bin ports/<lang>/<binary>
@@ -83,7 +83,7 @@ Run it with the same harness:
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
 ```
 
-## Reference corpus validation
+## Trace corpus validation
 
 The corpus was mutation-tested against three deliberately broken reference builds:
 

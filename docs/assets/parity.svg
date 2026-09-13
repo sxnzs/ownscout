@@ -8,9 +8,9 @@
   <rect width="1000" height="400" fill="url(#grid)"/>
   <rect x="20.5" y="20.5" width="959" height="359" fill="none" stroke="#7ee787" stroke-opacity="0.3"/>
 
-  <text x="48" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#7ee787" letter-spacing="3.4">PARITY MATRIX</text>
+  <text x="48" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#7ee787" letter-spacing="3.4">TRACE EQUIVALENCE</text>
   <line x1="48" y1="82" x2="952" y2="82" stroke="#7ee787" stroke-opacity="0.22" stroke-width="1"/>
-  <text x="48" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.6">replayed against the reference corpus — stdout and exit codes match exactly</text>
+  <text x="48" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.6">replayed against the trace corpus — stdout and exit codes match exactly</text>
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#8fce97" letter-spacing="2.4">
     <text x="48" y="144">PORT</text>

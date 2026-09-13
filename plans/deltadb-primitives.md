@@ -172,6 +172,6 @@ The absent-content case is where the byte budget earns its keep: it stops at
   frozen `hashSelectedLines` for every range of 24 awkward payloads (CRLF, a lone
   `\r`, invalid UTF-8, blank lines, an unterminated tail, a trailing `\r` with no
   `\n`).
-- The edge corpus grew by thirteen cases covering moved / gone / shrunken-file /
+- The edge trace corpus grew by thirteen cases covering moved / gone / shrunken-file /
   budget-stop / flag-off / flag-rejected / trailing-CR, so every branch and every
   message variant is a recorded case the three ports must replay byte-for-byte.
