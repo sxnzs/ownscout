@@ -11,7 +11,7 @@ Usage:
   ownscout doctor
   ownscout version
   ownscout contract validate --packet <file> [--json]
-  ownscout evidence verify --repo <dir> --packet <file> [--json]
+  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
   ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]
 
 Use "ownscout <command> --help" for command details.`;
@@ -342,14 +342,14 @@ function safePath(root:string, raw:string):string {
 // terminator, a final terminator adds no trailing line, hashing joins the
 // selected lines with "\n" and appends a final "\n" for non-empty content,
 // and all bytes are raw — the file is never decoded as text.
-function countLines(data:Buffer):number {
+export function countLines(data:Buffer):number {
   if (data.length===0) return 0;
   let count=0, i=0;
   while ((i=data.indexOf(10,i))!==-1) { count++; i++; }
   if (data[data.length-1]!==10) count++;
   return count;
 }
-function hashSelectedLines(data:Buffer,lineStart:number,lineEnd:number):string {
+export function hashSelectedLines(data:Buffer,lineStart:number,lineEnd:number):string {
   const h=createHash("sha256");
   let line=1, start=0, firstNonEmpty=false;
   while (line<=lineEnd && start<data.length) {
@@ -368,7 +368,118 @@ function hashSelectedLines(data:Buffer,lineStart:number,lineEnd:number):string {
   if (lineEnd>lineStart || firstNonEmpty) h.update("\n");
   return h.digest("hex");
 }
-function verifyEvidence(repo:string,p:AnyObj):{ok:boolean;results:Verification[];verified:number;failed:number;skipped:number} {  const root=repoRoot(repo), results:Verification[]=[];
+// Anchor re-resolution, mirroring internal/evidence/relocate.go. Relocation is
+// diagnostic only: it never changes a status, a counter, the exit code, or a
+// ledger byte. The window whose SHA-256 fingerprint matches the recorded one is
+// called a relocation, and the clause appended to the failure names where the
+// content now lives.
+const RELOCATE_BYTE_BUDGET = 8 << 20;
+export type Relocation = {found:boolean;lineStart:number;lineEnd:number;shift:number;exhaustive:boolean};
+
+// lineStarts returns the byte offset at which each line begins. Line numbers are
+// 1-based, so starts[i-1] is the first byte of line i. Empty input has no lines.
+// This is the same line model as countLines: a "\r\n" pair is one terminator,
+// and a final terminator does not introduce a trailing empty line.
+export function lineStarts(data:Buffer):number[] {
+  if (data.length===0) return [];
+  const starts:number[]=[];
+  let offset=0;
+  while (offset<data.length) {
+    starts.push(offset);
+    const index=data.indexOf(10,offset);
+    if (index<0) break;
+    offset=index+1;
+  }
+  return starts;
+}
+// contentEnd returns the offset just past the last content byte of 1-based line
+// number, excluding its terminator. The "\r" of a "\r\n" pair belongs to the
+// terminator, but a lone "\r" on an unterminated final line is content and is
+// kept - exactly as hashSelectedLines keeps it.
+export function contentEnd(data:Buffer,starts:number[],line:number):number {
+  const begin=starts[line-1];
+  let end=data.length;
+  if (line<starts.length) end=starts[line];
+  // Strip "\r\n" or "\n" only when the line is actually terminated. An
+  // unterminated final line keeps a trailing "\r" as content; stripping it
+  // here would let a relocation match a window that verification hashes
+  // differently.
+  if (end>begin && data[end-1]===10) {
+    end--;
+    if (end>begin && data[end-1]===13) end--;
+  }
+  return end;
+}
+// windowHash hashes lines [lineStart,lineEnd] exactly as hashSelectedLines does,
+// locating them from a precomputed start index instead of re-walking the file.
+export function windowHash(data:Buffer,starts:number[],lineStart:number,lineEnd:number):string {
+  const h=createHash("sha256");
+  for (let line=lineStart;line<=lineEnd;line++) {
+    if (line>lineStart) h.update("\n");
+    h.update(data.subarray(starts[line-1],contentEnd(data,starts,line)));
+  }
+  if (lineEnd>lineStart || contentEnd(data,starts,lineStart)>starts[lineStart-1]) h.update("\n");
+  return h.digest("hex");
+}
+// resolveAnchor searches for the recorded fingerprint. Candidate windows keep
+// the cited line count and are probed nearest-first: the cited start, then one
+// line below, one line above, and so on outward, preferring the lower line
+// number on a tie. A window that does not fit in the file is skipped, so a file
+// that shrank below the cited extent is still searched honestly.
+export function resolveAnchor(data:Buffer,starts:number[],totalLines:number,lineStart:number,lineEnd:number,expected:string):Relocation {
+  const extent=lineEnd-lineStart+1;
+  if (extent<1 || totalLines<extent) return {found:false,lineStart:0,lineEnd:0,shift:0,exhaustive:true};
+  // Every valid start is probed at most once, so counting probes against the
+  // number of valid starts tells us exactly whether the search covered the
+  // whole file, including when it stops early on the byte budget.
+  const validStarts=totalLines-extent+1;
+  // Order probes by distance from the cited start, but clamp the origin into
+  // the range of windows that actually fit. When the cited range lies past the
+  // end of a file that shrank, the nearest fitting windows are the last ones.
+  let origin=lineStart;
+  if (origin<1) origin=1;
+  if (origin>validStarts) origin=validStarts;
+  let probes=0, used=0;
+  for (let distance=0;;distance++) {
+    const low=origin-distance, high=origin+distance;
+    if (low<1 && high>validStarts) break;
+    const candidates=[low,high];
+    const count=distance===0?1:2;
+    for (let index=0;index<count;index++) {
+      const candidate=candidates[index];
+      if (candidate<1 || candidate>validStarts) continue;
+      const cost=contentEnd(data,starts,candidate+extent-1)-starts[candidate-1]+extent;
+      if (used+cost>RELOCATE_BYTE_BUDGET) return {found:false,lineStart:0,lineEnd:0,shift:0,exhaustive:probes===validStarts};
+      used+=cost;
+      probes++;
+      if (windowHash(data,starts,candidate,candidate+extent-1)===expected) return {found:true,lineStart:candidate,lineEnd:candidate+extent-1,shift:candidate-lineStart,exhaustive:false};
+    }
+  }
+  return {found:false,lineStart:0,lineEnd:0,shift:0,exhaustive:probes===validStarts};
+}
+// signedShift renders a line shift with an explicit sign so that a relocation
+// upwards is never mistaken for a downwards one.
+function signedShift(shift:number):string { return shift<0?String(shift):"+"+String(shift); }
+// relocationClause renders the diagnostic appended to a failure message. It
+// returns "" when no statement can honestly be made, which keeps the message
+// byte-identical to the pre-relocation behaviour in that case.
+export function relocationClause(data:Buffer,totalLines:number,lineStart:number,lineEnd:number,expected:string):string {
+  if (lineEnd-lineStart+1<1) return "";
+  const result=resolveAnchor(data,lineStarts(data),totalLines,lineStart,lineEnd,expected);
+  if (result.found) return "; content relocates to lines "+result.lineStart+"-"+result.lineEnd+" (shift "+signedShift(result.shift)+"; nearest matching window)";
+  if (result.exhaustive) return "; content not found elsewhere in this file";
+  return "; relocation search stopped after its byte budget";
+}
+// locationClause renders the relocation diagnostic for a failed span, or "" when
+// relocation is disabled or the recorded fingerprint is unusable.
+export function locationClause(data:Buffer,totalLines:number,lineStart:number,lineEnd:number,contentHash:string,options:{relocate:boolean}):string {
+  if (!options.relocate) return "";
+  let expected=contentHash;
+  if (expected.startsWith("sha256:")) expected=expected.slice(7);
+  if (!/^[0-9a-fA-F]{64}$/.test(expected)) return "";
+  return relocationClause(data,totalLines,lineStart,lineEnd,expected.toLowerCase());
+}
+function verifyEvidence(repo:string,p:AnyObj,options:{relocate:boolean}={relocate:false}):{ok:boolean;results:Verification[];verified:number;failed:number;skipped:number} {  const root=repoRoot(repo), results:Verification[]=[];
   for (const e of p.evidence||[]) {
     const r:Verification={evidence_id:e.evidence_id,path:e.path,status:"failed",expected_hash:e.content_hash,line_start:e.line_start,line_end:e.line_end};
     try {
@@ -380,10 +491,10 @@ function verifyEvidence(repo:string,p:AnyObj):{ok:boolean;results:Verification[]
       const st=fs.lstatSync(fp); if (!st.isFile() || st.isSymbolicLink()) throw new Error(`evidence path "${e.path}" is not a regular file`);
       const data=fs.readFileSync(fp);
       const total=countLines(data);
-      if (e.line_start<1 || e.line_end<e.line_start || e.line_end>total) throw new Error(`invalid line range ${e.line_start}-${e.line_end} for ${total} line(s)`);
+      if (e.line_start<1 || e.line_end<e.line_start || e.line_end>total) throw new Error(`invalid line range ${e.line_start}-${e.line_end} for ${total} line(s)`+locationClause(data,total,e.line_start,e.line_end,e.content_hash,options));
       let expected=e.content_hash; if (expected.startsWith("sha256:")) expected=expected.slice(7);
       if (!/^[0-9a-fA-F]{64}$/.test(expected)) throw new Error(`invalid SHA-256 content hash "${e.content_hash}"`);
-      r.actual_hash=hashSelectedLines(data,e.line_start,e.line_end); if (r.actual_hash!==expected.toLowerCase()) throw new Error(`content hash mismatch: expected ${e.content_hash}, got ${r.actual_hash}`);
+      r.actual_hash=hashSelectedLines(data,e.line_start,e.line_end); if (r.actual_hash!==expected.toLowerCase()) throw new Error(`content hash mismatch: expected ${e.content_hash}, got ${r.actual_hash}`+locationClause(data,total,e.line_start,e.line_end,e.content_hash,options));
       r.status="verified";
     } catch (x:any) { r.message=x.message; }
     results.push(r);
@@ -463,8 +574,8 @@ type Result={command:string;ok:boolean;summary:string;details:string[];next_acti
 function emit(out:NodeJS.WritableStream,json:boolean,d:Result,code:number):number{if(json)out.write(goJson(d)+"\n");else{out.write(`${d.ok?"OK":"ERROR"}: ${d.summary}\n`);for(const x of d.details)out.write(`  - ${x}\n`);out.write(`Next action: ${d.next_action}\n`);}return code;}
 function failure(out:any,msg:string,next:string,json=false){return json?emit(out,true,{command:"usage",ok:false,summary:msg,details:["usage: "+next],next_action:"Run '"+next+"'."},2):(out.write(`error: ${msg}\nNext action: run '${next}'.\n`),2);}
 function hasHelp(a:string[]){return a.includes("--help")||a.includes("-h");}
-function parseFlags(a:string[],allowed:Set<string>):{f:AnyObj;j:boolean;err?:string}{const f:any={},j=a.includes("--json");for(let i=0;i<a.length;i++){const x=a[i];if(x==="--json")continue;if(!allowed.has(x))return{f,j,err:`unknown flag or argument '${x}'`};if(i+1>=a.length||a[i+1].startsWith("-"))return{f,j,err:`${x} requires a value`};f[x]=a[++i];}return{f,j};}
-function help(a:string[],out:any){let t=rootUsage;if(a[0]==="doctor")t="Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.";else if(a[0]==="version")t="Usage: ownscout version\n\nPrints the OwnScout version.";else if(a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";else if(a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nVerifies packet evidence spans against a local repository.";else if(a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.";if(a[1]==="validate"&&a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";if(a[1]==="verify"&&a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun.";if(a[1]==="verify"&&a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.";out.write(t+"\n");return 0;}
+function parseFlags(a:string[],allowed:Set<string>,switches:Set<string>=new Set()):{f:AnyObj;j:boolean;err?:string}{const f:any={},j=a.includes("--json");for(let i=0;i<a.length;i++){const x=a[i];if(x==="--json")continue;if(switches.has(x)){f[x]="true";continue;}if(!allowed.has(x))return{f,j,err:`unknown flag or argument '${x}'`};if(i+1>=a.length||a[i+1].startsWith("-"))return{f,j,err:`${x} requires a value`};f[x]=a[++i];}return{f,j};}
+function help(a:string[],out:any){let t=rootUsage;if(a[0]==="doctor")t="Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.";else if(a[0]==="version")t="Usage: ownscout version\n\nPrints the OwnScout version.";else if(a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";else if(a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";else if(a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.";if(a[1]==="validate"&&a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";if(a[1]==="verify"&&a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";if(a[1]==="verify"&&a[0]==="node")t="Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.";out.write(t+"\n");return 0;}
 
 function run(args:string[],out:any):number {
   if(!args.length){out.write("error: a command is required\n\n"+rootUsage+"\n\nNext action: run 'ownscout --help'.\n");return 2;}
@@ -487,10 +598,10 @@ function contractCmd(a:string[],out:any):number{
 function evidenceCmd(a:string[],out:any):number{
   if(!a.length)return failure(out,"an evidence subcommand is required","ownscout evidence --help");
   if(a[0]!=="verify")return failure(out,`unknown evidence subcommand '${a[0]}'`,"ownscout evidence --help",a.includes("--json"));
-  const q=parseFlags(a.slice(1),new Set(["--repo","--packet"]));if(q.err)return failure(out,q.err,"ownscout evidence verify --help",q.j);if(!q.f["--repo"]||!q.f["--packet"])return failure(out,"both --repo <dir> and --packet <file> are required","ownscout evidence verify --help",q.j);
+  const q=parseFlags(a.slice(1),new Set(["--repo","--packet"]),new Set(["--relocate"]));if(q.err)return failure(out,q.err,"ownscout evidence verify --help",q.j);if(!q.f["--repo"]||!q.f["--packet"])return failure(out,"both --repo <dir> and --packet <file> are required","ownscout evidence verify --help",q.j);
   let p:any;try{p=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
   const v=validatePacket(p);if(v.length)return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet is invalid",details:details(v),next_action:"Fix the packet contract, then verify evidence again."},1);
-  let r:any;try{r=verifyEvidence(q.f["--repo"],p);}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
+  let r:any;try{r=verifyEvidence(q.f["--repo"],p,{relocate:q.f["--relocate"]==="true"});}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
   const issues=r.results.filter((x:any)=>x.status!=="verified").map((x:any)=>`evidence "${x.evidence_id}" ("${x.path}"): ${x.message||"status: "+x.status}`);
   if(!r.ok)return emit(out,q.j,{command:"evidence verify",ok:false,summary:`evidence verification failed (${issues.length} issue(s))`,details:issues,next_action:"Refresh or correct the listed evidence, then verify again."},1);
   return emit(out,q.j,{command:"evidence verify",ok:true,summary:"evidence verified",details:[`verified ${r.verified} evidence span(s)`],next_action:"The packet is ready for its declared default action."},0);

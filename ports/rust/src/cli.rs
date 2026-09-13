@@ -2,7 +2,7 @@ use crate::result::{render, usage, ResultData};
 use crate::{contract, evidence, ledger, node, packet, sha256};
 use std::fs;
 
-const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nUse \"ownscout <command> --help\" for command details.";
+const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nUse \"ownscout <command> --help\" for command details.";
 
 pub fn run(args: &[String]) -> (String, i32) {
     if args.is_empty() {
@@ -30,26 +30,24 @@ pub fn run(args: &[String]) -> (String, i32) {
 }
 
 fn contract_command(args: &[String]) -> (String, i32) {
+    // The reference scans the whole argument list for --json even when flag
+    // parsing fails, so a usage failure is rendered in the requested mode.
+    let json = args.iter().any(|a| a == "--json");
     if args.len() < 2 || args[1] != "validate" {
         return if args.len() > 1 {
-            (
-                usage(
-                    &format!("unknown contract subcommand '{}'", args[1]),
-                    "ownscout contract --help",
-                ),
-                2,
+            usage_result(
+                json,
+                &format!("unknown contract subcommand '{}'", args[1]),
+                "ownscout contract --help",
             )
         } else {
-            (
-                usage(
-                    "a contract subcommand is required",
-                    "ownscout contract --help",
-                ),
-                2,
+            usage_result(
+                false,
+                "a contract subcommand is required",
+                "ownscout contract --help",
             )
         };
     }
-    let json = args.iter().any(|a| a == "--json");
     let mut path = None;
     let mut i = 2;
     while i < args.len() {
@@ -59,33 +57,27 @@ fn contract_command(args: &[String]) -> (String, i32) {
         }
         if args[i] == "--packet" {
             if i + 1 >= args.len() || args[i + 1].starts_with('-') {
-                return (
-                    usage(
-                        "--packet requires a value",
-                        "ownscout contract validate --help",
-                    ),
-                    2,
+                return usage_result(
+                    json,
+                    "--packet requires a value",
+                    "ownscout contract validate --help",
                 );
             }
             path = Some(args[i + 1].clone());
             i += 2
         } else {
-            return (
-                usage(
-                    &format!("unknown flag or argument '{}'", args[i]),
-                    "ownscout contract validate --help",
-                ),
-                2,
+            return usage_result(
+                json,
+                &format!("unknown flag or argument '{}'", args[i]),
+                "ownscout contract validate --help",
             );
         }
     }
     let Some(path) = path else {
-        return (
-            usage(
-                "missing required --packet <file>",
-                "ownscout contract validate --help",
-            ),
-            2,
+        return usage_result(
+            json,
+            "missing required --packet <file>",
+            "ownscout contract validate --help",
         );
     };
     let p = match load_packet(&path) {
@@ -214,26 +206,50 @@ fn result(v: (String, i32)) -> (String, i32) {
     v
 }
 
+// usage_result mirrors the reference's usageFailureWithJSON: a usage error is
+// reported as the human form, or as a structured result when --json was asked
+// for, and always exits 2.
+fn usage_result(json: bool, message: &str, next: &str) -> (String, i32) {
+    if json {
+        return result(render(
+            &ResultData {
+                command: "usage".into(),
+                ok: false,
+                summary: message.into(),
+                details: vec![format!("usage: {}", next)],
+                next_action: format!("Run '{}'.", next),
+            },
+            true,
+            2,
+        ));
+    }
+    (usage(message, next), 2)
+}
+
 fn evidence_command(args: &[String]) -> (String, i32) {
     if args.len() < 2 {
-        return (
-            usage(
-                "an evidence subcommand is required",
-                "ownscout evidence --help",
-            ),
-            2,
+        return usage_result(
+            false,
+            "an evidence subcommand is required",
+            "ownscout evidence --help",
         );
     }
+    let json = args.iter().any(|a| a == "--json");
     if args[1] != "verify" {
         let msg = format!("unknown evidence subcommand '{}'", args[1]);
-        return (usage(&msg, "ownscout evidence --help"), 2);
+        return usage_result(json, &msg, "ownscout evidence --help");
     }
-    let json = args.iter().any(|a| a == "--json");
     let mut repo = None;
     let mut packet_path = None;
+    let mut relocate = false;
     let mut i = 2;
     while i < args.len() {
         if args[i] == "--json" {
+            i += 1;
+            continue;
+        }
+        if args[i] == "--relocate" {
+            relocate = true;
             i += 1;
             continue;
         }
@@ -241,34 +257,28 @@ fn evidence_command(args: &[String]) -> (String, i32) {
             "--repo" => &mut repo,
             "--packet" => &mut packet_path,
             _ => {
-                return (
-                    usage(
-                        &format!("unknown flag or argument '{}'", args[i]),
-                        "ownscout evidence verify --help",
-                    ),
-                    2,
+                return usage_result(
+                    json,
+                    &format!("unknown flag or argument '{}'", args[i]),
+                    "ownscout evidence verify --help",
                 )
             }
         };
         if i + 1 >= args.len() || args[i + 1].starts_with('-') {
-            return (
-                usage(
-                    &format!("{} requires a value", args[i]),
-                    "ownscout evidence verify --help",
-                ),
-                2,
+            return usage_result(
+                json,
+                &format!("{} requires a value", args[i]),
+                "ownscout evidence verify --help",
             );
         }
         *slot = Some(args[i + 1].clone());
         i += 2;
     }
     let (Some(repo), Some(path)) = (repo, packet_path) else {
-        return (
-            usage(
-                "both --repo <dir> and --packet <file> are required",
-                "ownscout evidence verify --help",
-            ),
-            2,
+        return usage_result(
+            json,
+            "both --repo <dir> and --packet <file> are required",
+            "ownscout evidence verify --help",
         );
     };
     let p = match load_packet(&path) {
@@ -293,7 +303,7 @@ fn evidence_command(args: &[String]) -> (String, i32) {
             1,
         ));
     }
-    let report = match evidence::verify(&repo, &p) {
+    let report = match evidence::verify_with_options(&repo, &p, &evidence::Options { relocate }) {
         Ok(v) => v,
         Err(e) => {
             return result(render(
@@ -402,44 +412,48 @@ fn node_command(args: &[String]) -> (String, i32) {
             "--envelope" => &mut envelope_path,
             "--ledger" => &mut ledger_path,
             _ => {
-                return (
-                    usage(
-                        &format!("unknown flag or argument '{}'", args[i]),
-                        "ownscout node verify --help",
-                    ),
-                    2,
+                return usage_result(
+                    json,
+                    &format!("unknown flag or argument '{}'", args[i]),
+                    "ownscout node verify --help",
                 )
             }
         };
         if i + 1 >= args.len() || args[i + 1].starts_with('-') {
-            return (
-                usage(
-                    &format!("{} requires a value", args[i]),
-                    "ownscout node verify --help",
-                ),
-                2,
+            return usage_result(
+                json,
+                &format!("{} requires a value", args[i]),
+                "ownscout node verify --help",
             );
         }
         *slot = Some(args[i + 1].clone());
         i += 2;
     }
-    let Some(ledger_path) = ledger_path else {
-        return (
-            usage(
-                "missing required --ledger value",
-                "ownscout node verify --help",
-            ),
-            2,
+    // The reference checks the four paths in this order and reports the first
+    // one that is missing, so the reported flag is part of the oracle.
+    let missing = [
+        ("--repo", repo.is_none()),
+        ("--packet", packet_path.is_none()),
+        ("--envelope", envelope_path.is_none()),
+        ("--ledger", ledger_path.is_none()),
+    ]
+    .into_iter()
+    .find(|(_, is_missing)| *is_missing)
+    .map(|(name, _)| name);
+    if let Some(name) = missing {
+        return usage_result(
+            json,
+            &format!("missing required {} value", name),
+            "ownscout node verify --help",
         );
-    };
-    let (Some(repo), Some(packet_path), Some(envelope_path)) = (repo, packet_path, envelope_path)
+    }
+    let (Some(repo), Some(packet_path), Some(envelope_path), Some(ledger_path)) =
+        (repo, packet_path, envelope_path, ledger_path)
     else {
-        return (
-            usage(
-                "all of --repo, --packet, --envelope, and --ledger are required",
-                "ownscout node verify --help",
-            ),
-            2,
+        return usage_result(
+            json,
+            "missing required --repo value",
+            "ownscout node verify --help",
         );
     };
     let eb = match fs::read(&envelope_path) {
@@ -618,7 +632,7 @@ fn help(args: &[String]) -> (String, i32) {
             "doctor" => "Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.".into(),
             "version" => "Usage: ownscout version\n\nPrints the OwnScout version.".into(),
             "contract" => "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.".into(),
-            "evidence" => "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nVerifies packet evidence spans against a local repository.".into(),
+            "evidence" => "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.".into(),
             "node" => "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.".into(),
             _ => ROOT_USAGE.to_string(),
         };
@@ -627,7 +641,7 @@ fn help(args: &[String]) -> (String, i32) {
         text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.".into();
     }
     if args.len() >= 2 && args[0] == "evidence" && args[1] == "verify" {
-        text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun.".into();
+        text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.".into();
     }
     if args.len() >= 2 && args[0] == "node" && args[1] == "verify" {
         text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.".into();

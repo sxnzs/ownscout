@@ -479,7 +479,7 @@ fn cli_rejects_unknown_subcommands_and_missing_arguments() {
     assert!(out.contains("unknown evidence subcommand"));
     let (out, code) = cli::run(&["node".into(), "verify".into()]);
     assert_eq!(code, 2);
-    assert!(out.contains("--ledger"));
+    assert!(out.contains("--repo"));
     let (out, code) = cli::run(&["contract".into(), "validate".into(), "--json".into()]);
     assert_eq!(code, 2);
     assert!(out.contains("--packet"));

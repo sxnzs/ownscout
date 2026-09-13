@@ -6,7 +6,7 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const RootUsage =
     "OwnScout — local repository evidence checks\n\n" ++
-    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\n" ++
+    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\n" ++
     "Use \"ownscout <command> --help\" for command details.";
 
 pub const RunResult = struct { output: []u8, code: u8 };
@@ -22,11 +22,11 @@ fn usage(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
         if (std.mem.eql(u8, args[0], "doctor")) text = "Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.";
         if (std.mem.eql(u8, args[0], "version")) text = "Usage: ownscout version\n\nPrints the OwnScout version.";
         if (std.mem.eql(u8, args[0], "contract")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";
-        if (std.mem.eql(u8, args[0], "evidence")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nVerifies packet evidence spans against a local repository.";
+        if (std.mem.eql(u8, args[0], "evidence")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";
         if (std.mem.eql(u8, args[0], "node")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results.";
     }
     if (args.len >= 2 and std.mem.eql(u8, args[0], "contract") and std.mem.eql(u8, args[1], "validate")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
-    if (args.len >= 2 and std.mem.eql(u8, args[0], "evidence") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun.";
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "evidence") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";
     if (args.len >= 2 and std.mem.eql(u8, args[0], "node") and std.mem.eql(u8, args[1], "verify")) text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun.";
     return try std.fmt.allocPrint(allocator, "{s}\n", .{text});
 }
@@ -410,9 +410,30 @@ fn contractValidate(allocator: std.mem.Allocator, args: []const []const u8, json
 }
 
 fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
-    const repo = parseValueFlag(args, "--repo");
-    const packet_path = parseValueFlag(args, "--packet");
-    if (repo == null or packet_path == null) return fail(allocator, "both --repo <dir> and --packet <file> are required", "ownscout evidence verify --help", json_output);
+    // Mirror the reference parseFlags: --repo and --packet take a value,
+    // --relocate is a switch only this subcommand accepts, and anything else is
+    // an unknown flag. A valued flag whose value is absent or looks like a flag
+    // is rejected before the required-value check, exactly as Go does.
+    var repo: ?[]const u8 = null;
+    var packet_path: ?[]const u8 = null;
+    var relocate = false;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--relocate")) {
+            relocate = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--repo") or std.mem.eql(u8, arg, "--packet")) {
+            if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, try std.fmt.allocPrint(allocator, "{s} requires a value", .{arg}), "ownscout evidence verify --help", json_output);
+            if (std.mem.eql(u8, arg, "--repo")) repo = args[index + 1] else packet_path = args[index + 1];
+            index += 1;
+            continue;
+        }
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout evidence verify --help", json_output);
+    }
+    if (repo == null or repo.?.len == 0 or packet_path == null or packet_path.?.len == 0) return fail(allocator, "both --repo <dir> and --packet <file> are required", "ownscout evidence verify --help", json_output);
     const packet = loadPacket(allocator, packet_path.?) catch |err| {
         const detail = switch (err) {
             error.NotFound => try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{packet_path.?}),
@@ -438,12 +459,12 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
     var verified: usize = 0;
     var issues: std.ArrayList([]const u8) = .empty;
     for (packet.evidence) |item| {
-        const outcome = try verifyEvidence(allocator, dir, item);
-        if (outcome == .verified) {
+        const outcome = try verifyEvidence(allocator, dir, item, relocate);
+        if (outcome.outcome == .verified) {
             verified += 1;
             continue;
         }
-        const msg = switch (outcome) {
+        const msg = switch (outcome.outcome) {
             .verified => unreachable,
             .invalid_path => if (std.mem.indexOf(u8, item.path, "..") != null) try std.fmt.allocPrint(allocator, "evidence path \"{s}\" contains a parent component", .{item.path}) else try std.fmt.allocPrint(allocator, "evidence path \"{s}\" must be repository-relative", .{item.path}),
             .not_found => blk: {
@@ -460,7 +481,11 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
                 break :blk try std.fmt.allocPrint(allocator, "content hash mismatch: expected {s}", .{item.content_hash});
             },
         };
-        try issues.append(allocator, try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg }));
+        const detail = if (outcome.clause.len != 0)
+            try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}{s}", .{ item.evidence_id, item.path, msg, outcome.clause })
+        else
+            try std.fmt.allocPrint(allocator, "evidence \"{s}\" (\"{s}\"): {s}", .{ item.evidence_id, item.path, msg });
+        try issues.append(allocator, detail);
     }
     if (issues.items.len != 0) {
         const summary = try std.fmt.allocPrint(allocator, "evidence verification failed ({d} issue(s))", .{issues.items.len});
@@ -501,18 +526,31 @@ const VerifyOutcome = union(enum) {
     hash_mismatch: ?[]const u8,
 };
 
+/// The outcome of one span plus the relocation clause, if any, that the
+/// diagnostic message must append. The clause is empty for every path Go does
+/// not annotate (path errors, unusable hashes, relocation disabled).
+const VerifyResult = struct {
+    outcome: VerifyOutcome,
+    clause: []const u8 = "",
+};
+
 const VerifyError = error{OutOfMemory};
 
-fn verifyEvidence(allocator: std.mem.Allocator, dir: std.Io.Dir, item: contract.Evidence) VerifyError!VerifyOutcome {
-    if (item.path.len == 0 or std.fs.path.isAbsolute(item.path) or std.mem.indexOf(u8, item.path, "..") != null) return .invalid_path;
-    const data = dir.readFileAlloc(std.Options.debug_io, item.path, allocator, .unlimited) catch return .not_found;
+fn verifyEvidence(allocator: std.mem.Allocator, dir: std.Io.Dir, item: contract.Evidence, relocate: bool) VerifyError!VerifyResult {
+    if (item.path.len == 0 or std.fs.path.isAbsolute(item.path) or std.mem.indexOf(u8, item.path, "..") != null) return .{ .outcome = .invalid_path };
+    const data = dir.readFileAlloc(std.Options.debug_io, item.path, allocator, .unlimited) catch return .{ .outcome = .not_found };
     const line_count = countNormalizedLines(data);
-    if (item.line_start < 1 or item.line_end < item.line_start or item.line_end > @as(i64, @intCast(line_count))) return .{ .bad_range = line_count };
+    if (item.line_start < 1 or item.line_end < item.line_start or item.line_end > @as(i64, @intCast(line_count))) {
+        return .{
+            .outcome = .{ .bad_range = line_count },
+            .clause = try locationClause(allocator, data, line_count, item.line_start, item.line_end, item.content_hash, relocate),
+        };
+    }
     var expected = item.content_hash;
     if (std.mem.startsWith(u8, expected, "sha256:")) expected = expected[7..];
-    if (expected.len != 64) return .bad_hash;
+    if (expected.len != 64) return .{ .outcome = .bad_hash };
     for (expected) |c| {
-        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) return .bad_hash;
+        if (!std.ascii.isHex(c)) return .{ .outcome = .bad_hash };
     }
     var selected: std.ArrayList(u8) = .empty;
     try appendSelectedLines(data, item.line_start, item.line_end, &selected, allocator);
@@ -520,9 +558,162 @@ fn verifyEvidence(allocator: std.mem.Allocator, dir: std.Io.Dir, item: contract.
     Sha256.hash(selected.items, &digest, .{});
     const actual = std.fmt.bytesToHex(digest, .lower);
     if (!std.ascii.eqlIgnoreCase(expected, &actual)) {
-        return .{ .hash_mismatch = try allocator.dupe(u8, &actual) };
+        return .{
+            .outcome = .{ .hash_mismatch = try allocator.dupe(u8, &actual) },
+            .clause = try locationClause(allocator, data, line_count, item.line_start, item.line_end, item.content_hash, relocate),
+        };
     }
-    return .verified;
+    return .{ .outcome = .verified };
+}
+
+// Anchor re-resolution (relocation). This mirrors the reference algorithm
+// byte for byte: it is diagnostic only and never changes a status, a counter,
+// the exit code, or any ledger byte.
+const relocate_byte_budget: usize = 8 << 20;
+
+const Relocation = struct {
+    found: bool = false,
+    line_start: i64 = 0,
+    line_end: i64 = 0,
+    shift: i64 = 0,
+    /// True when every valid start was probed, so "not present in this file"
+    /// is a statement the search actually earned.
+    exhaustive: bool = false,
+};
+
+/// Byte offset at which each 1-based line begins. Empty input has no lines.
+/// Same line model as countNormalizedLines: "\r\n" is one terminator and a
+/// final terminator adds no trailing empty line.
+fn lineStarts(allocator: std.mem.Allocator, data: []const u8) VerifyError![]usize {
+    var starts: std.ArrayList(usize) = .empty;
+    if (data.len == 0) return try starts.toOwnedSlice(allocator);
+    var offset: usize = 0;
+    while (offset < data.len) {
+        try starts.append(allocator, offset);
+        const index = std.mem.indexOfScalarPos(u8, data, offset, '\n') orelse break;
+        offset = index + 1;
+    }
+    return try starts.toOwnedSlice(allocator);
+}
+
+/// Offset just past the last content byte of 1-based line, excluding its
+/// terminator. The "\r" of a "\r\n" pair belongs to the terminator, but a lone
+/// "\r" on an unterminated final line is content and is kept - exactly as the
+/// verification path keeps it.
+fn lineContentEnd(data: []const u8, starts: []const usize, line: usize) usize {
+    const begin = starts[line - 1];
+    var end: usize = data.len;
+    if (line < starts.len) end = starts[line];
+    // Strip "\r\n" or "\n" only when the line is actually terminated. An
+    // unterminated final line keeps a trailing "\r" as content; stripping it
+    // here would let a relocation match a window that verification hashes
+    // differently.
+    if (end > begin and data[end - 1] == '\n') {
+        end -= 1;
+        if (end > begin and data[end - 1] == '\r') end -= 1;
+    }
+    return end;
+}
+
+/// Hash lines [line_start, line_end] exactly as hashSelectedLines does: the
+/// selected lines joined with "\n" plus a final "\n" for multi-line content or
+/// a non-empty single line. Lowercase hex, like the reference.
+fn windowHash(data: []const u8, starts: []const usize, line_start: usize, line_end: usize) [64]u8 {
+    var hasher = Sha256.init(.{});
+    var line = line_start;
+    while (line <= line_end) : (line += 1) {
+        if (line > line_start) hasher.update("\n");
+        hasher.update(data[starts[line - 1]..lineContentEnd(data, starts, line)]);
+    }
+    if (line_end > line_start or lineContentEnd(data, starts, line_start) > starts[line_start - 1]) hasher.update("\n");
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
+/// Strip an optional "sha256:" prefix and require exactly 64 hex characters.
+/// Returns the raw (possibly uppercase) hex; callers compare case-insensitively,
+/// which is equivalent to the reference lowercasing before comparison.
+fn normalizedExpectedHash(value: []const u8) ?[]const u8 {
+    var hex_value = value;
+    if (std.mem.startsWith(u8, hex_value, "sha256:")) hex_value = hex_value[7..];
+    if (hex_value.len != 64) return null;
+    for (hex_value) |c| {
+        if (!std.ascii.isHex(c)) return null;
+    }
+    return hex_value;
+}
+
+/// Search for the recorded fingerprint, probing candidate start lines outward
+/// from the cited start (lower line number first on a tie). Returns the first
+/// match, or the exhaustive/budget verdict when nothing matched.
+fn resolveAnchor(data: []const u8, starts: []const usize, total_lines: usize, line_start: i64, line_end: i64, expected: []const u8) Relocation {
+    const extent_signed = line_end -% line_start +% 1;
+    if (extent_signed < 1) return .{ .exhaustive = true };
+    const extent: usize = @intCast(extent_signed);
+    if (total_lines < extent) return .{ .exhaustive = true };
+    const valid_starts = total_lines - extent + 1;
+    const valid_starts_signed: i64 = @intCast(valid_starts);
+
+    // Clamp the origin into the windows that fit. When the cited range lies
+    // past the end of a file that shrank, the nearest fitting windows are the
+    // last ones.
+    var origin: i64 = line_start;
+    if (origin < 1) origin = 1;
+    if (origin > valid_starts_signed) origin = valid_starts_signed;
+
+    var probes: usize = 0;
+    var used: usize = 0;
+    var distance: i64 = 0;
+    while (true) : (distance += 1) {
+        const low = origin -% distance;
+        const high = origin +% distance;
+        if (low < 1 and high > valid_starts_signed) break;
+        const count: usize = if (distance == 0) 1 else 2;
+        var index: usize = 0;
+        while (index < count) : (index += 1) {
+            const candidate: i64 = if (index == 0) low else high;
+            if (candidate < 1 or candidate > valid_starts_signed) continue;
+            const start: usize = @intCast(candidate);
+            const cost = lineContentEnd(data, starts, start + extent - 1) - starts[start - 1] + extent;
+            if (used + cost > relocate_byte_budget) return .{ .exhaustive = probes == valid_starts };
+            used += cost;
+            probes += 1;
+            const hash = windowHash(data, starts, start, start + extent - 1);
+            if (std.ascii.eqlIgnoreCase(&hash, expected)) {
+                return .{
+                    .found = true,
+                    .line_start = candidate,
+                    .line_end = candidate + @as(i64, @intCast(extent)) - 1,
+                    .shift = candidate -% line_start,
+                };
+            }
+        }
+    }
+    return .{ .exhaustive = probes == valid_starts };
+}
+
+/// Render the diagnostic clause appended to a failure message, or "" when no
+/// statement can honestly be made (which keeps the message byte-identical to
+/// the pre-relocation behaviour).
+fn relocationClause(allocator: std.mem.Allocator, data: []const u8, total_lines: usize, line_start: i64, line_end: i64, expected: []const u8) VerifyError![]const u8 {
+    if (line_end -% line_start +% 1 < 1) return "";
+    const starts = try lineStarts(allocator, data);
+    const anchor = resolveAnchor(data, starts, total_lines, line_start, line_end, expected);
+    if (anchor.found) {
+        const sign: []const u8 = if (anchor.shift < 0) "" else "+";
+        return try std.fmt.allocPrint(allocator, "; content relocates to lines {d}-{d} (shift {s}{d}; nearest matching window)", .{ anchor.line_start, anchor.line_end, sign, anchor.shift });
+    }
+    if (anchor.exhaustive) return "; content not found elsewhere in this file";
+    return "; relocation search stopped after its byte budget";
+}
+
+/// Relocation diagnostic for a failed span, or "" when relocation is disabled
+/// or the recorded fingerprint is unusable.
+fn locationClause(allocator: std.mem.Allocator, data: []const u8, total_lines: usize, line_start: i64, line_end: i64, content_hash: []const u8, relocate: bool) VerifyError![]const u8 {
+    if (!relocate) return "";
+    const expected = normalizedExpectedHash(content_hash) orelse return "";
+    return try relocationClause(allocator, data, total_lines, line_start, line_end, expected);
 }
 
 fn countNormalizedLines(data: []const u8) usize {
@@ -562,10 +753,40 @@ fn appendSelectedLines(data: []const u8, line_start: i64, line_end: i64, out: *s
 }
 
 fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
-    const repo = parseValueFlag(args, "--repo") orelse return fail(allocator, "missing required --repo value", "ownscout node verify --help", json_output);
-    const packet_path = parseValueFlag(args, "--packet") orelse return fail(allocator, "missing required --packet value", "ownscout node verify --help", json_output);
-    const envelope_path = parseValueFlag(args, "--envelope") orelse return fail(allocator, "missing required --envelope value", "ownscout node verify --help", json_output);
-    const ledger_path = parseValueFlag(args, "--ledger") orelse return fail(allocator, "missing required --ledger value", "ownscout node verify --help", json_output);
+    // Mirror the reference parseFlags: only the four valued flags and --json
+    // are accepted, so --relocate is rejected here exactly as before it existed.
+    var repo_value: ?[]const u8 = null;
+    var packet_value: ?[]const u8 = null;
+    var envelope_value: ?[]const u8 = null;
+    var ledger_value: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--repo") or std.mem.eql(u8, arg, "--packet") or std.mem.eql(u8, arg, "--envelope") or std.mem.eql(u8, arg, "--ledger")) {
+            if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, try std.fmt.allocPrint(allocator, "{s} requires a value", .{arg}), "ownscout node verify --help", json_output);
+            if (std.mem.eql(u8, arg, "--repo")) {
+                repo_value = args[index + 1];
+            } else if (std.mem.eql(u8, arg, "--packet")) {
+                packet_value = args[index + 1];
+            } else if (std.mem.eql(u8, arg, "--envelope")) {
+                envelope_value = args[index + 1];
+            } else {
+                ledger_value = args[index + 1];
+            }
+            index += 1;
+            continue;
+        }
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout node verify --help", json_output);
+    }
+    if (repo_value == null or repo_value.?.len == 0) return fail(allocator, "missing required --repo value", "ownscout node verify --help", json_output);
+    if (packet_value == null or packet_value.?.len == 0) return fail(allocator, "missing required --packet value", "ownscout node verify --help", json_output);
+    if (envelope_value == null or envelope_value.?.len == 0) return fail(allocator, "missing required --envelope value", "ownscout node verify --help", json_output);
+    if (ledger_value == null or ledger_value.?.len == 0) return fail(allocator, "missing required --ledger value", "ownscout node verify --help", json_output);
+    const repo = repo_value.?;
+    const packet_path = packet_value.?;
+    const envelope_path = envelope_value.?;
+    const ledger_path = ledger_value.?;
     const packet = loadPacket(allocator, packet_path) catch |err| {
         if (err == error.WrongType or err == error.InvalidJson) {
             const details = [_][]const u8{"strict packet decoding failed"};
@@ -620,8 +841,8 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         var node_failed = false;
         for (node.evidence_ids) |id| {
             const item = findEvidence(packet.evidence, id) orelse continue;
-            const outcome = try verifyEvidence(allocator, dir, item);
-            if (outcome != .verified) {
+            const outcome = try verifyEvidence(allocator, dir, item, false);
+            if (outcome.outcome != .verified) {
                 const detail = try std.fmt.allocPrint(allocator, "node \"{s}\": failed (evidence \"{s}\" is missing or not verified)", .{ node.node_id, id });
                 try details.append(allocator, detail);
                 node_failed = true;
@@ -912,12 +1133,12 @@ test "evidence verification hashes selected lines and normalizes CRLF" {
         .line_start = 2, .line_end = 2, .source = "test", .content_hash = &hash,
         .collected_at = "now", .verifier_status = "verified",
     };
-    const outcome = try verifyEvidence(arena.allocator(), tmp.dir, item);
-    try std.testing.expect(outcome == .verified);
-    const mismatch = verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 2, .line_end = 2, .source = "test", .content_hash = &([_]u8{'0'} ** 64), .collected_at = "now", .verifier_status = "verified" }) catch |err| switch (err) {
+    const outcome = try verifyEvidence(arena.allocator(), tmp.dir, item, false);
+    try std.testing.expect(outcome.outcome == .verified);
+    const mismatch = verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 2, .line_end = 2, .source = "test", .content_hash = &([_]u8{'0'} ** 64), .collected_at = "now", .verifier_status = "verified" }, false) catch |err| switch (err) {
         error.OutOfMemory => return err,
     };
-    try std.testing.expectEqualStrings(&hash, mismatch.hash_mismatch orelse "missing");
+    try std.testing.expectEqualStrings(&hash, mismatch.outcome.hash_mismatch orelse "missing");
 }
 
 test "evidence verification rejects unsafe paths and invalid ranges" {
@@ -927,9 +1148,158 @@ test "evidence verification rejects unsafe paths and invalid ranges" {
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "source.txt", .data = "one\n" });
     const base = contract.Evidence{ .evidence_id = "e1", .kind = "source", .path = "source.txt", .commit = "h", .line_start = 1, .line_end = 1, .source = "test", .content_hash = "", .collected_at = "now", .verifier_status = "verified" };
-    const invalid = try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = "../source.txt", .commit = base.commit, .line_start = base.line_start, .line_end = base.line_end, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status });
-    try std.testing.expect(invalid == .invalid_path);
-    try std.testing.expectEqual(@as(usize, 1), (try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = base.path, .commit = base.commit, .line_start = 3, .line_end = 3, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status })).bad_range);
+    const invalid = try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = "../source.txt", .commit = base.commit, .line_start = base.line_start, .line_end = base.line_end, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }, false);
+    try std.testing.expect(invalid.outcome == .invalid_path);
+    try std.testing.expectEqual(@as(usize, 1), (try verifyEvidence(arena.allocator(), tmp.dir, .{ .evidence_id = base.evidence_id, .kind = base.kind, .path = base.path, .commit = base.commit, .line_start = 3, .line_end = 3, .source = base.source, .content_hash = base.content_hash, .collected_at = base.collected_at, .verifier_status = base.verifier_status }, false)).outcome.bad_range);
+}
+
+test "relocation window hashing agrees with the reference line hashing" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    // The relocation path locates lines from a precomputed start index while
+    // verification walks the file from byte zero; the two must agree on every
+    // range of every awkward payload. This is the differential oracle.
+    const payloads = [_][]const u8{
+        "",                              "\n",
+        "\n\n",                          "a",
+        "a\n",                           "a\nb\n",
+        "a\n\nb\n",                      "a\r\nb\r\n",
+        "a\r\nb",                        "a\r\n\r\nb\r\n",
+        "a\rb\n",                        "a\rb",
+        "a\nb\r",                        "b\r",
+        "\r",                            "a\r\nb\r",
+        "héllo\n🎉\n",                  "x\xff\xfey\n",
+        "\xff\n\xfe\n",                  "one\ntwo\nthree\nfour\nfive\n",
+        "one\r\ntwo\r\nthree\r\nfour\r\nfive", " \n\t\n\n  \n",
+        "a\n\n\n\n\n\n\n\nb\n",
+    };
+    for (payloads) |data| {
+        const starts = try lineStarts(allocator, data);
+        const total = countNormalizedLines(data);
+        try std.testing.expectEqual(total, starts.len);
+        var start: usize = 1;
+        while (start <= total) : (start += 1) {
+            var end: usize = start;
+            while (end <= total) : (end += 1) {
+                var selected: std.ArrayList(u8) = .empty;
+                try appendSelectedLines(data, @intCast(start), @intCast(end), &selected, allocator);
+                var digest: [32]u8 = undefined;
+                Sha256.hash(selected.items, &digest, .{});
+                const reference = std.fmt.bytesToHex(digest, .lower);
+                const got = windowHash(data, starts, start, end);
+                try std.testing.expectEqualStrings(&reference, &got);
+            }
+        }
+    }
+}
+
+test "relocation reports moved, absent, and exact-fit windows" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const data = "alpha\nbeta\ngamma\ndelta\n";
+    const total = countNormalizedLines(data);
+    const starts = try lineStarts(allocator, data);
+    try std.testing.expectEqual(@as(usize, 4), total);
+    const zeros = [_]u8{'0'} ** 64;
+
+    // Moved: the cited 1-2 actually lives at 3-4, reported with a signed shift.
+    const recorded = windowHash(data, starts, 3, 4);
+    try std.testing.expectEqualStrings(
+        "; content relocates to lines 3-4 (shift +2; nearest matching window)",
+        try relocationClause(allocator, data, total, 1, 2, &recorded),
+    );
+
+    // Absent with the whole file covered: absence is earned, not assumed.
+    try std.testing.expectEqualStrings(
+        "; content not found elsewhere in this file",
+        try relocationClause(allocator, data, total, 1, 2, &zeros),
+    );
+
+    // Exact fit: the window is the whole file, so only one start is valid and
+    // the cited range past the end clamps onto it.
+    const whole = windowHash(data, starts, 1, 4);
+    const clamped = resolveAnchor(data, starts, total, 9000, 9003, &whole);
+    try std.testing.expect(clamped.found);
+    try std.testing.expectEqual(@as(i64, 1), clamped.line_start);
+    try std.testing.expectEqual(@as(i64, 4), clamped.line_end);
+    try std.testing.expectEqual(@as(i64, -8999), clamped.shift);
+
+    // Exact fit at the file's last valid start.
+    const tail = windowHash(data, starts, 4, 4);
+    const tail_result = resolveAnchor(data, starts, total, 1, 1, &tail);
+    try std.testing.expect(tail_result.found);
+    try std.testing.expectEqual(@as(i64, 4), tail_result.line_start);
+    try std.testing.expectEqual(@as(i64, 4), tail_result.line_end);
+    try std.testing.expectEqual(@as(i64, 3), tail_result.shift);
+
+    // A reversed range cannot describe a window and yields no clause at all.
+    try std.testing.expectEqualStrings("", try relocationClause(allocator, data, total, 2, 1, &zeros));
+}
+
+test "relocation stops on the byte budget instead of claiming absence" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const unit = "x" ** 63 ++ "\n";
+    var big: std.ArrayList(u8) = .empty;
+    for (0..40000) |_| try big.appendSlice(allocator, unit);
+    const data = big.items;
+    const total = countNormalizedLines(data);
+    try std.testing.expectEqual(@as(usize, 40000), total);
+    const starts = try lineStarts(allocator, data);
+    const zeros = [_]u8{'0'} ** 64;
+
+    const anchor = resolveAnchor(data, starts, total, 20000, 20019, &zeros);
+    try std.testing.expect(!anchor.found);
+    try std.testing.expect(!anchor.exhaustive);
+    try std.testing.expectEqualStrings(
+        "; relocation search stopped after its byte budget",
+        try relocationClause(allocator, data, total, 20000, 20019, &zeros),
+    );
+}
+
+test "relocation is diagnostic only and gated by the option" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const contents = "alpha\nbeta\ngamma\ndelta\n";
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "notes.txt", .data = contents });
+    const starts = try lineStarts(allocator, contents);
+    const recorded = windowHash(contents, starts, 3, 4);
+    const content_hash = try std.fmt.allocPrint(allocator, "sha256:{s}", .{&recorded});
+    const item = contract.Evidence{ .evidence_id = "e1", .kind = "source", .path = "notes.txt", .commit = "h", .line_start = 1, .line_end = 2, .source = "test", .content_hash = content_hash, .collected_at = "now", .verifier_status = "verified" };
+
+    const annotated = try verifyEvidence(allocator, tmp.dir, item, true);
+    try std.testing.expect(annotated.outcome == .hash_mismatch);
+    try std.testing.expectEqualStrings("; content relocates to lines 3-4 (shift +2; nearest matching window)", annotated.clause);
+
+    // Without the option the message keeps its pre-relocation wording.
+    const plain = try verifyEvidence(allocator, tmp.dir, item, false);
+    try std.testing.expect(plain.outcome == .hash_mismatch);
+    try std.testing.expectEqualStrings("", plain.clause);
+}
+
+test "relocate is accepted only by evidence verify" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // evidence verify accepts the switch (and then reports the missing paths).
+    const missing = try run(allocator, &.{ "evidence", "verify", "--relocate" });
+    try std.testing.expectEqual(@as(u8, 2), missing.code);
+    try std.testing.expect(std.mem.indexOf(u8, missing.output, "both --repo <dir> and --packet <file> are required") != null);
+
+    const contract_flag = try run(allocator, &.{ "contract", "validate", "--packet", "absent.json", "--relocate" });
+    try std.testing.expectEqual(@as(u8, 2), contract_flag.code);
+    try std.testing.expect(std.mem.indexOf(u8, contract_flag.output, "unknown flag or argument '--relocate'") != null);
+
+    const node_flag = try run(allocator, &.{ "node", "verify", "--relocate" });
+    try std.testing.expectEqual(@as(u8, 2), node_flag.code);
+    try std.testing.expect(std.mem.indexOf(u8, node_flag.output, "unknown flag or argument '--relocate'") != null);
 }
 
 test "envelope validation rejects duplicate nodes and cycles" {
