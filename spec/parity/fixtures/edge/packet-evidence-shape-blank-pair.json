@@ -1,0 +1,41 @@
+{
+  "authorization": {
+    "level": "autonomous"
+  },
+  "budget": {
+    "max_bytes": 1000,
+    "max_evidence": 1,
+    "used_bytes": 12,
+    "used_evidence": 1
+  },
+  "degradations": [],
+  "evidence": [
+    {
+      "collected_at": "2026-09-05T00:00:00Z",
+      "commit": "deadbeef",
+      "content_hash": "sha256:e6ed5f20a317290e3aba55240de48a67ec6690fd22ab71a1332ac9fddbc38cc5",
+      "evidence_id": "evidence-1",
+      "kind": "source",
+      "line_end": 3,
+      "line_start": 2,
+      "path": "blank.txt",
+      "source": "test fixture",
+      "verifier_status": "verified"
+    }
+  ],
+  "freshness": {
+    "head_commit": "deadbeef",
+    "status": "current"
+  },
+  "head_commit": "deadbeef",
+  "issued_at": "2026-09-05T00:00:00Z",
+  "outcome": "complete",
+  "packet_hash": "packet-hash",
+  "packet_id": "packet-1",
+  "provenance": {
+    "tool": "test"
+  },
+  "repo_root": "testdata/repo",
+  "request_id": "request-1",
+  "schema_version": "v1"
+}

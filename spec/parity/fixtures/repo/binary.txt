@@ -1,0 +1,4 @@
+ascii line
+binary ÿş line
+utf8 hÃ©llo ğŸ‰
+tail €

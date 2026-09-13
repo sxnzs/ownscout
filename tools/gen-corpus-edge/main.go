@@ -6,6 +6,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +18,18 @@ import (
 	"ownscout/internal/node"
 	"ownscout/internal/nodepacket"
 )
+
+// rawEvidenceHash hashes the selected normalized lines exactly as the
+// reference does: joined with "\n", plus a final "\n" for non-empty content.
+// The line strings are raw bytes, so invalid UTF-8 survives unchanged.
+func rawEvidenceHash(lines []string) string {
+	selected := strings.Join(lines, "\n")
+	if selected != "" {
+		selected += "\n"
+	}
+	sum := sha256.Sum256([]byte(selected))
+	return hex.EncodeToString(sum[:])
+}
 
 type spec struct {
 	name string
@@ -247,6 +261,62 @@ func run() error {
 	if err := os.WriteFile(filepath.Join(edge, "ledger-garbage.jsonl"), []byte("not a ledger record\n"), 0o644); err != nil {
 		return err
 	}
+
+	// Evidence shapes the ports must reproduce byte-for-byte: hashing operates
+	// on raw file bytes (not lossily decoded text), CRLF is normalized only at
+	// line boundaries, a single empty line hashes the empty string, and
+	// evidence files have no size limit. binary.txt pairs invalid UTF-8 with
+	// CRLF terminators and an unterminated tail; blank.txt isolates the
+	// single-empty-line rule; oversize.txt crosses 1 MiB.
+	repoDir := filepath.Join(fixtures, "repo")
+	binaryContent := "ascii line\n" + "binary \xff\xfe line\r\n" + "utf8 héllo 🎉\r\n" + "tail \x80"
+	if err := os.WriteFile(filepath.Join(repoDir, "binary.txt"), []byte(binaryContent), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "blank.txt"), []byte("a\n\nb\n"), 0o644); err != nil {
+		return err
+	}
+	oversize := strings.Builder{}
+	oversizeLines := []string{}
+	for oversize.Len() <= (1 << 20) {
+		oversizeLines = append(oversizeLines, fmt.Sprintf("oversize line %06d: %s", len(oversizeLines)+1, strings.Repeat("0123456789abcdef", 4)))
+		oversize.WriteString(oversizeLines[len(oversizeLines)-1] + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "oversize.txt"), []byte(oversize.String()), 0o644); err != nil {
+		return err
+	}
+	evidenceShapes := []struct {
+		name      string
+		path      string
+		lines     []string
+		lineStart int
+		lineEnd   int
+	}{
+		{"binary", "binary.txt", []string{"ascii line", "binary \xff\xfe line", "utf8 héllo 🎉", "tail \x80"}, 1, 4},
+		{"binary-range", "binary.txt", nil, 9000, 9001},
+		{"blank-single", "blank.txt", []string{""}, 2, 2},
+		{"blank-pair", "blank.txt", []string{"", "b"}, 2, 3},
+		{"oversize", "oversize.txt", oversizeLines[:2], 1, 2},
+	}
+	for _, shape := range evidenceShapes {
+		payload := deepCopy(packetBase)
+		item := payload["evidence"].([]any)[0].(map[string]any)
+		item["path"] = shape.path
+		item["content_hash"] = "sha256:" + strings.Repeat("ab", 32)
+		item["line_start"] = shape.lineStart
+		item["line_end"] = shape.lineEnd
+		if shape.lines != nil {
+			item["content_hash"] = "sha256:" + rawEvidenceHash(shape.lines)
+		}
+		if err := writeJSON(filepath.Join(edge, "packet-evidence-shape-"+shape.name+".json"), payload); err != nil {
+			return err
+		}
+		args := []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-evidence-shape-" + shape.name + ".json"}
+		cases = append(cases,
+			spec{"evidence-edge-shape-"+shape.name+"-human", args},
+			spec{"evidence-edge-shape-"+shape.name+"-json", append(append([]string{}, args...), "--json")},
+		)
+	}
 	cases = append(cases,
 		spec{"contract-edge-nonutf8-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json"}},
 		spec{"contract-edge-nonutf8-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json", "--json"}},
@@ -283,7 +353,6 @@ func run() error {
 	}
 
 	ledger := filepath.Join(dir, "ledger.jsonl")
-	repoDir := filepath.Join(fixtures, "repo")
 	recorded := make([]map[string]any, 0, len(cases))
 	for _, item := range cases {
 		os.Remove(ledger)

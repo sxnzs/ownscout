@@ -1114,6 +1114,141 @@
     },
     {
       "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-binary.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-binary-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-binary.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-binary-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-binary-range.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-shape-binary-range-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"binary.txt\"): invalid line range 9000-9001 for 4 line(s)\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-binary-range.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-shape-binary-range-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"binary.txt\\\"): invalid line range 9000-9001 for 4 line(s)\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-blank-single.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-blank-single-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-blank-single.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-blank-single-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-blank-pair.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-blank-pair-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-blank-pair.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-blank-pair-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-oversize.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-oversize-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-shape-oversize.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-edge-shape-oversize-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
         "contract",
         "validate",
         "--packet",
