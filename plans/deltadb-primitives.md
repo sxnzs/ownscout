@@ -171,6 +171,6 @@ The absent-content case is where the byte budget earns its keep: it stops at
 - A differential test pins the relocation path's window hashing against the
   frozen `hashSelectedLines` for every range of 20 awkward payloads (CRLF, a
   lone `\r`, invalid UTF-8, blank lines, an unterminated tail).
-- The edge corpus grew by seventeen cases covering moved / gone / shrunken-file /
+- The edge corpus grew by twenty-nine cases covering moved / gone / shrunken-file /
   budget-stop / flag-off / flag-rejected, so every branch and every message
   variant is an oracle the three ports must replay byte-for-byte.

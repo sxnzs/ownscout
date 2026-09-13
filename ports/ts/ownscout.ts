@@ -27,6 +27,46 @@ function goJson(value: any): string {
     c === "&" ? "\\u0026" : c === "<" ? "\\u003c" : c === ">" ? "\\u003e" :
     c === "\u2028" ? "\\u2028" : "\\u2029");
 }
+// goIsPrint reports whether a rune is printable by Go's definition
+// (strconv.IsPrint): the Unicode categories L, M, N, P and S, plus the ASCII
+// space. The Latin-1 fast path mirrors Go's table exactly.
+function goIsPrint(r:number):boolean {
+  if (r === 0x20) return true;
+  if (r < 0x20 || r === 0x7f) return false;
+  if (r < 0x7f) return true;
+  if (r <= 0xff) return r >= 0xa1 && r !== 0xad;
+  if (r >= 0xd800 && r <= 0xdfff) return false;
+  if (r > 0x10ffff) return false;
+  return goPrintRe.test(String.fromCodePoint(r));
+}
+const goPrintRe=/^[\p{L}\p{M}\p{N}\p{P}\p{S}]$/u;
+// goQuote renders a string exactly as Go's strconv.Quote - and therefore the
+// %q verb in `json: unknown field %q` - does. The name is decoded Unicode, so
+// it is walked by code point; a lone surrogate is not a valid rune and Go's
+// decoder has already replaced it with U+FFFD, which is printable.
+export function goQuote(s:string):string {
+  let out='"';
+  for (const ch of s) {
+    let r=ch.codePointAt(0)!;
+    if (r>=0xd800 && r<=0xdfff) r=0xfffd;
+    if (r===0x22 || r===0x5c) { out+="\\"+String.fromCodePoint(r); continue; }
+    if (goIsPrint(r)) { out+=String.fromCodePoint(r); continue; }
+    switch (r) {
+      case 0x07: out+="\\a"; break;
+      case 0x08: out+="\\b"; break;
+      case 0x0c: out+="\\f"; break;
+      case 0x0a: out+="\\n"; break;
+      case 0x0d: out+="\\r"; break;
+      case 0x09: out+="\\t"; break;
+      case 0x0b: out+="\\v"; break;
+      default:
+        if (r<0x20 || r===0x7f) out+="\\x"+r.toString(16).padStart(2,"0");
+        else if (r<0x10000) out+="\\u"+r.toString(16).padStart(4,"0");
+        else out+="\\U"+r.toString(16).padStart(8,"0");
+    }
+  }
+  return out+'"';
+}
 function utf8(data: Buffer): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(data); }
   catch { throw new Error("input is not valid UTF-8"); }
@@ -126,7 +166,7 @@ class StrictParser {
         const key = this.string(); this.ws();
         if (seen.has(key) && this.rejectDuplicates) this.fail("duplicate key");
         seen.add(key);
-        if (!(key in schema)) this.fail(`unknown field ${JSON.stringify(key)}`);
+        if (!(key in schema)) this.fail(`unknown field ${goQuote(key)}`);
         this.ws();
         if (this.s[this.i++] !== ":") this.fail();
         const childPath = `${fieldPath}.${key}`;

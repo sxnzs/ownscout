@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded oracle.
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 120/120 | 120 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 120/120 | 21 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 120/120 | 22 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 132/132 | 128 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 132/132 | 24 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 132/132 | 24 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 69 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
@@ -35,21 +35,23 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 120 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge corpus: 132 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
-  range errors that must report the real line count, and the anchor
-  re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
+  range errors that must report the real line count, the anchor re-resolution
+  outcomes: moved, absent, shrunken file, and budget-stopped, and the
+  unknown-field surface: Go `%q` quoting of a field name across `\x`, `\u` and
+  `\U` widths, and which of two decode errors in one nested object is reported).
 - Oracle mutation test: four deliberately broken reference builds fail the
-  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 112/120, 64/120, 118/120 and
-  118/120), so a pass is meaningful.
-- Fuzzing: no divergence in 300 iterations (seed 7) and 200 (seed 1) per port.
-  Seed 11 found the null-handling defect recorded below. Seed 13 surfaces two
-  further divergences that neither corpus covers - unknown-field detection not
-  being in document order, and field names escaped the host language's way
-  rather than Go's `%q`. Those two are **pre-existing and still open**, recorded
-  in each port's `DIVERGENCES.md` rather than left silent.
+  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 118/132, 70/132, 130/132 and
+  130/132), so a pass is meaningful. The quoting and precedence cases cannot be
+  mutation-tested this way, because the reference's behaviour there comes from
+  `encoding/json`; they are validated instead by all three ports failing them
+  before the fix (TypeScript 6, Rust 8, Zig 8 of the new cases).
+- Fuzzing: no divergence in 300 iterations at seeds 7 and 13, and 200 at seed 1,
+  per port. Seeds 1, 11 and 13 each found a defect that is now fixed and frozen
+  into the edge corpus; see below. No open divergences are known.
 
 ## Bugs the fuzzer caught
 
@@ -89,6 +91,27 @@ first. All three are fixed in Rust and frozen into the edge corpus
 (`node-edge-missing-flags-human`, `node-edge-missing-flags-json`,
 `node-edge-missing-flags-partial-json`, `node-edge-unknown-flag-json`), which
 also proved that TypeScript and Zig already matched.
+
+### Field-name quoting and decode precedence (seed 13)
+
+The last two divergences the fuzzer could reach, both in packet decoding and both
+present in all three ports.
+
+The reference quotes an unknown field name with Go's `%q`, and it reports
+whichever decode error occurs first in document order, recursing into nested
+objects. Each port got a different half of this wrong: TypeScript escaped `"`,
+`\`, tab and newline but emitted DEL, NBSP and U+2028 as raw bytes; Rust used
+Rust's `{:?}`, giving `\u{7f}`; Zig emitted control bytes raw, which broke the
+single-line result format outright. On precedence, Rust always reported the
+unknown field because it scanned for them in a pass of its own, while Zig always
+reported the type error because it type-checked first.
+
+The fix needs three escape widths - `\xNN` for control bytes and DEL, `\uNNNN` up
+to U+FFFF, `\UNNNNNNNN` above it - with printable runes left literal, and the
+unknown-field check interleaved with the type checks so document order decides.
+Twelve cases pin it (`contract-edge-unknown-*` and
+`contract-edge-precedence-*`). All three ports now pass 132/132 and fuzz seed 13
+is clean; the `DIVERGENCES.md` files they had been recorded in are gone.
 
 ## Port design
 
