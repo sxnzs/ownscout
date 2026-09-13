@@ -150,9 +150,17 @@ cases pin the rule (`node-edge-identifier-*`).
 
 ### What this says about the gate
 
-Five divergence classes in a row were reachable only at seeds the gate does not
-run. A single seed is not a verification strategy: the cheap fix is to sweep a
-range of seeds in CI rather than pick one, and to treat "clean at seed N" as
+Seven divergence classes in a row were reachable only at seeds some earlier run
+did not happen to pick. A single seed is not a verification strategy, so the
+sweep is now a first-class target and a CI job rather than an ad-hoc command:
+
+```
+make fuzz-sweep                 # seeds 3 6 8 13 20 21 24, every port
+make fuzz-sweep FUZZ_SEEDS="1 2 3 4 5" FUZZ_ITERATIONS=300
+```
+
+`FUZZ_SEEDS`, `FUZZ_ITERATIONS` and `PORT_BINARIES` are overridable, and the
+target exits non-zero on the first divergence. Treat "clean at seed N" as
 evidence about seed N only.
 
 ## Port design

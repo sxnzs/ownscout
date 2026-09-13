@@ -34,3 +34,24 @@ jobs:
         run: make ports
       - name: Verify every port against the corpora
         run: spec/parity/verify-all.sh
+
+  # The corpora pin behaviours that have been seen; the fuzzer explores inputs no
+  # case names. A single seed is not a verification strategy: seven divergence
+  # classes were reachable only at seeds the gate did not run, so this job sweeps
+  # a range of them rather than picking one.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.16.0'
+      - name: Sweep fuzz seeds across every port
+        run: make fuzz-sweep

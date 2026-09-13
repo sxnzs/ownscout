@@ -46,3 +46,21 @@ ports:
     - node --version && cargo --version && zig version && python3 --version
     - make ports
     - spec/parity/verify-all.sh
+
+# The corpora pin behaviours that have been seen; the fuzzer explores inputs no
+# case names. A single seed is not a verification strategy: seven divergence
+# classes were reachable only at seeds the other jobs did not run. This sweep is
+# the thing that would have caught every one of them.
+fuzz:
+  stage: ports
+  image: node:24-bookworm
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential golang-go
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+    - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+    - tar -C /opt -xf /tmp/zig.tar.xz
+    - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+  script:
+    - . "$HOME/.cargo/env"
+    - make fuzz-sweep

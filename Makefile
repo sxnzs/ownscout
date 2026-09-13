@@ -1,7 +1,7 @@
 GO ?= go
 REF ?= spec/parity/reference-ownscout
 
-.PHONY: build gate test corpus corpus-check reference fuzz verify-ports ports ports-test
+.PHONY: build gate test corpus corpus-check reference fuzz fuzz-sweep verify-ports ports ports-test
 
 build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
@@ -35,6 +35,23 @@ ports-test:
 
 fuzz: reference
 	python3 spec/parity/fuzz.py --candidate $(REF)
+
+# The corpora pin behaviours that have been seen; the fuzzer explores inputs no
+# case names. A single seed is not a verification strategy: seven divergence
+# classes in a row were reachable only at seeds the gate did not run, and each
+# one was found by sweeping rather than by the seed that happened to be current.
+# Seeds 3, 6, 8, 13, 20, 21 and 24 are the ones that have caught something.
+FUZZ_SEEDS ?= 3 6 8 13 20 21 24
+FUZZ_ITERATIONS ?= 200
+PORT_BINARIES ?= ports/ts/bin/ownscout ports/rust/target/release/ownscout ports/zig/zig-out/bin/ownscout
+
+fuzz-sweep: reference ports
+	@for port in $(PORT_BINARIES); do \
+		for seed in $(FUZZ_SEEDS); do \
+			python3 spec/parity/fuzz.py --candidate $$port \
+				--iterations $(FUZZ_ITERATIONS) --seed $$seed || exit 1; \
+		done; \
+	done
 
 verify-ports:
 	spec/parity/verify-all.sh
