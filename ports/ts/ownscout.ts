@@ -731,14 +731,6 @@ function safeLedgerPath(ledger:string,repo:string):string {
   if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw new Error(`ledger path "${p}" is a symlink`);
   return p;
 }
-function ledgerOpen(ledger:string,repo:string):{path:string;records:any[]} {
-  const p=safeLedgerPath(ledger,repo); if(!fs.existsSync(path.dirname(p))) throw new Error(`open ledger parent "${path.dirname(p)}": no such file or directory`);
-  if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, "a", 0o600));
-  const data=fs.existsSync(p)?fs.readFileSync(p):Buffer.alloc(0); if(data.length>1<<20)throw new Error("ledger exceeds 1048576 bytes");
-  if(data.length&&!data.toString().endsWith("\n"))throw new Error("validate ledger: nonempty ledger must end with LF");
-  const records:any[]=[]; for(const line of data.toString().split("\n").filter(Boolean)){const rec=JSON.parse(line); if(rec.schema_version!=="ownscout-ledger-v1"||rec.seq!==records.length+1||rec.prev_record_hash!==(records.length?records.at(-1).record_hash:zero)||rec.record_hash!==hashRecord(rec))throw new Error("validate ledger: invalid record");records.push(rec);}
-  return {path:p,records};
-}
 // hashRecord hashes exactly what Go's json.Marshal emits for a ledger Record:
 // struct field order, record_hash blanked, and the omitempty reason omitted.
 function ledgerRecordCanonical(r:any):any{
@@ -746,57 +738,322 @@ function ledgerRecordCanonical(r:any):any{
   return {schema_version:r.schema_version,seq:r.seq,prev_record_hash:r.prev_record_hash,record_hash:"",envelope_sha256:r.envelope_sha256,packet_binding_sha256:r.packet_binding_sha256,ownscout_version:r.ownscout_version,node_results:results.map((n:any)=>({node_id:n.node_id,status:n.status,...(n.reason?{reason:n.reason}:{})}))};
 }
 function hashRecord(r:any):string{return sha256(goJson(ledgerRecordCanonical(r)));}
+function ledgerOpen(ledger:string,repo:string):{path:string;list:any[]} {
+  const p=safeLedgerPath(ledger,repo); if(!fs.existsSync(path.dirname(p))) throw new Error(`open ledger parent "${path.dirname(p)}": no such file or directory`);
+  if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, "a", 0o600));
+  const data=fs.readFileSync(p); if(data.length>MAX_LEDGER)throw new Error("ledger exceeds 1048576 bytes");
+  return {path:p,list:validateLedger(data).list};
+}
 function appendLedger(l:any,b:string,envHash:string,results:any[]):void {
   if(!results.length)throw new Error("node_results must be non-empty");
-  const prev=l.records.length?l.records.at(-1).record_hash:zero;
-  const rec:any={schema_version:"ownscout-ledger-v1",seq:l.records.length+1,prev_record_hash:prev,record_hash:zero,envelope_sha256:envHash,packet_binding_sha256:b,ownscout_version:VERSION,node_results:results};
+  const prev=l.list.length?l.list[l.list.length-1].record_hash:zero;
+  const rec:any={schema_version:"ownscout-ledger-v1",seq:l.list.length+1,prev_record_hash:prev,record_hash:zero,envelope_sha256:envHash,packet_binding_sha256:b,ownscout_version:VERSION,node_results:results};
   rec.record_hash=hashRecord(rec);const line=goJson(rec)+"\n";if(Buffer.byteLength(line)>64<<10||fs.statSync(l.path).size+Buffer.byteLength(line)>1<<20)throw new Error("ledger exceeds 1048576 bytes");
-  fs.appendFileSync(l.path,line,{mode:0o600});l.records.push(rec);
+  fs.appendFileSync(l.path,line,{mode:0o600});l.list.push(rec);
 }
 
 // --- ledger verify -------------------------------------------------------
+// The reference validates a ledger line with internal/ledger's decodeRecord,
+// which walks the document the way Go 1.27's encoding/json v2 token reader
+// does. GoDec reproduces that walk (structure, duplicate/unknown fields,
+// node_results shape) and buildLedgerRecord reproduces the typed conversion
+// and its error text.
 class LedgerValidationError extends Error {}
 const MAX_LEDGER=1<<20, MAX_NODE_RESULTS=4096;
-const ledgerNodeResultSchema={node_id:"string",status:"string",reason:"string"};
-const ledgerRecordSchema={schema_version:"string",seq:"int64",prev_record_hash:"string",record_hash:"string",envelope_sha256:"string",packet_binding_sha256:"string",ownscout_version:"string",node_results:{array:ledgerNodeResultSchema}};
-
+const RECORD_FIELDS=["schema_version","seq","prev_record_hash","record_hash","envelope_sha256","packet_binding_sha256","ownscout_version","node_results"];
+const NODE_RESULT_FIELDS=["node_id","status","reason"];
 function isJSONSpace(c:number):boolean{return c===0x20||c===0x09||c===0x0a||c===0x0d;}
+function isHexDigit(d:number):boolean{return (d>=0x30&&d<=0x39)||(d>=0x61&&d<=0x66)||(d>=0x41&&d<=0x46);}
+function hexDigit(d:number):number{return d<=0x39?d-0x30:(d>=0x61?d-0x61+10:d-0x41+10);}
+function validCodepoint(v:number):boolean{return v>=0&&v<=0x10ffff&&!(v>=0xd800&&v<=0xdfff);}
+function literalContext(word:string,index:number):string{
+  if(word==="true") return index===1?"in literal true (expecting 'r')":index===2?"in literal true (expecting 'u')":"in literal true (expecting 'e')";
+  if(word==="false") return index===1?"in literal false (expecting 'a')":index===2?"in literal false (expecting 'l')":index===3?"in literal false (expecting 's')":"in literal false (expecting 'e')";
+  return index===1?"in literal null (expecting 'u')":"in literal null (expecting 'l')";
+}
+function nonCanonicalOrUnknown(key:string,allowed:string[]):string{
+  const folded=goFoldName(key);
+  for(const candidate of allowed) if(goFoldName(candidate)===folded) return `non-canonical JSON field ${goQuote(key)}; use ${goQuote(candidate)}`;
+  return `unknown JSON field ${goQuote(key)}`;
+}
 function goQuoteChar(c:number):string{
   if(c===0x27) return "'\\''";
   if(c===0x22) return "'\"'";
-  if(c>=0x20 && c<0x7f) return "'"+String.fromCharCode(c)+"'";
-  return "'"+goQuote(String.fromCharCode(c)).slice(1,-1)+"'";
+  if(c===0x5c) return "'\\\\'";
+  if(c>=0x20 && c<=0x7e) return "'"+String.fromCharCode(c)+"'";
+  if(c===0x07) return "'\\a'";
+  if(c===0x08) return "'\\b'";
+  if(c===0x09) return "'\\t'";
+  if(c===0x0a) return "'\\n'";
+  if(c===0x0b) return "'\\v'";
+  if(c===0x0c) return "'\\f'";
+  if(c===0x0d) return "'\\r'";
+  return "'\\x"+c.toString(16).padStart(2,"0")+"'";
 }
-// ledgerSyntaxError reproduces the first-token syntax errors of Go's
-// encoding/json scanner, which validateJSONObject surfaces as "malformed JSON".
-function ledgerSyntaxError(s:string):string|undefined{
-  let i=0; while(i<s.length && isJSONSpace(s.charCodeAt(i))) i++;
-  if(i>=s.length) return "unexpected end of JSON input";
-  const c=s[i];
-  if(c==="{"||c==="["||c==="\""||(c>="0"&&c<="9")||c==="-") return undefined;
-  for(const lit of ["true","false","null"]){
-    if(c!==lit[0]) continue;
-    for(let k=0;k<lit.length;k++){
-      if(i+k>=s.length) return "unexpected EOF";
-      if(s[i+k]!==lit[k]) return `invalid character ${goQuoteChar(s.charCodeAt(i+k))} in literal ${lit} (expecting ${goQuoteChar(lit.charCodeAt(k))})`;
+class GoDec {
+  data:Buffer; pos=0;
+  constructor(data:Buffer){this.data=data;}
+  peek():number{return this.pos<this.data.length?this.data[this.pos]:-1;}
+  skipWs(){while(this.pos<this.data.length&&isJSONSpace(this.data[this.pos]))this.pos++;}
+  private err(c:number,context:string):Error{return new Error(`invalid character ${goQuoteChar(c)} ${context}`);}
+  token():{kind:"delim"|"str"|"other";delim?:number;str?:string}{
+    this.skipWs();
+    const c=this.peek();
+    if(c<0) throw new Error("EOF");
+    if(c===0x7b){this.pos++;return {kind:"delim",delim:0x7b};}
+    if(c===0x5b){this.pos++;return {kind:"delim",delim:0x5b};}
+    if(c===0x22) return {kind:"str",str:this.string()};
+    if(c===0x74){this.literal("true");return {kind:"other"};}
+    if(c===0x66){this.literal("false");return {kind:"other"};}
+    if(c===0x6e){this.literal("null");return {kind:"other"};}
+    if(c===0x2d||(c>=0x30&&c<=0x39)){this.number();return {kind:"other"};}
+    throw this.err(c,"looking for beginning of value");
+  }
+  private literal(word:string){
+    for(let i=0;i<word.length;i++){
+      const c=this.peek();
+      if(c<0) throw new Error("unexpected EOF");
+      if(c!==word.charCodeAt(i)) throw this.err(c,literalContext(word,i));
+      this.pos++;
     }
-    return undefined;
   }
-  return `invalid character ${goQuoteChar(c.charCodeAt(0))} looking for beginning of value`;
+  private number(){
+    if(this.peek()===0x2d) this.pos++;
+    let c=this.peek();
+    if(c<0) throw new Error("unexpected EOF");
+    if(c===0x30) this.pos++;
+    else if(c>=0x31&&c<=0x39) this.digits();
+    else throw this.err(c,"in numeric literal");
+    if(this.peek()===0x2e){
+      this.pos++;
+      c=this.peek();
+      if(c<0) throw new Error("unexpected EOF");
+      if(c>=0x30&&c<=0x39) this.digits(); else throw this.err(c,"in numeric literal");
+    }
+    c=this.peek();
+    if(c===0x65||c===0x45){
+      this.pos++;
+      c=this.peek();
+      if(c===0x2b||c===0x2d) this.pos++;
+      c=this.peek();
+      if(c<0) throw new Error("unexpected EOF");
+      if(c>=0x30&&c<=0x39) this.digits(); else throw this.err(c,"in numeric literal");
+    }
+  }
+  private digits(){for(;;){const c=this.peek(); if(c>=0x30&&c<=0x39) this.pos++; else break;}}
+  private string():string{
+    this.pos++;
+    let out="";
+    for(;;){
+      const c=this.peek();
+      if(c<0) throw new Error("unexpected EOF");
+      this.pos++;
+      if(c===0x22) return out;
+      if(c===0x5c){
+        const escape=this.pos-1;
+        const e=this.peek();
+        if(e<0) throw new Error("unexpected EOF");
+        this.pos++;
+        if(e===0x22) out+='"';
+        else if(e===0x5c) out+="\\";
+        else if(e===0x2f) out+="/";
+        else if(e===0x62) out+="\b";
+        else if(e===0x66) out+="\f";
+        else if(e===0x6e) out+="\n";
+        else if(e===0x72) out+="\r";
+        else if(e===0x74) out+="\t";
+        else if(e===0x75){
+          const digits:number[]=[]; let seen=0;
+          while(seen<4){ const d=this.peek(); if(d<0) break; digits.push(d); seen++; this.pos++; }
+          if(seen<4 || !digits.every(isHexDigit)) throw new Error(`invalid escape sequence \`${goDecodeUtf8(this.data.subarray(escape,this.pos))}\` in string`);
+          let value=digits.reduce((a,d)=>a*16+hexDigit(d),0);
+          // A high surrogate followed by a low-surrogate escape is one rune;
+          // an unpaired one is the replacement rune.
+          if(value>=0xd800&&value<=0xdbff){
+            const save=this.pos;
+            let combined=-1;
+            if(this.peek()===0x5c){
+              this.pos++;
+              if(this.peek()===0x75){
+                this.pos++;
+                const low:number[]=[]; let seenLow=0;
+                while(seenLow<4){ const d=this.peek(); if(d<0) break; low.push(d); seenLow++; this.pos++; }
+                if(seenLow===4&&low.every(isHexDigit)){
+                  const lowValue=low.reduce((a,d)=>a*16+hexDigit(d),0);
+                  if(lowValue>=0xdc00&&lowValue<=0xdfff) combined=0x10000+((value-0xd800)<<10)+(lowValue-0xdc00);
+                }
+              }
+            }
+            if(combined>=0){ out+=String.fromCodePoint(combined); continue; }
+            this.pos=save;
+            out+="\ufffd";
+            continue;
+          }
+          out+=String.fromCodePoint(validCodepoint(value)?value:0xfffd);
+        }
+        else throw new Error(`invalid escape sequence \`${goDecodeUtf8(this.data.subarray(escape,this.pos))}\` in string`);
+        continue;
+      }
+      if(c<0x20) throw this.err(c,"in string");
+      const start=this.pos-1;
+      while(this.pos<this.data.length && this.data[this.pos]>=0x80) this.pos++;
+      out+=goDecodeUtf8(this.data.subarray(start,this.pos));
+    }
+  }
+  afterComma(){
+    this.pos++; this.skipWs();
+    const c=this.peek();
+    if(c<0) throw new Error("EOF");
+    if(c===0x5d||c===0x7d) throw this.err(0x2c,"looking for beginning of value");
+  }
+  consumeValue(){
+    const t=this.token();
+    if(t.kind==="delim"&&t.delim===0x7b) this.consumeObject(null);
+    else if(t.kind==="delim"&&t.delim===0x5b) this.consumeArray();
+  }
+  consumeArray(){
+    this.skipWs();
+    if(this.peek()===0x5d){this.pos++;return;}
+    for(;;){
+      this.consumeValue();
+      this.skipWs();
+      const c=this.peek();
+      if(c<0) throw new Error("unexpected end of JSON input");
+      if(c===0x2c) this.afterComma();
+      else if(c===0x5d){this.pos++;return;}
+      else throw this.err(c,"after array element");
+    }
+  }
+  consumeObject(allowed:string[]|null){
+    const seen=new Set<string>();
+    for(;;){
+      this.skipWs();
+      const c=this.peek();
+      if(c<0) throw new Error("unexpected end of JSON input");
+      if(c===0x7d){this.pos++;return;}
+      const t=this.token();
+      if(t.kind!=="str") throw new Error("object member name must be a string");
+      const key=t.str!;
+      if(seen.has(key)) throw new Error(`duplicate JSON field ${goQuote(key)}`);
+      seen.add(key);
+      if(allowed&&!allowed.includes(key)) throw new Error(nonCanonicalOrUnknown(key,allowed));
+      this.skipWs();
+      const c2=this.peek();
+      if(c2<0) throw new Error("EOF");
+      if(c2===0x3a) this.pos++;
+      else throw this.err(c2,"after object key");
+      this.skipWs();
+      const c3=this.peek();
+      if(c3<0) throw new Error("EOF");
+      if(c3===0x7d) throw new Error("missing value after object key");
+      if(allowed&&key==="node_results") this.consumeNodeResults();
+      else this.consumeValue();
+      this.skipWs();
+      const c4=this.peek();
+      if(c4<0) throw new Error("unexpected end of JSON input");
+      if(c4===0x2c) this.afterComma();
+      else if(c4===0x7d){this.pos++;return;}
+      else throw this.err(c4,"after object key:value pair");
+    }
+  }
+  consumeNodeResult(){
+    const t=this.token();
+    if(t.kind==="delim"&&t.delim===0x7b) this.consumeObject(NODE_RESULT_FIELDS);
+    else throw new Error("node result must be a JSON object");
+  }
+  consumeNodeResults(){
+    const t=this.token();
+    if(!(t.kind==="delim"&&t.delim===0x5b)) throw new Error("node_results must be an array");
+    this.skipWs();
+    if(this.peek()===0x5d){this.pos++;return;}
+    for(;;){
+      this.consumeNodeResult();
+      this.skipWs();
+      const c=this.peek();
+      if(c<0) throw new Error("unexpected end of JSON input");
+      if(c===0x2c) this.afterComma();
+      else if(c===0x5d){this.pos++;return;}
+      else throw this.err(c,"after array element");
+    }
+  }
 }
-function decodeLedgerRecord(text:string):any{
-  const syntax=ledgerSyntaxError(text);
-  if(syntax!==undefined) throw new Error(`malformed JSON: ${syntax}`);
-  // validateJSONObject parses the first token before anything else, so any
-  // valid non-object line is rejected with this exact message.
-  if(text[0]!=="{") throw new Error("record must be a JSON object");
-  try{return new StrictParser(text,true,true,true,false,false).parse(ledgerRecordSchema);}
-  catch(e:any){
-    const m=String(e.message);
-    if(m.startsWith("unknown field ")) throw new Error(`malformed JSON: unknown JSON field ${m.slice("unknown field ".length)}`);
-    if(m.startsWith("duplicate key ")) throw new Error(`malformed JSON: duplicate JSON field ${m.slice("duplicate key ".length)}`);
-    throw new Error(`malformed record: ${m}`);
+function goValidateObject(data:Buffer):void{
+  const dec=new GoDec(data);
+  let first;
+  try{first=dec.token();}catch(e:any){throw new Error(`malformed JSON: ${e.message}`);}
+  if(!(first.kind==="delim"&&first.delim===0x7b)) throw new Error("record must be a JSON object");
+  try{dec.consumeObject(RECORD_FIELDS);}catch(e:any){throw new Error(`malformed JSON: ${e.message}`);}
+  dec.skipWs();
+  if(dec.pos<dec.data.length){
+    try{dec.token();}catch(e:any){throw new Error(`trailing data: ${e.message}`);}
+    throw new Error("trailing data");
   }
+}
+// ledgerParseValue reparses an already-validated record, keeping number
+// literals verbatim so the typed errors can name them.
+function ledgerParseValue(text:string):any{
+  let i=0;
+  const ws=()=>{while(i<text.length&&isJSONSpace(text.charCodeAt(i)))i++;};
+  const str=():string=>{
+    const start=i; i++;
+    while(i<text.length){ const c=text[i++]; if(c==='"') break; if(c==="\\"){ if(text[i]==="u") i+=5; else i++; } }
+    return JSON.parse(text.slice(start,i));
+  };
+  const val=():any=>{
+    ws();
+    const c=text[i];
+    if(c==="{"){ i++; const o:AnyObj={}; ws(); if(text[i]==="}"){i++;return o;} for(;;){ ws(); const k=str(); ws(); i++; const v=val(); o[k]=v; ws(); if(text[i]===","){i++;continue;} i++; return o; } }
+    if(c==="["){ i++; const a:any[]=[]; ws(); if(text[i]==="]"){i++;return a;} for(;;){ a.push(val()); ws(); if(text[i]===","){i++;continue;} i++; return a; } }
+    if(c==='"') return str();
+    if(c==="t"){ i+=4; return true; }
+    if(c==="f"){ i+=5; return false; }
+    if(c==="n"){ i+=4; return null; }
+    const m=/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(i))!;
+    i+=m[0].length; return {__num:m[0]};
+  };
+  return val();
+}
+function ledgerKind(v:any):string{
+  if(v===null||v===undefined) return "null";
+  if(typeof v==="boolean") return "bool";
+  if(typeof v==="string") return "string";
+  if(Array.isArray(v)) return "array";
+  if(v.__num!==undefined) return "number";
+  return "object";
+}
+function ledgerStringField(v:any,path:string):string{
+  if(v===undefined||v===null) return "";
+  if(typeof v==="string") return v;
+  throw new Error(`malformed record: json: cannot unmarshal ${ledgerKind(v)} into Go struct field ${path} of type string`);
+}
+function buildLedgerRecord(v:any):any{
+  let seq=0;
+  const seqv=v.seq;
+  if(seqv!==undefined&&seqv!==null){
+    if(seqv.__num!==undefined){
+      const lit=seqv.__num;
+      let ok=/^\d+$/.test(lit);
+      if(ok){ try{ if(BigInt(lit)>18446744073709551615n) ok=false; }catch{ ok=false; } }
+      if(!ok) throw new Error(`malformed record: json: cannot unmarshal number ${lit} into Go struct field Record.seq of type uint64`);
+      seq=Number(BigInt(lit));
+    } else {
+      throw new Error(`malformed record: json: cannot unmarshal ${ledgerKind(seqv)} into Go struct field Record.seq of type uint64`);
+    }
+  }
+  const results:any[]=[];
+  const nrv=v.node_results;
+  if(nrv!==undefined&&nrv!==null){
+    for(let idx=0;idx<nrv.length;idx++){
+      const item=nrv[idx];
+      if(item===null||typeof item!=="object"||Array.isArray(item)||item.__num!==undefined) throw new Error(`malformed record: json: cannot unmarshal ${ledgerKind(item)} into Go value of type ledger.NodeResult`);
+      results.push({node_id:ledgerStringField(item.node_id,`Record.node_results.${idx}.node_id`),status:ledgerStringField(item.status,`Record.node_results.${idx}.status`),reason:ledgerStringField(item.reason,`Record.node_results.${idx}.reason`)});
+    }
+  }
+  return {schema_version:ledgerStringField(v.schema_version,"Record.schema_version"),seq,prev_record_hash:ledgerStringField(v.prev_record_hash,"Record.prev_record_hash"),record_hash:ledgerStringField(v.record_hash,"Record.record_hash"),envelope_sha256:ledgerStringField(v.envelope_sha256,"Record.envelope_sha256"),packet_binding_sha256:ledgerStringField(v.packet_binding_sha256,"Record.packet_binding_sha256"),ownscout_version:ledgerStringField(v.ownscout_version,"Record.ownscout_version"),node_results:results};
+}
+function decodeLedgerRecord(data:Buffer):any{
+  goValidateObject(data);
+  return buildLedgerRecord(ledgerParseValue(goDecodeUtf8(data)));
 }
 function validateLedgerIdentifier(value:any):void{
   if(typeof value!=="string"||value.length<1||value.length>128) throw new Error("must contain 1-128 ASCII identifier characters");
@@ -837,28 +1094,40 @@ function validateLedgerRecord(r:any,expectedSeq:number,expectedPrev:string):void
     seen.add(id);
   }
 }
-function validateLedger(data:Buffer):{records:number;tip:string}{
+function isGoSpaceRune(r:number):boolean{
+  if(r===0x09||r===0x0a||r===0x0b||r===0x0c||r===0x0d||r===0x20||r===0x85||r===0xa0) return true;
+  if(r>0xa0) return /\p{Zs}/u.test(String.fromCodePoint(r));
+  return false;
+}
+function goTrimSpaceBytes(buf:Buffer):Buffer{
+  let start=0;
+  while(start<buf.length){ const d=goDecodeRune(buf,start); if(d.size===0||!isGoSpaceRune(d.r)) break; start+=d.size; }
+  let lastEnd=start, i=start;
+  while(i<buf.length){ const d=goDecodeRune(buf,i); const sz=d.size||1; if(!isGoSpaceRune(d.r)) lastEnd=i+sz; i+=sz; }
+  return buf.subarray(start,lastEnd);
+}
+function validateLedger(data:Buffer):{list:any[];tip:string}{
   if(data.length&&data[data.length-1]!==0x0a) throw new LedgerValidationError("nonempty ledger must end with LF");
-  let text:string;
-  try{text=new TextDecoder("utf-8",{fatal:true}).decode(data);}catch{throw new LedgerValidationError("invalid UTF-8");}
-  const lines=text.length?text.split("\n"):[];
-  if(lines.length&&lines[lines.length-1]==="") lines.pop();
-  let last:any=null,count=0;
-  for(let i=0;i<lines.length;i++){
-    let line=lines[i];
-    if(line.endsWith("\r")) line=line.slice(0,-1);
-    const trimmed=line.trim();
+  const list:any[]=[];
+  let start=0;
+  while(start<data.length){
+    let end=data.indexOf(0x0a,start);
+    if(end<0) end=data.length;
+    let line=data.subarray(start,end);
+    if(line.length&&line[line.length-1]===0x0d) line=line.subarray(0,line.length-1);
+    const trimmed=goTrimSpaceBytes(line);
     if(trimmed.length===0) throw new LedgerValidationError("empty or blank line");
     let record:any;
-    try{record=decodeLedgerRecord(trimmed);}catch(e:any){throw new LedgerValidationError(`line ${count+1}: ${e.message}`);}
-    const expectedSeq=count+1, expectedPrev=count!==0?last.record_hash:zero;
-    try{validateLedgerRecord(record,expectedSeq,expectedPrev);}catch(e:any){throw new LedgerValidationError(`line ${count+1}: ${e.message}`);}
-    if(record.record_hash!==hashRecord(record)) throw new LedgerValidationError(`line ${count+1}: record_hash does not match canonical record`);
-    last=record;count++;
+    try{record=decodeLedgerRecord(trimmed);}catch(e:any){throw new LedgerValidationError(`line ${list.length+1}: ${e.message}`);}
+    const expectedSeq=list.length+1, expectedPrev=list.length?list[list.length-1].record_hash:zero;
+    try{validateLedgerRecord(record,expectedSeq,expectedPrev);}catch(e:any){throw new LedgerValidationError(`line ${list.length+1}: ${e.message}`);}
+    if(record.record_hash!==hashRecord(record)) throw new LedgerValidationError(`line ${list.length+1}: record_hash does not match canonical record`);
+    list.push(record);
+    start=end+1;
   }
-  return {records:count,tip:count?last.record_hash:""};
+  return {list,tip:list.length?list[list.length-1].record_hash:""};
 }
-function ledgerVerify(pth:string):{records:number;tip:string}{
+function ledgerVerify(pth:string):{list:any[];tip:string}{
   const ledgerPath=path.resolve(pth);
   let st:fs.Stats;
   try{st=fs.lstatSync(ledgerPath);}
@@ -900,7 +1169,7 @@ function ledgerCmd(a:string[],out:any):number{
     return emit(out,q.j,{command:"ledger verify",ok:false,summary:"ledger could not be read",details:[e.message],next_action:"Provide a readable ledger file with --ledger <file>."},2);
   }
   const tip=s.tip||"none";
-  return emit(out,q.j,{command:"ledger verify",ok:true,summary:"ledger is intact",details:[`${s.records} record(s), tip ${tip}`],next_action:"The ledger chain is intact."},0);
+  return emit(out,q.j,{command:"ledger verify",ok:true,summary:"ledger is intact",details:[`${s.list.length} record(s), tip ${tip}`],next_action:"The ledger chain is intact."},0);
 }
 function nodeBindCmd(a:string[],out:any):number{
   const q=parseFlags(a,new Set(["--packet"]));
