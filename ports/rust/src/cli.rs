@@ -1,6 +1,7 @@
 use crate::result::{render, usage, ResultData};
 use crate::{contract, evidence, ledger, node, packet, sha256};
 use std::fs;
+use std::io::Read;
 
 const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout ledger rotate --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nUse \"ownscout <command> --help\" for command details.";
 
@@ -148,33 +149,45 @@ enum PacketError {
 // evidence. Go reads the packet through readBounded first, so an oversized
 // input is a read failure ("packet could not be loaded"), not a decode failure.
 fn load_packet_validation(path: &str) -> Result<packet::Packet, PacketError> {
-    let data = read_bounded(path).map_err(PacketError::Read)?;
+    let data = read_bounded(path, "packet").map_err(PacketError::Read)?;
     packet::decode_strict(&data).map_err(|_| PacketError::Decode)
 }
 
 // read_bounded mirrors the reference's readBounded: the same 1 MiB cap and the
 // same error text, so an oversize packet is a read failure rather than a decode
 // failure.
-fn read_bounded(path: &str) -> Result<Vec<u8>, String> {
+fn read_bounded(path: &str, kind: &str) -> Result<Vec<u8>, String> {
     let quoted = crate::packet::go_quote(path);
-    let data = match fs::read(path) {
-        Ok(data) => data,
+    // open and read are separate errors in the reference: a directory opens
+    // fine and only fails at read, producing "read <kind> \"<path>\": read
+    // <path>: is a directory" — both halves of the message matter.
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
         Err(e) => {
             if e.kind() == std::io::ErrorKind::NotFound {
-                return Err(format!("packet file {} does not exist", quoted));
+                return Err(format!("{} file {} does not exist", kind, quoted));
             }
-            return Err(format!("open packet {}: {}", quoted, ledger::go_errno(&e)));
+            return Err(format!("open {} {}: {}", kind, quoted, ledger::go_errno(&e)));
         }
     };
+    let mut data = Vec::new();
+    if let Err(e) = std::io::Read::take(&mut file, (1 << 20) + 1).read_to_end(&mut data) {
+        return Err(format!(
+            "read {} {}: read {}: {}",
+            kind,
+            quoted,
+            path,
+            ledger::go_errno(&e)
+        ));
+    }
     if data.len() > 1 << 20 {
-        return Err("packet exceeds 1048576 byte input limit".into());
+        return Err(format!("{} exceeds 1048576 byte input limit", kind));
     }
     Ok(data)
 }
 
 fn load_packet_strict(path: &str) -> Result<packet::Packet, PacketError> {
-    let data = read_bounded(path)
-        .map_err(|_| PacketError::Read("packet input could not be read".into()))?;
+    let data = read_bounded(path, "packet").map_err(PacketError::Read)?;
     packet::decode_strict(&data).map_err(|_| PacketError::Decode)
 }
 
@@ -565,15 +578,15 @@ fn node_bind_command(args: &[String], json: bool) -> (String, i32) {
             "ownscout node bind --help",
         );
     };
-    let data = match read_bounded(&path) {
+    let data = match read_bounded(&path, "packet") {
         Ok(data) => data,
-        Err(_) => {
+        Err(e) => {
             return result(render(
                 &ResultData {
                     command: "node bind".into(),
                     ok: false,
                     summary: "packet could not be loaded".into(),
-                    details: vec!["packet input could not be read".into()],
+                    details: vec![e],
                     next_action: "Provide a readable packet file with --packet <file>.".into(),
                 },
                 json,
@@ -699,11 +712,11 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
     };
     let p = match load_packet_strict(&packet_path) {
         Ok(v) => v,
-        Err(PacketError::Read(_)) => {
+        Err(PacketError::Read(e)) => {
             return node_error(
                 json,
                 "packet could not be loaded",
-                "packet input could not be read",
+                &e,
                 2,
                 "Provide a readable packet file with --packet <file>.",
             )
@@ -736,13 +749,13 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
             2,
         ));
     }
-    let eb = match read_bounded(&envelope_path) {
+    let eb = match read_bounded(&envelope_path, "envelope") {
         Ok(v) => v,
-        Err(_) => {
+        Err(e) => {
             return node_error(
                 json,
                 "envelope could not be loaded",
-                "envelope input could not be read",
+                &e,
                 2,
                 "Provide a readable envelope file with --envelope <file>.",
             )
@@ -916,6 +929,9 @@ fn help(args: &[String]) -> (String, i32) {
     }
     if args.len() >= 2 && args[0] == "ledger" && args[1] == "verify" {
         text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.".into();
+    }
+    if args.len() >= 2 && args[0] == "ledger" && args[1] == "rotate" {
+        text = "Usage: ownscout ledger rotate --ledger <file> [--json]\n\nAudits the chain, then renames the ledger to <file>.<tip8> so the next verification starts a fresh chain.\n\nNext action: provide --ledger with a readable, non-empty ledger file.".into();
     }
     if args.len() >= 2 && args[0] == "node" && args[1] == "bind" {
         text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.".into();
