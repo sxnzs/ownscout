@@ -1838,6 +1838,134 @@
     {
       "args": [
         "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-duplicate-key.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-duplicate-key-human",
+      "stdout": "ERROR: packet could not be decoded\n  - strict packet decoding failed\nNext action: Provide one valid packet-v1 JSON object with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-duplicate-key.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-duplicate-key-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-badutf8.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-badutf8-human",
+      "stdout": "ERROR: packet could not be decoded\n  - strict packet decoding failed\nNext action: Provide one valid packet-v1 JSON object with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-badutf8.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-badutf8-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-null-field.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-null-field-human",
+      "stdout": "ERROR: packet could not be decoded\n  - strict packet decoding failed\nNext action: Provide one valid packet-v1 JSON object with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-node-null-field.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-strict-null-field-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-surrogate-escape.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-surrogate-escape-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-surrogate-escape.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-surrogate-escape-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "node",
         "verify"
       ],
       "exitCode": 2,

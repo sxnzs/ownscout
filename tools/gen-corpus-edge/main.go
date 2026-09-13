@@ -494,6 +494,57 @@ func run() error {
 		spec{"node-edge-case-exact-only-human", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl")},
 		spec{"node-edge-case-exact-only-json", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl", "--json")},
 	)
+	// node verify decodes the packet with the strict node packet decoder, not with
+	// encoding/json, so a duplicate key, an explicit null field and an invalid
+	// UTF-8 byte are all rejected there while contract validate tolerates them.
+	// The ports approximated that decoder with the lenient one.
+	marshalledPacket, err := json.Marshal(packetBase)
+	if err != nil {
+		return err
+	}
+	nodeStrict := []struct {
+		name string
+		data []byte
+	}{
+		{"duplicate-key", append([]byte("{\"packet_id\":\"dup\","), marshalledPacket[1:]...)},
+		{"badutf8", bytes.Replace(marshalledPacket, []byte("\"packet-1\""), []byte("\"pack\xffet\""), 1)},
+	}
+	nullField := deepCopy(packetBase)
+	nullField["issued_at"] = nil
+	nullFieldData, err := json.Marshal(nullField)
+	if err != nil {
+		return err
+	}
+	nodeStrict = append(nodeStrict, struct {
+		name string
+		data []byte
+	}{"null-field", nullFieldData})
+	for _, variant := range nodeStrict {
+		file := "packet-edge-node-" + variant.name + ".json"
+		if err := os.WriteFile(filepath.Join(edge, file), variant.data, 0o644); err != nil {
+			return err
+		}
+		args := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/" + file,
+			"--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl"}
+		cases = append(cases,
+			spec{"node-edge-strict-" + variant.name + "-human", args},
+			spec{"node-edge-strict-" + variant.name + "-json", append(append([]string{}, args...), "--json")},
+		)
+	}
+	// A lone surrogate escape is not an error to encoding/json: it substitutes
+	// U+FFFD, so the contract path accepts it.
+	surrogate, err := json.Marshal(packetBase)
+	if err != nil {
+		return err
+	}
+	surrogate = bytes.Replace(surrogate, []byte("\"packet-1\""), []byte("\"\\uD800\""), 1)
+	if err := os.WriteFile(filepath.Join(edge, "packet-edge-surrogate-escape.json"), surrogate, 0o644); err != nil {
+		return err
+	}
+	cases = append(cases,
+		spec{"contract-edge-surrogate-escape-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-edge-surrogate-escape.json"}},
+		spec{"contract-edge-surrogate-escape-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-edge-surrogate-escape.json", "--json"}},
+	)
 	cases = append(cases,
 		// The reference checks node verify's four paths in a fixed order and
 		// reports the first one missing, and its usage errors honour --json.
