@@ -1663,6 +1663,41 @@
     {
       "args": [
         "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-case-top.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-case-exact-only-human",
+      "stdout": "ERROR: packet could not be decoded\n  - strict packet decoding failed\nNext action: Provide one valid packet-v1 JSON object with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-edge-case-top.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-case-exact-only-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
         "verify"
       ],
       "exitCode": 2,

@@ -476,6 +476,16 @@ func run() error {
 			spec{"contract-edge-" + extra + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
+	// The reference has two packet decoders that disagree on case: the contract
+	// and evidence path decodes with encoding/json (case-fold fallback), while
+	// node verify uses the strict node packet decoder, which is exact-only. A
+	// port that shares one decoder must not make the strict one case-insensitive.
+	nodeCase := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-edge-case-top.json",
+		"--envelope", "fixtures/envelope-valid.json"}
+	cases = append(cases,
+		spec{"node-edge-case-exact-only-human", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl")},
+		spec{"node-edge-case-exact-only-json", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl", "--json")},
+	)
 	cases = append(cases,
 		// The reference checks node verify's four paths in a fixed order and
 		// reports the first one missing, and its usage errors honour --json.
