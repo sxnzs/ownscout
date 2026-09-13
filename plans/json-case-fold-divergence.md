@@ -1,7 +1,7 @@
 # Case-folded JSON field names: the recorded two-decoder divergence
 
 > **Superseded 2026-09-13.** The decoder unification removed the lenient
-> `encoding/json` path: `internal/cli/adapter.go` `loadPacket` now decodes
+> `encoding/json` path: `internal/cli/packet.go` `loadPacket` now decodes
 > through `nodepacket.DecodeValid`, so every command shares one strict
 > boundary and all shapes below are hard decode failures (`exit 2`, generic
 > "strict packet decoding failed"). This file stays as the record of the
