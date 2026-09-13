@@ -29,7 +29,10 @@ fi
 echo "== protected paths"
 # Ignore every port directory (lanes are disjoint); flag any change to the
 # reference, the corpora, or the tooling.
-touched="$(git status --porcelain | awk '{print $2}' | grep -v "^ports/" || true)"
+# For a rename ("R  old -> new") the destination is the protected-path risk, so
+# resolve to the post-'->' path before filtering; a port file renamed into
+# internal/ must not escape the check.
+touched="$(git status --porcelain | sed 's/^...//; s/.* -> //' | grep -v "^ports/" || true)"
 if [ -n "$touched" ]; then
   echo "FAIL: changes outside the port directories:"
   echo "$touched"
