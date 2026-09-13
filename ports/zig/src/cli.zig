@@ -7,7 +7,7 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const RootUsage =
     "OwnScout — local repository evidence checks\n\n" ++
-    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\n" ++
+    "Usage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout ledger rotate --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\n" ++
     "Use \"ownscout <command> --help\" for command details.";
 
 pub const RunResult = struct { output: []u8, code: u8 };
@@ -24,7 +24,7 @@ fn usage(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
         if (std.mem.eql(u8, args[0], "version")) text = "Usage: ownscout version\n\nPrints the OwnScout version.";
         if (std.mem.eql(u8, args[0], "contract")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";
         if (std.mem.eql(u8, args[0], "evidence")) text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";
-        if (std.mem.eql(u8, args[0], "ledger")) text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.";
+        if (std.mem.eql(u8, args[0], "ledger")) text = "Usage: ownscout ledger verify --ledger <file> [--json]\n       ownscout ledger rotate --ledger <file> [--json]\n\nAudits or archives an append-only ledger.";
         if (std.mem.eql(u8, args[0], "node")) text = "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.";
     }
     if (args.len >= 2 and std.mem.eql(u8, args[0], "contract") and std.mem.eql(u8, args[1], "validate")) text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
@@ -84,6 +84,7 @@ fn nodeRun(allocator: std.mem.Allocator, args: []const []const u8) !RunResult {
 fn ledgerRun(allocator: std.mem.Allocator, args: []const []const u8) !RunResult {
     if (args.len == 0) return fail(allocator, "a ledger subcommand is required", "ownscout ledger --help", false);
     const json_output = has(args, "--json");
+    if (std.mem.eql(u8, args[0], "rotate")) return ledgerRotate(allocator, args[1..], json_output);
     if (!std.mem.eql(u8, args[0], "verify")) return fail(allocator, try std.fmt.allocPrint(allocator, "unknown ledger subcommand '{s}'", .{args[0]}), "ownscout ledger --help", json_output);
     return ledgerVerify(allocator, args[1..], json_output);
 }
@@ -1048,6 +1049,14 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "envelope validation failed", .details = &details, .next_action = "Fix the envelope binding or graph, then run node verification again." }, json_output), .code = 2 };
     };
     if (std.mem.eql(u8, ledger_path, repo) or (std.mem.startsWith(u8, ledger_path, repo) and ledger_path.len > repo.len and ledger_path[repo.len] == '/')) {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    }
+    const absolute_ledger_path = absolutePath(allocator, ledger_path) catch {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    };
+    if (ledgerSymlinkAncestor(absolute_ledger_path) != null) {
         const details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     }
@@ -2354,6 +2363,35 @@ fn absolutePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return std.fs.path.resolve(allocator, &.{ buffer[0..cwd_len], path });
 }
 
+/// macOS ships /var as a symlink to /private/var; that one system link is
+/// permitted, matching ledger.permittedSystemSymlink.
+fn permittedSystemSymlink(path: []const u8) bool {
+    if (!std.mem.eql(u8, path, "/var")) return false;
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, "/private/var", .{}) catch return false;
+    return stat.kind == .directory;
+}
+
+/// Return the first symlink component in an absolute ledger path. Ledger
+/// verification intentionally follows links, but append/rotate must not
+/// mutate a path whose parent can be redirected behind the caller's back.
+fn ledgerSymlinkAncestor(path: []const u8) ?[]const u8 {
+    if (!std.fs.path.isAbsolute(path)) return null;
+    var link_target: [4096]u8 = undefined;
+    var index: usize = 1;
+    while (index <= path.len) : (index += 1) {
+        if (index != path.len and path[index] != '/') continue;
+        if (index <= 1) continue;
+        const component = path[0..index];
+        if (std.Io.Dir.readLinkAbsolute(std.Options.debug_io, component, &link_target)) |_| {
+            if (!permittedSystemSymlink(component)) return component;
+        } else |err| switch (err) {
+            error.NotLink, error.FileNotFound => {},
+            else => return component,
+        }
+    }
+    return null;
+}
+
 fn ledgerVerify(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
     var ledger_path: ?[]const u8 = null;
     var index: usize = 0;
@@ -2405,6 +2443,95 @@ fn ledgerVerify(allocator: std.mem.Allocator, args: []const []const u8, json_out
             const detail = try std.fmt.allocPrint(allocator, "{d} record(s), tip {s}", .{ summary.records, tip });
             const details = [_][]const u8{detail};
             return .{ .output = try result.render(allocator, .{ .command = "ledger verify", .ok = true, .summary = "ledger is intact", .details = &details, .next_action = "The ledger chain is intact." }, json_output), .code = 0 };
+        },
+    }
+}
+
+fn ledgerRotate(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
+    var ledger_path: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--json")) continue;
+        if (std.mem.eql(u8, arg, "--ledger")) {
+            if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "-")) return fail(allocator, "--ledger requires a value", "ownscout ledger rotate --help", json_output);
+            ledger_path = args[index + 1];
+            index += 1;
+            continue;
+        }
+        return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout ledger rotate --help", json_output);
+    }
+    if (ledger_path == null or ledger_path.?.len == 0) return fail(allocator, "missing required --ledger value", "ownscout ledger rotate --help", json_output);
+
+    const path = absolutePath(allocator, ledger_path.?) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": resolve ledger path failed", .{ledger_path.?});
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    if (ledgerSymlinkAncestor(path)) |ancestor| {
+        const detail = try std.fmt.allocPrint(allocator, "ledger path \"{s}\" has symlink ancestor \"{s}\"", .{ path, ancestor });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    }
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": lstat {s}: no such file or directory", .{ path, path });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    if (stat.kind != .file) {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": not a regular file", .{path});
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    }
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(ledger_max_size + 1)) catch {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": ledger exceeds {d} bytes", .{ path, ledger_max_size });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    };
+    if (data.len > ledger_max_size) {
+        const detail = try std.fmt.allocPrint(allocator, "read ledger \"{s}\": ledger exceeds {d} bytes", .{ path, ledger_max_size });
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+    }
+    switch (validateLedgerData(allocator, data)) {
+        .invalid => |message| {
+            const detail = try std.fmt.allocPrint(allocator, "validate ledger \"{s}\": {s}", .{ path, message });
+            const details = [_][]const u8{detail};
+            return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger verification failed", .details = &details, .next_action = "Repair the ledger before rotating; a broken chain keeps its live name." }, json_output), .code = 1 };
+        },
+        .ok => |summary| {
+            if (summary.records == 0) {
+                const detail = try std.fmt.allocPrint(allocator, "ledger \"{s}\" is empty", .{path});
+                const details = [_][]const u8{detail};
+                return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+            }
+            const archive_path = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ path, summary.tip[0..8] });
+            if (ledgerSymlinkAncestor(archive_path) != null) {
+                const detail = try std.fmt.allocPrint(allocator, "archive \"{s}\" already exists", .{archive_path});
+                const details = [_][]const u8{detail};
+                return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+            }
+            if (std.Io.Dir.cwd().statFile(std.Options.debug_io, archive_path, .{})) |_| {
+                const detail = try std.fmt.allocPrint(allocator, "archive \"{s}\" already exists", .{archive_path});
+                const details = [_][]const u8{detail};
+                return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+            } else |err| {
+                if (err != error.FileNotFound) {
+                    const detail = try std.fmt.allocPrint(allocator, "inspect archive \"{s}\": {s}", .{ archive_path, @errorName(err) });
+                    const details = [_][]const u8{detail};
+                    return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+                }
+            }
+            std.Io.Dir.renameAbsolute(path, archive_path, std.Options.debug_io) catch |err| {
+                const detail = try std.fmt.allocPrint(allocator, "rename ledger \"{s}\": {s}", .{ path, @errorName(err) });
+                const details = [_][]const u8{detail};
+                return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = false, .summary = "ledger could not be rotated", .details = &details, .next_action = "Provide a readable, non-empty ledger file with --ledger <file>." }, json_output), .code = 2 };
+            };
+            const details = [_][]const u8{
+                try std.fmt.allocPrint(allocator, "{d} record(s), tip {s}", .{ summary.records, summary.tip }),
+                try std.fmt.allocPrint(allocator, "archived to {s}", .{archive_path}),
+            };
+            return .{ .output = try result.render(allocator, .{ .command = "ledger rotate", .ok = true, .summary = "ledger rotated", .details = &details, .next_action = "The next node verify starts a fresh chain; audit the archive with ownscout ledger verify." }, json_output), .code = 0 };
         },
     }
 }

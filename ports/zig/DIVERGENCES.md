@@ -10,7 +10,11 @@ soundness gap, are fixed. The case-folding divergence is gone: every command now
 decodes through the one strict `internal/nodepacket` boundary, so the packet
 decoders agree on exact names, duplicate keys, explicit null, invalid UTF-8 and
 the 1 MiB input cap. `gofold.zig` remains only for the ledger's
-`strings.EqualFold` field check.
+`strings.EqualFold` field check. The ledger append path now rejects symlink
+ancestors (with the macOS `/var` system-link exception), pinned by the
+`node-edge-ledger-symlink-ancestor-*` cases, while `ledger verify` keeps
+following links; the residual `Open` hardening (link count 1, parent identity,
+resolved-path equality, `flock`) is still not ported and has no corpus case.
 
 ## 1. Packet open/read failures use a fixed detail
 
@@ -22,27 +26,31 @@ read failure to `read packet "<path>" failed`. A missing file
 (`packet file "<path>" does not exist`) retains the loaded shape. The 1 MiB cap
 is a strict decode failure and uses the generic decode response.
 
-## 2. Append failures report the Open wording
+## 2. Append failures report the Open wording — fixed
 
 The reference distinguishes a failure to open the ledger
 (`ledger could not be opened` / `ledger open failed`) from a failure to append
-(`ledger append failed` / `node results could not be appended`). This port maps
-every ledger error to the Open wording, so an append-time failure would report
-the wrong summary. Not reachable through the corpora.
+(`ledger append failed` / `node results could not be appended`). ~~This port maps
+every ledger error to the Open wording.~~
 
-## 3. Ledger filesystem hardening is not ported
+Fixed in `6547bf2`: `appendLedger` returns distinct `LedgerOpenFailed`,
+`LedgerAppendFailed` and `LedgerFull` errors and `nodeVerify` maps each to the
+matching summary. Still not reachable through the corpora.
 
-`internal/ledger/ledger.go` `Open` rejects symlink ancestors (with a `/var`
-exception), requires a link count of 1, checks parent identity and resolved-path
-equality, and takes a `flock`. This port only rejects a ledger path inside the
-repository. That single rejection is the pinned case; the rest is unverified.
+## 3. Append-time size cap — enforced, but unpinned
 
-## 4. Append-time size cap is not enforced
+~~The reference rejects an append that would push the ledger past 1 MiB. This port
+enforces the record-size cap but not the whole-ledger append-time cap.~~
 
-The reference rejects an append that would push the ledger past 1 MiB. This port
-enforces the record-size cap but not the whole-ledger append-time cap.
+Fixed in `6547bf2`: `appendLedger` checks `output.items.len > ledger_max_size`
+and returns `error.LedgerFull`, which `node verify` surfaces as `ledger is
+full`. The *open-time* cap is pinned by `ledger-edge-verify-full-*` and
+`node-edge-ledger-full-*`. **The append-time cap itself has no corpus case** —
+`ledger-full.jsonl` is over-cap before `Open`, so `Append`'s overflow path is
+unexercised. Pinning it needs a `node verify` case against a valid ledger sized
+just under 1 MiB.
 
-## 5. Per-line scanner bound is approximated
+## 4. Per-line scanner bound is approximated
 
 The reference bounds each scanned line with a `bufio.Scanner` buffer. This port
 derives the bound from the trimmed record length, which is equivalent for the
