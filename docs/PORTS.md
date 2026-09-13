@@ -47,7 +47,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 167/190, 99/190, 188/190 and
   188/190), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
-  `encoding/json`; they are validated instead by all three ports failing them
+  the decoder; they are validated instead by all three ports failing them
   before the fix (TypeScript 6, Rust 8, Zig 8 of the new cases).
 - Fuzzing: no divergence in 300 iterations at seeds 7 and 13, and 200 at seed 1,
   per port. Seeds 1, 11 and 13 each found a defect that is now fixed and frozen
@@ -113,26 +113,24 @@ Twelve cases pin it (`contract-edge-unknown-*` and
 `contract-edge-precedence-*`). All three ports pass 190/190 and fuzz seed 13 is
 clean; the `DIVERGENCES.md` files they had been recorded in are gone.
 
-### Case folding, raw UTF-8 and null elements (seeds 3-21)
+### Strict decoding on every command (seeds 3-21, then unification)
 
-Fixing the two above moved the fuzzer on to three more decoding divergences, all
-inherited by the reference from `encoding/json`:
+Fixing the two above moved the fuzzer on to three decoding divergences the
+reference then inherited from `encoding/json`'s defaults on the contract and
+evidence paths. The decoder unification later removed the lenient path
+entirely: every command now decodes through `nodepacket`, and all of these
+shapes are hard decode failures everywhere:
 
-- **A struct field matches its name case-insensitively** when no exact match
-  exists, so `SCHEMA_VERSION` is `schema_version`. All three ports required exact
-  case. Reachable at seeds 3, 6, 20 and 21.
-- **An invalid UTF-8 byte inside a field name becomes its own U+FFFD**, because Go
-  decodes with `utf8.DecodeRune` and advances one byte on error. TypeScript's
-  `TextDecoder` collapsed the run and Rust emitted one replacement for the whole
-  sequence, so a raw `\xf0\x9f` gave one U+FFFD instead of two.
-- **A null element of the evidence array decodes to the zero-valued struct**, so
-  `line_start` and `line_end` default to 0 and the `must be at least 1` rules
-  still fire. TypeScript skipped them, reporting 10 violations where the
-  reference reports 12.
+- **Case-folded field names** — `SCHEMA_VERSION` no longer maps to
+  `schema_version` on any command.
+- **Invalid UTF-8 inside field names** — rejected outright rather than
+  becoming per-byte U+FFFD substitutions.
+- **Null elements in the evidence array** — rejected at decode rather than
+  decoding to a zero-valued struct.
 
-Eight cases pin these (`contract-edge-case-top`, `-case-nested`,
-`-null-evidence-element`, `-unknown-badutf8`), taking the trace corpus to 190. These
-were found by sweeping seeds, not by the single seed 13 that the earlier rounds
+The fixtures pin the rejections (`contract-edge-case-top`, `-case-nested`,
+`-null-evidence-element`, `-unknown-badutf8`, `-surrogate-escape`). They were
+found by sweeping seeds, not by the single seed 13 that the earlier rounds
 used - the fuzzer's coverage is seed-dependent, so a clean seed 13 is not
 evidence that a port is exact.
 

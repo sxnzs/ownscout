@@ -58,11 +58,11 @@ func TestInvalidUsage(t *testing.T) {
 
 func TestContractValidation(t *testing.T) {
 	valid := filepath.Join("testdata", "valid.json")
-	packet, err := loadPacket(valid)
+	packet, violations, err := loadPacket(valid)
 	if err != nil {
 		t.Fatalf("canonical packet could not be loaded: %v", err)
 	}
-	if violations := validatePacket(packet); len(violations) != 0 {
+	if len(violations) != 0 {
 		t.Fatalf("canonical packet has violations: %v", violations)
 	}
 	evaluation := contract.EvaluatePacket(packet)
@@ -80,14 +80,14 @@ func TestContractValidation(t *testing.T) {
 		t.Fatalf("invalid: code=%d output=%q", code, output)
 	}
 	code, output = runTest(t, "contract", "validate", "--packet", filepath.Join("testdata", "malformed.json"))
-	if code != 2 || !strings.Contains(output, "not valid JSON") {
+	if code != 2 || !strings.Contains(output, "strict packet decoding failed") {
 		t.Fatalf("malformed: code=%d output=%q", code, output)
 	}
 }
 
 func TestEvidenceVerification(t *testing.T) {
 	valid := filepath.Join("testdata", "valid.json")
-	packet, err := loadPacket(valid)
+	packet, _, err := loadPacket(valid)
 	if err != nil {
 		t.Fatalf("canonical packet could not be loaded: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestUnknownJSONFieldRejected(t *testing.T) {
 		raw["unexpected_secret"] = json.RawMessage(`"DO_NOT_PRINT"`)
 	})
 	code, output := runTest(t, "contract", "validate", "--packet", packetPath)
-	if code != 2 || !strings.Contains(output, "unknown JSON field") {
+	if code != 2 || !strings.Contains(output, "strict packet decoding failed") {
 		t.Fatalf("code=%d output=%q", code, output)
 	}
 	if strings.Contains(output, "DO_NOT_PRINT") || strings.Contains(output, "packet-1") {

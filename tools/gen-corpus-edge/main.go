@@ -443,11 +443,11 @@ func run() error {
 			spec{"contract-edge-precedence-" + order.name + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
-	// Three more decoding behaviours the reference inherits from encoding/json
-	// and the ports got wrong. A struct field matches its name case-insensitively
-	// when no exact match exists; an invalid UTF-8 byte inside a field name
-	// becomes its own U+FFFD; and a null element of the evidence array decodes to
-	// the zero-valued struct, so the numeric rules still fire on it.
+	// Shapes the single strict decoder rejects at the boundary on every command:
+	// a case-folded field name, an invalid UTF-8 byte inside a field name, and a
+	// null element in the evidence array. They once slipped through
+	// encoding/json's defaults; since the decoder unification all four command
+	// surfaces reject them identically.
 	caseTop := deepCopy(packetBase)
 	caseTop["SCHEMA_VERSION"] = caseTop["schema_version"]
 	delete(caseTop, "schema_version")
@@ -484,20 +484,17 @@ func run() error {
 			spec{"contract-edge-" + extra + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
-	// The reference has two packet decoders that disagree on case: the contract
-	// and evidence path decodes with encoding/json (case-fold fallback), while
-	// node verify uses the strict node packet decoder, which is exact-only. A
-	// port that shares one decoder must not make the strict one case-insensitive.
+	// The strict decoder is exact-only on every command: a case-folded field
+	// name is a hard decode failure, not a match. node verify's surface is
+	// pinned here too so a port cannot fold leniency back in on any path.
 	nodeCase := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-edge-case-top.json",
 		"--envelope", "fixtures/envelope-valid.json"}
 	cases = append(cases,
 		spec{"node-edge-case-exact-only-human", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl")},
 		spec{"node-edge-case-exact-only-json", append(append([]string{}, nodeCase...), "--ledger", "ledger.jsonl", "--json")},
 	)
-	// node verify decodes the packet with the strict node packet decoder, not with
-	// encoding/json, so a duplicate key, an explicit null field and an invalid
-	// UTF-8 byte are all rejected there while contract validate tolerates them.
-	// The ports approximated that decoder with the lenient one.
+	// Duplicate keys, explicit null fields and invalid UTF-8 bytes are all hard
+	// decode failures under the strict decoder every command shares.
 	marshalledPacket, err := json.Marshal(packetBase)
 	if err != nil {
 		return err
@@ -531,8 +528,8 @@ func run() error {
 			spec{"node-edge-strict-" + variant.name + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
-	// A lone surrogate escape is not an error to encoding/json: it substitutes
-	// U+FFFD, so the contract path accepts it.
+	// A lone surrogate escape is a hard decode failure; encoding/json would
+	// have substituted U+FFFD and accepted it.
 	surrogate, err := json.Marshal(packetBase)
 	if err != nil {
 		return err

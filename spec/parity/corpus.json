@@ -123,7 +123,7 @@
       ],
       "exitCode": 2,
       "name": "contract-malformed-human",
-      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/packet-malformed.json\" is not valid JSON\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+      "stdout": "ERROR: packet could not be decoded\n  - strict packet decoding failed\nNext action: Provide one valid packet-v1 JSON object with --packet \u003cfile\u003e.\n"
     },
     {
       "args": [
@@ -135,7 +135,7 @@
       ],
       "exitCode": 2,
       "name": "contract-malformed-json",
-      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/packet-malformed.json\\\" is not valid JSON\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
     },
     {
       "args": [

@@ -1,5 +1,12 @@
 # Case-folded JSON field names: the recorded two-decoder divergence
 
+> **Superseded 2026-09-13.** The decoder unification removed the lenient
+> `encoding/json` path: `internal/cli/adapter.go` `loadPacket` now decodes
+> through `nodepacket.DecodeValid`, so every command shares one strict
+> boundary and all shapes below are hard decode failures (`exit 2`, generic
+> "strict packet decoding failed"). This file stays as the record of the
+> retired asymmetry and its per-port cost.
+
 Independently verified from the reference binary (`spec/parity/reference-ownscout`,
 commit `ede2d25`). This pins the exact contract the ports must reproduce for the
 case-insensitive-field-matching divergence (fuzz seed 3, iteration 48).

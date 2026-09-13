@@ -105,9 +105,12 @@ re-measured against the current 120-case set.
 
 ## Behavior to preserve (read the Go source)
 
-- **packet-v1 strict decoding** (`internal/nodepacket/decode.go`): exactly one
-  JSON object, exact case-sensitive field names, duplicate keys rejected,
-  unknown fields rejected, no trailing JSON, 1 MiB inclusive limit, valid UTF-8.
+- **packet-v1 strict decoding** (`internal/nodepacket/decode.go`) — shared by
+  every command, not only `node` paths: exactly one JSON object, exact
+  case-sensitive field names, duplicate keys rejected, unknown fields rejected,
+  no trailing JSON, 1 MiB inclusive limit, valid UTF-8. Decode failures report
+  the generic "strict packet decoding failed" detail — no packet contents or
+  decoder internals leak into output.
 - **Contract validation** (`internal/contract/contract.go`) and the
   outcome -> action table in `specs/packet-v1.md`. Violation ordering and the
   human/JSON rendering are part of the contract.

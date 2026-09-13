@@ -322,7 +322,7 @@ func runContract(args []string, out io.Writer) int {
 		return usageFailureWithJSON(out, "missing required --packet <file>", "ownscout contract validate --help", jsonOutput)
 	}
 
-	packet, err := loadPacket(path)
+	packet, violations, err := loadPacket(path)
 	if err != nil {
 		return result(out, jsonOutput, resultData{
 			Command:    "contract validate",
@@ -332,13 +332,21 @@ func runContract(args []string, out io.Writer) int {
 			NextAction: "Provide a readable JSON packet with --packet <file>.",
 		}, 2)
 	}
-	violations := validatePacket(packet)
+	if isDecodeFailure(violations) {
+		return result(out, jsonOutput, resultData{
+			Command:    "contract validate",
+			OK:         false,
+			Summary:    "packet could not be decoded",
+			Details:    []string{"strict packet decoding failed"},
+			NextAction: "Provide one valid packet-v1 JSON object with --packet <file>.",
+		}, 2)
+	}
 	if len(violations) > 0 {
 		return result(out, jsonOutput, resultData{
 			Command:    "contract validate",
 			OK:         false,
 			Summary:    fmt.Sprintf("packet is invalid (%d violation(s))", len(violations)),
-			Details:    violations,
+			Details:    packetViolationDetails(violations),
 			NextAction: "Fix the listed packet fields, then run contract validation again.",
 		}, 1)
 	}
@@ -368,12 +376,15 @@ func runEvidence(args []string, out io.Writer) int {
 	if !repoOK || repo == "" || !packetOK || packetPath == "" {
 		return usageFailureWithJSON(out, "both --repo <dir> and --packet <file> are required", "ownscout evidence verify --help", jsonOutput)
 	}
-	packet, err := loadPacket(packetPath)
+	packet, violations, err := loadPacket(packetPath)
 	if err != nil {
 		return result(out, jsonOutput, resultData{"evidence verify", false, "packet could not be loaded", []string{err.Error()}, "Provide a readable JSON packet with --packet <file>."}, 2)
 	}
-	if violations := validatePacket(packet); len(violations) > 0 {
-		return result(out, jsonOutput, resultData{"evidence verify", false, "packet is invalid", violations, "Fix the packet contract, then verify evidence again."}, 1)
+	if isDecodeFailure(violations) {
+		return result(out, jsonOutput, resultData{"evidence verify", false, "packet could not be decoded", []string{"strict packet decoding failed"}, "Provide one valid packet-v1 JSON object with --packet <file>."}, 2)
+	}
+	if len(violations) > 0 {
+		return result(out, jsonOutput, resultData{"evidence verify", false, "packet is invalid", packetViolationDetails(violations), "Fix the packet contract, then verify evidence again."}, 1)
 	}
 	report, err := evidence.VerifyPacketWithOptions(repo, packet, evidence.Options{Relocate: flags["--relocate"] != ""})
 	if err != nil {

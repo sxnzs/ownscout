@@ -1,49 +1,34 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"strings"
 
 	"ownscout/internal/contract"
 	"ownscout/internal/evidence"
+	"ownscout/internal/nodepacket"
 )
 
-func loadPacket(path string) (contract.Packet, error) {
-	data, err := os.ReadFile(path)
+// loadPacket decodes a packet at the single strict boundary shared by every
+// command: the 1 MiB input cap plus nodepacket.DecodeValid. Contract
+// violations are returned alongside a decodable packet; a hard decode failure
+// surfaces as exactly one RuleDecode violation.
+func loadPacket(path string) (contract.Packet, []contract.Violation, error) {
+	data, err := readBounded(path, "packet", nodepacket.MaxInputBytes)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return contract.Packet{}, fmt.Errorf("packet file %q does not exist", path)
-		}
-		return contract.Packet{}, fmt.Errorf("read packet %q: %w", path, err)
+		return contract.Packet{}, nil, err
 	}
+	packet, violations := nodepacket.DecodeValid(data)
+	return packet, violations, nil
+}
 
-	trimmed := bytes.TrimSpace(data)
-	if !json.Valid(trimmed) {
-		return contract.Packet{}, fmt.Errorf("packet %q is not valid JSON", path)
-	}
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return contract.Packet{}, fmt.Errorf("packet %q must contain a JSON object", path)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var packet contract.Packet
-	if err := decoder.Decode(&packet); err != nil {
-		if strings.Contains(err.Error(), "unknown field") {
-			return contract.Packet{}, fmt.Errorf("packet %q contains an unknown JSON field: %v", path, err)
-		}
-		return contract.Packet{}, fmt.Errorf("packet %q is not valid JSON: %v", path, err)
-	}
-	if err := ensureEOF(decoder); err != nil {
-		return contract.Packet{}, fmt.Errorf("packet %q is not valid JSON: %v", path, err)
-	}
-	return packet, nil
+// isDecodeFailure reports whether the violation list is the single strict
+// decode rejection rather than contract findings on a decoded packet.
+func isDecodeFailure(violations []contract.Violation) bool {
+	return len(violations) == 1 && violations[0].Rule == nodepacket.RuleDecode
 }
 
 func readBounded(path, kind string, limit int) ([]byte, error) {
@@ -69,20 +54,7 @@ func readBounded(path, kind string, limit int) ([]byte, error) {
 	return data, nil
 }
 
-func ensureEOF(decoder *json.Decoder) error {
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return errors.New("multiple JSON values")
-		}
-		return err
-	}
-	return nil
-}
 
-func validatePacket(packet contract.Packet) []string {
-	return packetViolationDetails(contract.ValidatePacket(packet))
-}
 
 func packetViolationDetails(violations []contract.Violation) []string {
 	if len(violations) == 0 {

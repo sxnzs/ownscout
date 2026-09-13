@@ -51,10 +51,12 @@ producer's own claims.
 | `ownscout node bind --packet p.json` | What is this packet's canonical binding digest, for `packet_binding_sha256`? |
 | `ownscout ledger verify --ledger L` | Is the ledger's hash chain intact, read-only? |
 
-Packet decoding is deliberately strict: unknown fields are rejected, duplicate
-keys are rejected, trailing JSON is rejected, and there is a 1 MiB input limit.
-There is no compatibility normalisation and no silent hash repair. **Fix the
-packet, do not ask the tool to reinterpret it.**
+Packet decoding is deliberately strict on every command — one shared decoder,
+not a lenient front door and a strict back door: unknown fields are rejected,
+duplicate keys are rejected, field names are exact case, trailing JSON is
+rejected, and there is a 1 MiB input limit. There is no compatibility
+normalisation and no silent hash repair. **Fix the packet, do not ask the
+tool to reinterpret it.**
 
 ## Install
 
@@ -256,7 +258,7 @@ internal/
   contract/          packet-v1 validation and violation ordering
   evidence/          path-safe re-hashing of cited content, anchor re-resolution
   node/              node-envelope graph validation and evaluation
-  nodepacket/        strict packet-v1 decoding
+  nodepacket/        strict packet-v1 decoding shared by all commands
   ledger/            append-only SHA-256 hash-chained ledger
 ports/
   ts/  rust/  zig/   independent reimplementations

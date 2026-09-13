@@ -19,13 +19,15 @@ func TestStrictPacketBoundaryModes(t *testing.T) {
 	tests := []struct {
 		name, input, want string
 	}{
-		{"malformed", `{"packet_id":`, "not valid JSON"},
-		{"null", `null`, "must contain a JSON object"},
-		{"array", `[]`, "must contain a JSON object"},
-		{"scalar", `"DO_NOT_PRINT"`, "must contain a JSON object"},
-		{"trailing value", string(valid) + `{}`, "not valid JSON"},
-		{"unknown root field", strings.Replace(string(valid), `"packet_id":`, `"unexpected": "DO_NOT_PRINT", "packet_id":`, 1), "unknown JSON field"},
-		{"unknown nested field", strings.Replace(string(valid), `"kind":`, `"unexpected": "DO_NOT_PRINT", "kind":`, 1), "unknown JSON field"},
+		// Every shape fails at the single strict boundary with the same generic
+		// report; packet contents and decode internals never leak into output.
+		{"malformed", `{"packet_id":`, "strict packet decoding failed"},
+		{"null", `null`, "strict packet decoding failed"},
+		{"array", `[]`, "strict packet decoding failed"},
+		{"scalar", `"DO_NOT_PRINT"`, "strict packet decoding failed"},
+		{"trailing value", string(valid) + `{}`, "strict packet decoding failed"},
+		{"unknown root field", strings.Replace(string(valid), `"packet_id":`, `"unexpected": "DO_NOT_PRINT", "packet_id":`, 1), "strict packet decoding failed"},
+		{"unknown nested field", strings.Replace(string(valid), `"kind":`, `"unexpected": "DO_NOT_PRINT", "kind":`, 1), "strict packet decoding failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
