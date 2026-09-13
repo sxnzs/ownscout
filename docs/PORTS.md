@@ -163,6 +163,14 @@ make fuzz-sweep FUZZ_SEEDS="1 2 3 4 5" FUZZ_ITERATIONS=300
 target exits non-zero on the first divergence. Treat "clean at seed N" as
 evidence about seed N only.
 
+Sweeping was necessary but not sufficient. The forged-ledger soundness gap was
+invisible to *every* seed, because the envelope cases removed `ledger.jsonl`
+before each run and so never validated an existing ledger. The fuzzer now seeds
+a mutated ledger and runs `ledger verify` and `node verify` against it. The
+lesson generalises: when a class of input is never fed to a command, more
+iterations of the same seed do not help - the coverage has to change, not the
+volume.
+
 ## Port design
 
 - **TypeScript** — a single `ownscout.ts` run directly by Node 24 type stripping,
