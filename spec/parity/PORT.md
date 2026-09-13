@@ -59,7 +59,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (114 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (118 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), an in-repository ledger rejection, the raw-byte evidence shapes
@@ -73,7 +73,11 @@ lines and signed shift, absent content is reported only once every fitting
 window has been probed, a file too large to cover reports that the search
 stopped on its byte budget, the same packet without the flag is byte-identical
 to the pre-relocation wording, and `--relocate` is rejected by every other
-subcommand. Run it with the same harness:
+subcommand, and the node-verify usage surface: the four paths are reported
+missing in a fixed order (repo, packet, envelope, ledger) and a usage error is
+rendered as a structured result under `--json`. That last group exists because
+the Rust port was found diverging on both, having passed the previous corpus.
+Run it with the same harness:
 
 ```
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
@@ -85,10 +89,10 @@ The corpus was mutation-tested against three deliberately broken reference build
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 106/114 |
-| `next_action` renamed to `nextAction` | 20/28 | 62/114 |
-| final newline always appended to the hashed evidence range | 28/28 | 112/114 |
-| unmutated reference | 28/28 | 114/114 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 110/118 |
+| `next_action` renamed to `nextAction` | 20/28 | 63/118 |
+| final newline always appended to the hashed evidence range | 28/28 | 116/118 |
+| unmutated reference | 28/28 | 118/118 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the

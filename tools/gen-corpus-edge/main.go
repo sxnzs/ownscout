@@ -372,6 +372,15 @@ func run() error {
 		spec{"contract-edge-relocate-unknown-flag-json", []string{"contract", "validate", "--packet", "fixtures/packet-valid.json", "--relocate", "--json"}},
 	)
 	cases = append(cases,
+		// The reference checks node verify's four paths in a fixed order and
+		// reports the first one missing, and its usage errors honour --json.
+		// Neither was covered until a port was found diverging on both.
+		spec{"node-edge-missing-flags-human", []string{"node", "verify"}},
+		spec{"node-edge-missing-flags-json", []string{"node", "verify", "--json"}},
+		spec{"node-edge-missing-flags-partial-json", []string{"node", "verify", "--json", "--repo", "fixtures/repo"}},
+		spec{"node-edge-unknown-flag-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--relocate", "--json"}},
+	)
+	cases = append(cases,
 		spec{"contract-edge-nonutf8-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json"}},
 		spec{"contract-edge-nonutf8-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json", "--json"}},
 		spec{"evidence-edge-repo-is-file-human", []string{"evidence", "verify", "--repo", "fixtures/repo/notes.txt", "--packet", "fixtures/packet-valid.json"}},

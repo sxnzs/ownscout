@@ -1403,6 +1403,56 @@
     },
     {
       "args": [
+        "node",
+        "verify"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-missing-flags-human",
+      "stdout": "error: missing required --repo value\nNext action: run 'ownscout node verify --help'.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-missing-flags-json",
+      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"missing required --repo value\",\"details\":[\"usage: ownscout node verify --help\"],\"next_action\":\"Run 'ownscout node verify --help'.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--json",
+        "--repo",
+        "fixtures/repo"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-missing-flags-partial-json",
+      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"missing required --packet value\",\"details\":[\"usage: ownscout node verify --help\"],\"next_action\":\"Run 'ownscout node verify --help'.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-unknown-flag-json",
+      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"unknown flag or argument '--relocate'\",\"details\":[\"usage: ownscout node verify --help\"],\"next_action\":\"Run 'ownscout node verify --help'.\"}\n"
+    },
+    {
+      "args": [
         "contract",
         "validate",
         "--packet",
