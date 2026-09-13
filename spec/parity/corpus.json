@@ -30,6 +30,26 @@
     },
     {
       "args": [
+        "ledger",
+        "verify",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-ledger",
+      "stdout": "Usage: ownscout ledger verify --ledger \u003cfile\u003e [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-ledger-rotate",
+      "stdout": "Usage: ownscout ledger rotate --ledger \u003cfile\u003e [--json]\n\nAudits the chain, then renames the ledger to \u003cfile\u003e.\u003ctip8\u003e so the next verification starts a fresh chain.\n\nNext action: provide --ledger with a readable, non-empty ledger file.\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--help"
@@ -37,6 +57,16 @@
       "exitCode": 0,
       "name": "help-node",
       "stdout": "Usage: ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--relocate] [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once. With --relocate, failed evidence details include matching locations when available.\n\nNext action: provide all four paths and rerun.\n"
+    },
+    {
+      "args": [
+        "node",
+        "bind",
+        "--help"
+      ],
+      "exitCode": 0,
+      "name": "help-node-bind",
+      "stdout": "Usage: ownscout node bind --packet \u003cfile\u003e [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file.\n"
     },
     {
       "args": [

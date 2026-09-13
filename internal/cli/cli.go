@@ -489,6 +489,9 @@ func writeHelp(args []string, out io.Writer) int {
 	if len(args) >= 2 && args[0] == "ledger" && args[1] == "verify" {
 		text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nReplays the SHA-256 ledger chain without opening or modifying it.\n\nNext action: provide --ledger with a readable ledger file."
 	}
+	if len(args) >= 2 && args[0] == "ledger" && args[1] == "rotate" {
+		text = "Usage: ownscout ledger rotate --ledger <file> [--json]\n\nAudits the chain, then renames the ledger to <file>.<tip8> so the next verification starts a fresh chain.\n\nNext action: provide --ledger with a readable, non-empty ledger file."
+	}
 	if len(args) >= 2 && args[0] == "node" && args[1] == "bind" {
 		text = "Usage: ownscout node bind --packet <file> [--json]\n\nComputes the canonical packet binding for a strictly decoded packet.\n\nNext action: provide --packet with a readable packet file."
 	}
