@@ -35,6 +35,9 @@ pub struct Record {
     pub results: Vec<NodeResult>,
 }
 pub struct Store {
+    // Keep the lock before the file so it is released before the descriptor is
+    // dropped when the store goes out of scope.
+    _lock: LedgerLock,
     file: File,
     next: u64,
     prev: String,
@@ -63,12 +66,15 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
             repo.display()
         ));
     }
-    let mut f = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
+    let mut options = OpenOptions::new();
+    options.read(true).append(true).create(true);
+    #[cfg(unix)]
+    options.custom_flags(nofollow_flag());
+    let mut f = options
         .open(&full)
         .map_err(|e| format!("open ledger {:?}: {}", full.display(), e))?;
+    lock_exclusive(&f).map_err(|e| format!("lock ledger {:?}: {}", full.display(), go_errno(&e)))?;
+    let lock = LedgerLock::new(&f);
     let mut data = Vec::new();
     f.read_to_end(&mut data)
         .map_err(|e| format!("read ledger {:?}: {}", full.display(), e))?;
@@ -121,6 +127,7 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
         next += 1;
     }
     Ok(Store {
+        _lock: lock,
         file: f,
         next,
         prev,
