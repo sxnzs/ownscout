@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded oracle.
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 132/132 | 128 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 132/132 | 24 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 132/132 | 24 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 140/140 | 128 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 140/140 | 24 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 140/140 | 24 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 69 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
@@ -35,7 +35,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 132 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge corpus: 140 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
@@ -44,8 +44,8 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   unknown-field surface: Go `%q` quoting of a field name across `\x`, `\u` and
   `\U` widths, and which of two decode errors in one nested object is reported).
 - Oracle mutation test: four deliberately broken reference builds fail the
-  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 118/132, 70/132, 130/132 and
-  130/132), so a pass is meaningful. The quoting and precedence cases cannot be
+  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 125/140, 74/140, 138/140 and
+  138/140), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
   `encoding/json`; they are validated instead by all three ports failing them
   before the fix (TypeScript 6, Rust 8, Zig 8 of the new cases).
@@ -110,8 +110,31 @@ The fix needs three escape widths - `\xNN` for control bytes and DEL, `\uNNNN` u
 to U+FFFF, `\UNNNNNNNN` above it - with printable runes left literal, and the
 unknown-field check interleaved with the type checks so document order decides.
 Twelve cases pin it (`contract-edge-unknown-*` and
-`contract-edge-precedence-*`). All three ports now pass 132/132 and fuzz seed 13
-is clean; the `DIVERGENCES.md` files they had been recorded in are gone.
+`contract-edge-precedence-*`). All three ports pass 140/140 and fuzz seed 13 is
+clean; the `DIVERGENCES.md` files they had been recorded in are gone.
+
+### Case folding, raw UTF-8 and null elements (seeds 3-21)
+
+Fixing the two above moved the fuzzer on to three more decoding divergences, all
+inherited by the reference from `encoding/json`:
+
+- **A struct field matches its name case-insensitively** when no exact match
+  exists, so `SCHEMA_VERSION` is `schema_version`. All three ports required exact
+  case. Reachable at seeds 3, 6, 20 and 21.
+- **An invalid UTF-8 byte inside a field name becomes its own U+FFFD**, because Go
+  decodes with `utf8.DecodeRune` and advances one byte on error. TypeScript's
+  `TextDecoder` collapsed the run and Rust emitted one replacement for the whole
+  sequence, so a raw `\xf0\x9f` gave one U+FFFD instead of two.
+- **A null element of the evidence array decodes to the zero-valued struct**, so
+  `line_start` and `line_end` default to 0 and the `must be at least 1` rules
+  still fire. TypeScript skipped them, reporting 10 violations where the
+  reference reports 12.
+
+Eight cases pin these (`contract-edge-case-top`, `-case-nested`,
+`-null-evidence-element`, `-unknown-badutf8`), taking the corpus to 140. These
+were found by sweeping seeds, not by the single seed 13 that the earlier rounds
+used - the fuzzer's coverage is seed-dependent, so a clean seed 13 is not
+evidence that a port is exact.
 
 ## Port design
 
