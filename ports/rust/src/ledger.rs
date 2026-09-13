@@ -146,7 +146,8 @@ impl Store {
         let mut r = r;
         r.hash = record_hash(&r);
         let s = encode(&r, true);
-        if s.len() + 1 > 65536 {
+        // Go caps the marshalled record (without its newline) at 64 KiB.
+        if s.len() > MAX_RECORD_SIZE {
             return Err("record exceeds 65536 bytes".into());
         }
         // The whole-ledger cap is checked again at append time: a ledger that
@@ -434,7 +435,7 @@ fn scan_lines(data: &[u8]) -> Result<Vec<&[u8]>, String> {
     for index in 0..data.len() {
         if data[index] == b'\n' {
             let raw = &data[start..index];
-            if raw.len() > MAX_RECORD_SIZE + 1 {
+            if raw.len() > MAX_RECORD_SIZE {
                 return Err("read line: bufio.Scanner: token too long".into());
             }
             out.push(raw);
@@ -443,7 +444,7 @@ fn scan_lines(data: &[u8]) -> Result<Vec<&[u8]>, String> {
     }
     if start < data.len() {
         let raw = &data[start..];
-        if raw.len() > MAX_RECORD_SIZE + 1 {
+        if raw.len() > MAX_RECORD_SIZE {
             return Err("read line: bufio.Scanner: token too long".into());
         }
         out.push(raw);

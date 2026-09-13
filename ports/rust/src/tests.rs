@@ -488,6 +488,63 @@ fn ledger_rejects_invalid_inputs_and_repository_paths() {
 }
 
 #[test]
+fn ledger_append_enforces_the_whole_ledger_cap() {
+    let root = temp_dir("ledger-append-full-root");
+    let outside = temp_dir("ledger-append-full-outside").join("ledger.jsonl");
+    let mut store = ledger::open(outside.to_str().unwrap(), root.to_str().unwrap()).unwrap();
+    let envelope = "a".repeat(64);
+    let binding = "b".repeat(64);
+    let mut appended = 0usize;
+    loop {
+        let result = store.append(
+            &envelope,
+            &binding,
+            "0.1.0",
+            vec![ledger::NodeResult {
+                node_id: "build".into(),
+                status: "evidence_current".into(),
+                reason: "r".repeat(60_000),
+            }],
+        );
+        match result {
+            Ok(_) => appended += 1,
+            Err(e) => {
+                // The reference reports the whole-ledger cap verbatim.
+                assert_eq!(e, "ledger exceeds 1048576 bytes");
+                break;
+            }
+        }
+    }
+    assert!(appended > 0, "no record fit before the cap");
+    drop(store);
+    // The rejected record must never have reached the file.
+    let size = fs::metadata(&outside).unwrap().len();
+    assert!(size <= 1 << 20, "ledger grew to {size} bytes");
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn ledger_verify_rejects_a_line_over_the_scanner_bound() {
+    let dir = temp_dir("ledger-long-line");
+    let path = dir.join("ledger.jsonl");
+    // bufio.Scanner's buffer is 64 KiB + 1, so a 65537-byte line is too long.
+    let mut data = vec![b'a'; 65537];
+    data.push(b'\n');
+    fs::write(&path, data).unwrap();
+    let (out, code) = cli::run(&[
+        "ledger".into(),
+        "verify".into(),
+        "--ledger".into(),
+        path.to_str().unwrap().into(),
+        "--json".into(),
+    ]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("read line: bufio.Scanner: token too long"), "{out}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn cli_ledger_verify_reports_summary_and_errors() {
     let root = temp_dir("ledger-verify-root");
     let outside = temp_dir("ledger-verify-outside").join("ledger.jsonl");
