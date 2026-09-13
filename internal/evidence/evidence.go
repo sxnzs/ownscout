@@ -2,6 +2,7 @@
 package evidence
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -116,9 +117,9 @@ func verifyOne(root string, item contract.Evidence) Verification {
 		return result
 	}
 
-	lines := splitNormalizedLines(data)
-	if item.LineStart < 1 || item.LineEnd < item.LineStart || item.LineEnd > len(lines) {
-		result.Message = fmt.Sprintf("invalid line range %d-%d for %d line(s)", item.LineStart, item.LineEnd, len(lines))
+	lines := countNormalizedLines(data)
+	if item.LineStart < 1 || item.LineEnd < item.LineStart || item.LineEnd > lines {
+		result.Message = fmt.Sprintf("invalid line range %d-%d for %d line(s)", item.LineStart, item.LineEnd, lines)
 		return result
 	}
 
@@ -128,12 +129,7 @@ func verifyOne(root string, item contract.Evidence) Verification {
 		return result
 	}
 
-	selected := strings.Join(lines[item.LineStart-1:item.LineEnd], "\n")
-	if selected != "" {
-		selected += "\n"
-	}
-	sum := sha256.Sum256([]byte(selected))
-	result.ActualHash = hex.EncodeToString(sum[:])
+	result.ActualHash = hashSelectedLines(data, item.LineStart, item.LineEnd)
 	if result.ActualHash != expected {
 		result.Message = fmt.Sprintf("content hash mismatch: expected %s, got %s", item.ContentHash, result.ActualHash)
 		return result
@@ -205,25 +201,98 @@ func readRegularFile(path string) ([]byte, error) {
 	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
 		return nil, fmt.Errorf("evidence path %q changed to a non-regular or different file", path)
 	}
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read evidence file %q: %w", path, err)
+	// Presize from Stat so large evidence files are read without the repeated
+	// growth copies of a naive ReadAll.
+	data := make([]byte, 0, readCapacity(openedInfo.Size()))
+	buffer := make([]byte, 32*1024)
+	for {
+		n, err := file.Read(buffer)
+		data = append(data, buffer[:n]...)
+		if err == io.EOF {
+			return data, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cannot read evidence file %q: %w", path, err)
+		}
 	}
-	return data, nil
 }
 
-func splitNormalizedLines(data []byte) []string {
-	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
-	if normalized == "" {
-		return nil
+func readCapacity(size int64) int {
+	const min, max = 512, 8 << 20
+	if size < min {
+		return min
 	}
-	lines := strings.Split(normalized, "\n")
-	// A final line terminator terminates the preceding line; it does not
-	// introduce an additional selectable empty line.
-	if lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	if size > max {
+		return max
 	}
-	return lines
+	return int(size) + 1
+}
+
+// countNormalizedLines counts lines the way the historical
+// splitNormalizedLines did: a "\r\n" pair is one terminator, a final line
+// terminator does not introduce a trailing empty line, and empty input has no
+// lines. It scans bytes in place and allocates nothing.
+func countNormalizedLines(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	count := 0
+	for offset := 0; offset < len(data); {
+		index := bytes.IndexByte(data[offset:], '\n')
+		if index < 0 {
+			break
+		}
+		count++
+		offset += index + 1
+	}
+	if data[len(data)-1] != '\n' {
+		count++
+	}
+	return count
+}
+
+// hashSelectedLines hashes the selected line range exactly as joining the
+// normalized lines with "\n" and appending a final "\n" for non-empty content
+// did historically. It scans in place and allocates only the digest.
+func hashSelectedLines(data []byte, lineStart, lineEnd int) string {
+	hasher := sha256.New()
+	newline := []byte("\n")
+	firstLineNonEmpty := false
+	lineNo := 1
+	for offset := 0; lineNo <= lineEnd && offset < len(data); {
+		index := bytes.IndexByte(data[offset:], '\n')
+		contentEnd := 0
+		if index < 0 {
+			// The final line has no terminator; a lone "\r" stays in content.
+			contentEnd = len(data)
+		} else {
+			contentEnd = offset + index
+			// A "\r" directly before the "\n" is part of the terminator.
+			if contentEnd > offset && data[contentEnd-1] == '\r' {
+				contentEnd--
+			}
+		}
+		if lineNo >= lineStart {
+			if lineNo > lineStart {
+				hasher.Write(newline)
+			}
+			hasher.Write(data[offset:contentEnd])
+			if lineNo == lineStart {
+				firstLineNonEmpty = contentEnd > offset
+			}
+		}
+		if index < 0 {
+			break
+		}
+		offset += index + 1
+		lineNo++
+	}
+	// Joining non-empty content appends the final terminator; a single empty
+	// line joins to "" and stays un-terminated.
+	if lineEnd > lineStart || firstLineNonEmpty {
+		hasher.Write(newline)
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func normalizedExpectedHash(value string) (string, error) {

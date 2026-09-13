@@ -644,11 +644,11 @@ func validateRecord(record Record, expectedSeq uint64, expectedPrev string) erro
 	if len(record.NodeResults) > maxNodeResults {
 		return fmt.Errorf("node_results exceeds %d results", maxNodeResults)
 	}
+	if containsNUL(record.SchemaVersion) || containsNUL(record.PrevRecordHash) || containsNUL(record.RecordHash) || containsNUL(record.EnvelopeSHA256) || containsNUL(record.PacketBindingSHA256) || containsNUL(record.OwnscoutVersion) {
+		return errors.New("record contains a NUL byte")
+	}
 	seen := make(map[string]struct{}, len(record.NodeResults))
 	for i, result := range record.NodeResults {
-		if containsNUL(record.SchemaVersion) || containsNUL(record.PrevRecordHash) || containsNUL(record.RecordHash) || containsNUL(record.EnvelopeSHA256) || containsNUL(record.PacketBindingSHA256) || containsNUL(record.OwnscoutVersion) {
-			return errors.New("record contains a NUL byte")
-		}
 		if err := validateNodeResult(result); err != nil {
 			return fmt.Errorf("node_results[%d]: %w", i, err)
 		}
