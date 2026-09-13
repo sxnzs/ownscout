@@ -2185,6 +2185,251 @@
         "--envelope",
         "fixtures/envelope-valid.json",
         "--ledger",
+        "fixtures/edge/ledger-forged-record-hash.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-record-hash-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-record-hash.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-record-hash-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-prev.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-prev-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-prev.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-prev-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-envelope.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-envelope-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-envelope.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-envelope-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-schema.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-schema-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-schema.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-schema-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-seq.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-seq-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-seq.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-seq-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-status.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-status-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-status.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-status-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-folded.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-folded-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-forged-folded.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-forged-folded-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
         "fixtures/edge/ledger-seed.jsonl"
       ],
       "exitCode": 0,

@@ -634,6 +634,88 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// A ledger is validated when it is opened: the record hash is recomputed, the
+	// sequence is checked, the previous-hash chain is walked and the field names
+	// must be canonical. Each forged variant changes exactly one value of the seed
+	// record in place, so the fixture stays canonical in every other respect and
+	// the case is about the rule it names rather than about key order.
+	seedLine := strings.TrimRight(string(seed), "\n")
+	var seedRecord map[string]any
+	if err := json.Unmarshal([]byte(seedLine), &seedRecord); err != nil {
+		return err
+	}
+	status := ""
+	if results, ok := seedRecord["node_results"].([]any); ok && len(results) > 0 {
+		if first, ok := results[0].(map[string]any); ok {
+			status, _ = first["status"].(string)
+		}
+	}
+	forged := []struct {
+		name string
+		key  string
+		old  any
+		new  any
+	}{
+		{"record-hash", "record_hash", seedRecord["record_hash"], strings.Repeat("0", 64)},
+		{"prev", "prev_record_hash", seedRecord["prev_record_hash"], strings.Repeat("f", 64)},
+		{"envelope", "envelope_sha256", seedRecord["envelope_sha256"], strings.Repeat("1", 64)},
+		{"schema", "schema_version", seedRecord["schema_version"], "WRONG"},
+		{"seq", "seq", seedRecord["seq"], 99},
+		{"status", "status", status, "bogus"},
+	}
+	ledgers := map[string]string{}
+	for _, variant := range forged {
+		oldJSON, _ := json.Marshal(variant.old)
+		newJSON, _ := json.Marshal(variant.new)
+		from := "\"" + variant.key + "\":" + string(oldJSON)
+		to := "\"" + variant.key + "\":" + string(newJSON)
+		if !strings.Contains(seedLine, from) {
+			return fmt.Errorf("forged ledger %s: %q not found in the seed record", variant.name, from)
+		}
+		ledgers[variant.name] = strings.Replace(seedLine, from, to, 1) + "\n"
+	}
+	foldedLedger := strings.Replace(seedLine, "\"schema_version\":", "\"SCHEMA_VERSION\":", 1)
+	if foldedLedger == seedLine {
+		return fmt.Errorf("forged ledger folded: schema_version not found in the seed record")
+	}
+	ledgers["folded"] = foldedLedger + "\n"
+
+	// The reference rejects all seven, so recording them never appends to a
+	// fixture. They are recorded here rather than queued in cases because the
+	// main recording loop has already run.
+	for _, name := range []string{"record-hash", "prev", "envelope", "schema", "seq", "status", "folded"} {
+		file := "ledger-forged-" + name + ".jsonl"
+		if err := os.WriteFile(filepath.Join(edge, file), []byte(ledgers[name]), 0o644); err != nil {
+			return err
+		}
+		args := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+			"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/" + file}
+		for _, mode := range []struct {
+			suffix string
+			extra  []string
+		}{{"human", nil}, {"json", []string{"--json"}}} {
+			caseArgs := append(append([]string{}, args...), mode.extra...)
+			command := exec.Command(bin, caseArgs...)
+			command.Dir = dir
+			var out bytes.Buffer
+			command.Stdout = &out
+			command.Stderr = &out
+			exitCode := 0
+			if err := command.Run(); err != nil {
+				exitErr, ok := err.(*exec.ExitError)
+				if !ok {
+					return fmt.Errorf("ledger-forged-%s-%s: %v", name, mode.suffix, err)
+				}
+				exitCode = exitErr.ExitCode()
+			}
+			recorded = append(recorded, map[string]any{
+				"name":     "node-edge-ledger-forged-" + name + "-" + mode.suffix,
+				"args":     caseArgs,
+				"exitCode": exitCode,
+				"stdout":   normalize(out.String(), dir, repoDir, bin),
+			})
+		}
+	}
 	for _, mode := range []struct {
 		name  string
 		extra []string
