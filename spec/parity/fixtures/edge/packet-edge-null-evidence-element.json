@@ -1,0 +1,30 @@
+{
+  "authorization": {
+    "level": "autonomous"
+  },
+  "budget": {
+    "max_bytes": 1000,
+    "max_evidence": 1,
+    "used_bytes": 12,
+    "used_evidence": 1
+  },
+  "degradations": [],
+  "evidence": [
+    null
+  ],
+  "freshness": {
+    "head_commit": "deadbeef",
+    "status": "current"
+  },
+  "head_commit": "deadbeef",
+  "issued_at": "2026-09-05T00:00:00Z",
+  "outcome": "complete",
+  "packet_hash": "packet-hash",
+  "packet_id": "packet-1",
+  "provenance": {
+    "tool": "test"
+  },
+  "repo_root": "testdata/repo",
+  "request_id": "request-1",
+  "schema_version": "v1"
+}

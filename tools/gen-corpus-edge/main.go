@@ -435,6 +435,47 @@ func run() error {
 			spec{"contract-edge-precedence-" + order.name + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
+	// Three more decoding behaviours the reference inherits from encoding/json
+	// and the ports got wrong. A struct field matches its name case-insensitively
+	// when no exact match exists; an invalid UTF-8 byte inside a field name
+	// becomes its own U+FFFD; and a null element of the evidence array decodes to
+	// the zero-valued struct, so the numeric rules still fire on it.
+	caseTop := deepCopy(packetBase)
+	caseTop["SCHEMA_VERSION"] = caseTop["schema_version"]
+	delete(caseTop, "schema_version")
+	if err := writeJSON(filepath.Join(edge, "packet-edge-case-top.json"), caseTop); err != nil {
+		return err
+	}
+	caseNested := deepCopy(packetBase)
+	firstEvidence := caseNested["evidence"].([]any)[0].(map[string]any)
+	firstEvidence["LINE_START"] = firstEvidence["line_start"]
+	delete(firstEvidence, "line_start")
+	if err := writeJSON(filepath.Join(edge, "packet-edge-case-nested.json"), caseNested); err != nil {
+		return err
+	}
+	nullElement := deepCopy(packetBase)
+	nullElement["evidence"] = []any{nil}
+	if err := writeJSON(filepath.Join(edge, "packet-edge-null-evidence-element.json"), nullElement); err != nil {
+		return err
+	}
+	// writeJSON marshals a Go string, which would replace the invalid bytes with
+	// U+FFFD; the fixture has to be written raw. "\xf0\x9f" is a truncated
+	// four-byte sequence, so the reference emits one U+FFFD per byte.
+	encoded, err := json.Marshal(packetBase)
+	if err != nil {
+		return err
+	}
+	rawUTF8 := append([]byte("{\"\xf0\x9f\":1,"), encoded[1:]...)
+	if err := os.WriteFile(filepath.Join(edge, "packet-edge-unknown-badutf8.json"), rawUTF8, 0o644); err != nil {
+		return err
+	}
+	for _, extra := range []string{"case-top", "case-nested", "null-evidence-element", "unknown-badutf8"} {
+		args := []string{"contract", "validate", "--packet", "fixtures/edge/packet-edge-" + extra + ".json"}
+		cases = append(cases,
+			spec{"contract-edge-" + extra + "-human", args},
+			spec{"contract-edge-" + extra + "-json", append(append([]string{}, args...), "--json")},
+		)
+	}
 	cases = append(cases,
 		// The reference checks node verify's four paths in a fixed order and
 		// reports the first one missing, and its usage errors honour --json.

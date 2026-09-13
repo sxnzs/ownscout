@@ -1570,6 +1570,98 @@
     },
     {
       "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-case-top.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-case-top-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-case-top.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-case-top-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-case-nested.json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-case-nested-human",
+      "stdout": "OK: packet is valid\n  - outcome: complete\n  - default action: autonomous_proceed\nNext action: Run evidence verification before consuming this packet.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-case-nested.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "contract-edge-case-nested-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":true,\"summary\":\"packet is valid\",\"details\":[\"outcome: complete\",\"default action: autonomous_proceed\"],\"next_action\":\"Run evidence verification before consuming this packet.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-null-evidence-element.json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-null-evidence-element-human",
+      "stdout": "ERROR: packet is invalid (12 violation(s))\n  - malformed_evidence: evidence[0].evidence_id: required evidence field is missing\n  - malformed_evidence: evidence[0].kind: required evidence field is missing\n  - malformed_evidence: evidence[0].path: required evidence field is missing\n  - malformed_evidence: evidence[0].commit: required evidence field is missing\n  - malformed_evidence: evidence[0].source: required evidence field is missing\n  - malformed_evidence: evidence[0].content_hash: required evidence field is missing\n  - malformed_evidence: evidence[0].collected_at: required evidence field is missing\n  - malformed_evidence: evidence[0].verifier_status: required evidence field is missing\n  - malformed_evidence: evidence[0].line_start: line_start must be at least 1\n  - malformed_evidence: evidence[0].line_end: line_end must be at least 1\n  - malformed_evidence: evidence[0].verifier_status: unknown verifier status\n  - evidence: evidence[0].verifier_status: complete packet requires verified evidence\nNext action: Fix the listed packet fields, then run contract validation again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-null-evidence-element.json",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "contract-edge-null-evidence-element-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet is invalid (12 violation(s))\",\"details\":[\"malformed_evidence: evidence[0].evidence_id: required evidence field is missing\",\"malformed_evidence: evidence[0].kind: required evidence field is missing\",\"malformed_evidence: evidence[0].path: required evidence field is missing\",\"malformed_evidence: evidence[0].commit: required evidence field is missing\",\"malformed_evidence: evidence[0].source: required evidence field is missing\",\"malformed_evidence: evidence[0].content_hash: required evidence field is missing\",\"malformed_evidence: evidence[0].collected_at: required evidence field is missing\",\"malformed_evidence: evidence[0].verifier_status: required evidence field is missing\",\"malformed_evidence: evidence[0].line_start: line_start must be at least 1\",\"malformed_evidence: evidence[0].line_end: line_end must be at least 1\",\"malformed_evidence: evidence[0].verifier_status: unknown verifier status\",\"evidence: evidence[0].verifier_status: complete packet requires verified evidence\"],\"next_action\":\"Fix the listed packet fields, then run contract validation again.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-badutf8.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-badutf8-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-unknown-badutf8.json\" contains an unknown JSON field: json: unknown field \"��\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-badutf8.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-badutf8-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-unknown-badutf8.json\\\" contains an unknown JSON field: json: unknown field \\\"��\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify"
       ],
