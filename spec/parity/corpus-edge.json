@@ -2717,6 +2717,64 @@
     },
     {
       "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-near-full.jsonl"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-near-full-human",
+      "stdout": "OK: ledger is intact\n  - 21 record(s), tip e4a6d63517a8c2e875e122c1492e6f07e14f5ff7e1c9dd5cc2d2237c2f87ad30\nNext action: The ledger chain is intact.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-near-full.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-near-full-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":true,\"summary\":\"ledger is intact\",\"details\":[\"21 record(s), tip e4a6d63517a8c2e875e122c1492e6f07e14f5ff7e1c9dd5cc2d2237c2f87ad30\"],\"next_action\":\"The ledger chain is intact.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-near-full.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-append-full-human",
+      "stdout": "ERROR: ledger is full\n  - ledger exceeds 1048576 bytes\nNext action: Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-near-full.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-append-full-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger is full\",\"details\":[\"ledger exceeds 1048576 bytes\"],\"next_action\":\"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",

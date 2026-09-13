@@ -9,12 +9,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"ownscout/internal/ledger"
 	"ownscout/internal/node"
 	"ownscout/internal/nodepacket"
 )
@@ -321,8 +323,8 @@ func run() error {
 		}
 		args := []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-evidence-shape-" + shape.name + ".json"}
 		cases = append(cases,
-			spec{"evidence-edge-shape-"+shape.name+"-human", args},
-			spec{"evidence-edge-shape-"+shape.name+"-json", append(append([]string{}, args...), "--json")},
+			spec{"evidence-edge-shape-" + shape.name + "-human", args},
+			spec{"evidence-edge-shape-" + shape.name + "-json", append(append([]string{}, args...), "--json")},
 		)
 	}
 	// Anchor re-resolution (evidence verify --relocate). drift.txt records a
@@ -804,6 +806,68 @@ func run() error {
 		})
 	}
 
+	// A ledger that is VALID and just under the cap, so Open accepts it and the
+	// append is what overflows. The cap has two sites in the reference - Open
+	// rejects an existing oversized ledger and Append refuses a record that would
+	// push one past it - and every case above reaches only the first, so a port
+	// that skipped the append-time check stayed green.
+	if err := buildNearFullLedger(filepath.Join(edge, "ledger-near-full.jsonl"), repoDir); err != nil {
+		return err
+	}
+	nearFullPath := filepath.Join(edge, "ledger-near-full.jsonl")
+	// The append cases are meant to fail, but a fixture that is one byte too
+	// small would let them succeed and append - which would both record the
+	// wrong oracle and rewrite the fixture under the remaining cases. Snapshot
+	// the bytes and restore them before every run, and assert on the first run
+	// that the append really is refused.
+	nearFull, err := os.ReadFile(nearFullPath)
+	if err != nil {
+		return err
+	}
+	nearFullArgs := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+		"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-near-full.jsonl"}
+	probe := exec.Command(bin, nearFullArgs...)
+	probe.Dir = dir
+	probeOut, probeErr := probe.CombinedOutput()
+	if probeErr == nil || !strings.Contains(string(probeOut), "ledger is full") {
+		return fmt.Errorf("near-full ledger did not refuse an append: %v: %s", probeErr, probeOut)
+	}
+	if err := os.WriteFile(nearFullPath, nearFull, 0o644); err != nil {
+		return err
+	}
+	for _, mode := range []struct {
+		name string
+		args []string
+	}{
+		{"ledger-edge-verify-near-full-human", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-near-full.jsonl"}},
+		{"ledger-edge-verify-near-full-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-near-full.jsonl", "--json"}},
+		{"node-edge-ledger-append-full-human", nearFullArgs},
+		{"node-edge-ledger-append-full-json", append(append([]string{}, nearFullArgs...), "--json")},
+	} {
+		if err := os.WriteFile(nearFullPath, nearFull, 0o644); err != nil {
+			return err
+		}
+		command := exec.Command(bin, mode.args...)
+		command.Dir = dir
+		var out bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &out
+		exitCode := 0
+		if err := command.Run(); err != nil {
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				return fmt.Errorf("%s: %v", mode.name, err)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		recorded = append(recorded, map[string]any{
+			"name":     mode.name,
+			"args":     mode.args,
+			"exitCode": exitCode,
+			"stdout":   normalize(out.String(), dir, repoDir, bin),
+		})
+	}
+
 	for _, mode := range []struct {
 		name  string
 		extra []string
@@ -855,4 +919,48 @@ func normalize(text, dir, repoDir, bin string) string {
 	text = strings.ReplaceAll(text, dir, "{{DIR}}")
 	text = strings.ReplaceAll(text, bin, "{{BIN}}")
 	return text
+}
+
+// buildNearFullLedger writes a valid, fully chained ledger whose remaining space
+// is smaller than the record node verify appends, so an open still succeeds and
+// the append is what overflows. Records go through the reference's own ledger
+// package, in shrinking steps, so the fill converges in a few dozen writes
+// rather than thousands. A failed append marks a store unusable, so each attempt
+// reopens.
+func buildNearFullLedger(path, repoRoot string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Any well-formed SHA-256 will do: this ledger never reaches verification.
+	envelope := strings.Repeat("ab", 32)
+	binding := strings.Repeat("cd", 32)
+	appendReason := func(length int) error {
+		store, err := ledger.Open(path, repoRoot)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		_, err = store.Append(envelope, binding, "0.1.0", []ledger.NodeResult{{
+			NodeID: "fill",
+			Status: "evidence_current",
+			Reason: strings.Repeat("x", length),
+		}})
+		return err
+	}
+	// The last step is smaller than the record node verify appends, so when the
+	// fill stops the space left cannot hold it.
+	for _, step := range []int{60000, 6000, 600, 300, 0} {
+		for {
+			err := appendReason(step)
+			if err == nil {
+				continue
+			}
+			var full *ledger.FullError
+			if errors.As(err, &full) {
+				break
+			}
+			return err
+		}
+	}
+	return nil
 }
