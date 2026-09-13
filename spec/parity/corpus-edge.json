@@ -1504,6 +1504,29 @@
         "contract",
         "validate",
         "--packet",
+        "fixtures/edge/packet-edge-unknown-astral.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-astral-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-unknown-astral.json\" contains an unknown JSON field: json: unknown field \"astral\\U0010fffeend\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-astral.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-astral-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-unknown-astral.json\\\" contains an unknown JSON field: json: unknown field \\\"astral\\\\U0010fffeend\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
         "fixtures/edge/packet-edge-precedence-unknown-first.json"
       ],
       "exitCode": 2,

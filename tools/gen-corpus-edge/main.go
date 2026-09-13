@@ -393,6 +393,9 @@ func run() error {
 		{"specials", "a\"b\\c\td\ne\x7ff"},
 		{"controls", "x\x01y\x1fz\rw"},
 		{"nonascii", "héllo🎉\u00a0\u2028"},
+		// A non-printable rune above U+FFFF, which Go's %q renders with the
+		// eight-digit \U form rather than \u.
+		{"astral", "astral\U0010FFFEend"},
 	}
 	for _, unknown := range unknownNames {
 		payload := deepCopy(packetBase)
