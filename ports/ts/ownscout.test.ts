@@ -28,7 +28,8 @@ test("contract validation accepts a valid packet", () => {
 test("contract validation reports malformed JSON", () => {
   const result = run("contract", "validate", "--packet", fixture("packet-malformed.json"));
   assert.equal(result.status, 2);
-  assert.match(result.stdout, /packet could not be loaded/);
+  assert.match(result.stdout, /packet could not be decoded/);
+  assert.match(result.stdout, /strict packet decoding failed/);
 });
 
 test("evidence verification reports stale content", () => {

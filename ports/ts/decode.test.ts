@@ -43,43 +43,45 @@ test("goFoldName folds ASCII to upper case without toLowerCase semantics", () =>
   assert.equal(goFoldName("öutcome"), "öUTCOME"); // not "OUTCOME"
 });
 
-test("contract validate folds field names but node verify stays exact-only", () => {
-  assert.equal(run("contract", "validate", "--packet", fixture("edge/packet-edge-case-top.json")).status, 0);
-  assert.equal(run("contract", "validate", "--packet", fixture("edge/packet-edge-case-nested.json")).status, 0);
-  assert.equal(
-    run("evidence", "verify", "--repo", fixture("repo"), "--packet", fixture("edge/packet-edge-case-top.json")).status,
-    0,
-  );
+test("every command decodes through one strict nodepacket boundary", () => {
+  for (const name of ["packet-edge-case-top", "packet-edge-case-nested"]) {
+    const contract = run("contract", "validate", "--packet", fixture(`edge/${name}.json`));
+    assert.equal(contract.status, 2, name);
+    assert.match(contract.stdout, /packet could not be decoded/, name);
+  }
+  const evidence = run("evidence", "verify", "--repo", fixture("repo"), "--packet", fixture("edge/packet-edge-case-top.json"));
+  assert.equal(evidence.status, 2);
+  assert.match(evidence.stdout, /packet could not be decoded/);
   const node = run(
     "node", "verify",
     "--repo", fixture("repo"),
     "--packet", fixture("edge/packet-edge-case-top.json"),
     "--envelope", fixture("envelope-valid.json"),
-    "--ledger", "/tmp/ownscout-node-exact-only.jsonl",
+    "--ledger", path.join(tmpdir(), "ownscout-strict-node.jsonl"),
   );
   assert.equal(node.status, 2);
   assert.match(node.stdout, /strict packet decoding failed/);
 });
 
-// FIX C: a null evidence element is Go's zero-valued Evidence, so the two line
-// range rules fire in addition to the ten missing-field/status rules.
-test("a null evidence element is a zero-valued struct with 12 violations", () => {
+// An explicit null is rejected by the strict boundary, so the zero-valued
+// struct and its contract violations are never reached.
+test("an explicit null evidence element is rejected by the strict decoder", () => {
   const result = run("contract", "validate", "--packet", fixture("edge/packet-edge-null-evidence-element.json"));
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /packet is invalid \(12 violation\(s\)\)/);
-  assert.match(result.stdout, /evidence\[0\]\.line_start: line_start must be at least 1/);
-  assert.match(result.stdout, /evidence\[0\]\.line_end: line_end must be at least 1/);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /packet could not be decoded/);
+  assert.match(result.stdout, /strict packet decoding failed/);
 });
 
-test("a raw truncated UTF-8 field name is reported as two U+FFFD", () => {
+test("a raw invalid-UTF-8 packet is rejected before any field is named", () => {
   const result = run("contract", "validate", "--packet", fixture("edge/packet-edge-unknown-badutf8.json"));
   assert.equal(result.status, 2);
-  assert.match(result.stdout, /contains an unknown JSON field: json: unknown field "\ufffd\ufffd"/);
+  assert.match(result.stdout, /packet could not be decoded/);
+  assert.match(result.stdout, /strict packet decoding failed/);
 });
 
-// Go stores a fold-matched value in the canonical field but names the key
-// exactly as the document wrote it in a type error.
-test("a fold-matched type error names the key as written", () => {
+// There is no case-fold fallback anywhere now: a case-variant field name is an
+// unknown field, not a match that then reports a type error.
+test("a case-variant field name is rejected, not folded", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ownscout-fold-"));
   try {
     const packet = JSON.parse(readFileSync(fixture("packet-valid.json"), "utf8"));
@@ -88,7 +90,7 @@ test("a fold-matched type error names the key as written", () => {
     writeFileSync(file, JSON.stringify(packet));
     const result = run("contract", "validate", "--packet", file);
     assert.equal(result.status, 2);
-    assert.match(result.stdout, /Go struct field Packet\.PACKET_ID of type string/);
+    assert.match(result.stdout, /packet could not be decoded/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -117,16 +119,18 @@ test("node verify uses the strict nodepacket decoder", () => {
   }
 });
 
-// The same three packets stay on the lenient encoding/json path for contract
-// validate: duplicate keys are last-wins, bad UTF-8 is replaced, and null is a
-// zero value that only contract validation complains about.
-test("contract validate keeps the lenient decoder for the strict fixtures", () => {
-  assert.equal(run("contract", "validate", "--packet", fixture("edge/packet-edge-node-duplicate-key.json")).status, 0);
-  assert.equal(run("contract", "validate", "--packet", fixture("edge/packet-edge-node-badutf8.json")).status, 0);
-  const nullField = run("contract", "validate", "--packet", fixture("edge/packet-edge-node-null-field.json"));
-  assert.equal(nullField.status, 1);
-  assert.match(nullField.stdout, /packet is invalid \(1 violation\(s\)\)/);
-  assert.match(nullField.stdout, /issued_at: required field is missing/);
+// Duplicate keys, invalid UTF-8 and explicit null are rejected on every
+// command, including contract validate.
+test("contract validate uses the same strict decoder as node verify", () => {
+  for (const name of [
+    "packet-edge-node-duplicate-key",
+    "packet-edge-node-badutf8",
+    "packet-edge-node-null-field",
+  ]) {
+    const result = run("contract", "validate", "--packet", fixture(`edge/${name}.json`));
+    assert.equal(result.status, 2, name);
+    assert.match(result.stdout, /packet could not be decoded/, name);
+  }
 });
 
 function writePacketId(dir: string, escape: string): string {

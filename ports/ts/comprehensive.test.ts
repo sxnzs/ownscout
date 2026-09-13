@@ -147,20 +147,20 @@ test("contract enforces complete packet requirements", () => {
 
 test("strict packet boundaries reject malformed roots and trailing data", () => {
   const valid = readFileSync(path.join(fixtures, "packet-valid.json"), "utf8");
-  const cases: Array<[string, string, string]> = [
-    ["empty", "", "not valid JSON"],
-    ["whitespace", " \n\t", "not valid JSON"],
-    ["null root", "null", "must contain a JSON object"],
-    ["array root", "[]", "must contain a JSON object"],
-    ["string root", JSON.stringify("DO_NOT_PRINT"), "must contain a JSON object"],
-    ["number root", "1", "must contain a JSON object"],
-    ["truncated", valid.slice(0, -2), "not valid JSON"],
-    ["trailing object", `${valid}{}`, "not valid JSON"],
-    ["trailing null", `${valid} null`, "not valid JSON"],
-    ["trailing comment", `${valid} // comment`, "not valid JSON"],
-    ["unknown field", valid.replace('"packet_id":', '"unexpected_secret":"DO_NOT_PRINT","packet_id":'), 'contains an unknown JSON field: json: unknown field "unexpected_secret"'],
+  const cases: Array<[string, string]> = [
+    ["empty", ""],
+    ["whitespace", " \n\t"],
+    ["null root", "null"],
+    ["array root", "[]"],
+    ["string root", JSON.stringify("DO_NOT_PRINT")],
+    ["number root", "1"],
+    ["truncated", valid.slice(0, -2)],
+    ["trailing object", `${valid}{}`],
+    ["trailing null", `${valid} null`],
+    ["trailing comment", `${valid} // comment`],
+    ["unknown field", valid.replace('"packet_id":', '"unexpected_secret":"DO_NOT_PRINT","packet_id":')],
   ];
-  for (const [name, input, message] of cases) {
+  for (const [name, input] of cases) {
     test(name, () => {
       const dir = tempDir();
       const packet = path.join(dir, "packet.json");
@@ -168,7 +168,8 @@ test("strict packet boundaries reject malformed roots and trailing data", () => 
       const result = run("contract", "validate", "--packet", packet, "--json");
       assert.equal(result.code, 2, result.stdout);
       const value = assertJsonResult(result.stdout, "contract validate", false);
-      assert.ok(`${value.summary}\n${value.details.join("\n")}`.includes(message));
+      assert.equal(value.summary, "packet could not be decoded");
+      assert.deepEqual(value.details, ["strict packet decoding failed"]);
       assert.doesNotMatch(result.stdout, /DO_NOT_PRINT/);
     });
   }
@@ -176,14 +177,14 @@ test("strict packet boundaries reject malformed roots and trailing data", () => 
 
 test("strict packet decoding rejects malformed field types", () => {
   const valid = readFileSync(path.join(fixtures, "packet-valid.json"), "utf8");
-  const cases = [
+  const cases: Array<[string, string | Buffer]> = [
     ["numeric packet id", valid.replace('"packet_id": "packet-1"', '"packet_id": 1')],
     ["numeric evidence", valid.replace('"evidence": [', '"evidence": {}')],
     ["numeric budget", valid.replace('"budget": {', '"budget": 1')],
     ["fractional integer", valid.replace('"max_evidence": 1', '"max_evidence": 1.5')],
     ["out of range integer", valid.replace('"max_bytes": 1000', '"max_bytes": 9223372036854775808')],
-    ["invalid UTF-8", Buffer.from(valid.replace('"packet_hash": "packet-hash"', '"packet_hash": "packet-'), "utf8").toString("utf8") + "\xff"],
-  ] as const;
+    ["invalid UTF-8", Buffer.concat([Buffer.from(valid, "utf8"), Buffer.from([0xff])])],
+  ];
   for (const [name, input] of cases) {
     test(name, () => {
       const dir = tempDir();
@@ -191,7 +192,7 @@ test("strict packet decoding rejects malformed field types", () => {
       writeFileSync(packet, input, { mode: 0o600 });
       const result = run("contract", "validate", "--packet", packet);
       assert.equal(result.code, 2, result.stdout);
-      assert.match(result.stdout, /packet could not be loaded/);
+      assert.match(result.stdout, /packet could not be decoded/);
     });
   }
 });
@@ -410,9 +411,10 @@ test("CLI JSON output is stable and does not leak packet contents", () => {
   assert.equal(result.code, 2);
   const value = assertJsonResult(result.stdout, "contract validate", false);
   assert.equal(value.ok, false);
+  assert.equal(value.summary, "packet could not be decoded");
+  assert.deepEqual(value.details, ["strict packet decoding failed"]);
   assert.doesNotMatch(result.stdout, /DO_NOT_PRINT/);
-  assert.match(result.stdout, /json: unknown field/);
-  assert.match(result.stdout, /untrusted/);
+  assert.doesNotMatch(result.stdout, /untrusted/);
 });
 
 test("node invalid packet and envelope never create a ledger", () => {

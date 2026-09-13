@@ -150,15 +150,11 @@ export function goDecodeUtf8(data:Buffer):string {
   return out;
 }
 
-// resolveSchemaField returns the schema key a decoded object key names. An
-// exact own-property match wins; when fold is set, a Go foldName comparison is
-// the fallback, mirroring encoding/json's byExactName then byFoldedName lookup.
-function resolveSchemaField(schema:AnyObj,key:string,fold:boolean):string|undefined {
-  if (Object.prototype.hasOwnProperty.call(schema,key)) return key;
-  if (!fold) return undefined;
-  const folded=goFoldName(key);
-  for (const candidate of Object.keys(schema)) if (goFoldName(candidate)===folded) return candidate;
-  return undefined;
+// resolveSchemaField returns the schema key a decoded object key names. Field
+// names match exactly; there is no case-fold fallback anywhere now that every
+// command decodes through the strict nodepacket boundary.
+function resolveSchemaField(schema:AnyObj,key:string):string|undefined {
+  return Object.prototype.hasOwnProperty.call(schema,key)?key:undefined;
 }
 
 class StrictParser {
@@ -166,12 +162,10 @@ class StrictParser {
   private readonly s: string;
   private readonly rejectDuplicates: boolean;
   private readonly goErrors: boolean;
-  private readonly defaultNulls: boolean;
-  private readonly foldFields: boolean;
   private readonly rejectNull: boolean;
-  constructor(s: string, rejectDuplicates = true, goErrors = false, defaultNulls = false, foldFields = false, rejectNull = false) {
-    this.s = s; this.rejectDuplicates = rejectDuplicates; this.goErrors = goErrors; this.defaultNulls = defaultNulls;
-    this.foldFields = foldFields; this.rejectNull = rejectNull;
+  constructor(s: string, rejectDuplicates = true, goErrors = false, rejectNull = false) {
+    this.s = s; this.rejectDuplicates = rejectDuplicates; this.goErrors = goErrors;
+    this.rejectNull = rejectNull;
   }
   // JSON whitespace is exactly space, tab, LF and CR. JavaScript's \s also
   // matches \v, \f and NBSP, which encoding/json rejects.
@@ -212,15 +206,9 @@ class StrictParser {
     this.requireType(schema, fieldPath, goType);
     if (this.s.startsWith("null", this.i)) {
       this.i += 4;
-      // The strict node packet decoder rejects an explicit null for any field;
-      // encoding/json (contract/evidence) tolerates it and leaves a zero value.
+      // The single strict packet boundary rejects an explicit null for any
+      // field, matching nodepacket; the envelope parser leaves it as null.
       if (this.rejectNull) this.fail("unexpected null");
-      if (!this.defaultNulls) return null;
-      if (schema?.array) return null;
-      if (schema && typeof schema === "object") return {};
-      if (schema === "string") return "";
-      if (schema === "boolean") return false;
-      if (schema === "int" || schema === "int64") return 0;
       return null;
     }
     if (schema === "string") return this.string();
@@ -263,9 +251,9 @@ class StrictParser {
         const key = this.string(); this.ws();
         if (seen.has(key) && this.rejectDuplicates) this.fail(`duplicate key ${goQuote(key)}`);
         seen.add(key);
-        // The CLI packet path falls back to a case-folded match, exactly as
-        // encoding/json does; the node-envelope decoder matches exactly only.
-        const field=resolveSchemaField(schema,key,this.foldFields);
+        // Field names match exactly on every command, packets and envelopes
+        // alike; there is no case-fold fallback left.
+        const field=resolveSchemaField(schema,key);
         if (field===undefined) this.fail(`unknown field ${goQuote(key)}`);
         this.ws();
         if (this.s[this.i++] !== ":") this.fail();
@@ -372,19 +360,19 @@ function validUnicodeEscapes(s:string):boolean {
   }
   return true;
 }
-function decodePacket(data: Buffer, rejectDuplicates = true, strictUtf8 = true, foldFields = false, rejectNull = false): AnyObj {
+// decodePacket is the one strict packet boundary every command shares: the
+// 1 MiB cap, valid UTF-8, unpaired-surrogate rejection, exact field names,
+// duplicate keys rejected and explicit null rejected, matching
+// internal/nodepacket.Decode.
+function decodePacket(data: Buffer): AnyObj {
   if (data.length > MAX_INPUT) throw new Error("input exceeds 1 MiB");
-  const text = strictUtf8 ? utf8(data) : goDecodeUtf8(data);
-  // Reject unpaired UTF-16 escapes, matching the Go decoder's preflight.
-  if (strictUtf8 && !validUnicodeEscapes(text)) throw new Error("invalid Unicode escape");
-  return new StrictParser(text, rejectDuplicates, !rejectDuplicates, true, foldFields, rejectNull).parse(packetSchema);
+  const text = utf8(data);
+  if (!validUnicodeEscapes(text)) throw new Error("invalid Unicode escape");
+  return new StrictParser(text, true, false, true).parse(packetSchema);
 }
 function decodePacketValid(data: Buffer): { packet: AnyObj; violations: Violation[] } {
   try {
-    // The node command uses the strict nodepacket decoder: exact field names,
-    // duplicate keys and explicit nulls are rejected, and the input must be
-    // valid UTF-8. This is deliberately not the lenient loadPacket path.
-    const packet = decodePacket(data, true, true, false, true);
+    const packet = decodePacket(data);
     return { packet, violations: validatePacket(packet) };
   } catch (e: any) {
     return { packet: {}, violations: [{ rule: "packet_decode", field: "packet", message: "nodepacket: packet: " + e.message }] };
@@ -481,24 +469,20 @@ function packetCanonical(p: AnyObj): AnyObj {
     degradations:p.degradations||[],provenance,packet_hash:""};
 }
 
-function loadPacket(pth: string): AnyObj {
-  if (!fs.existsSync(pth)) throw new Error(`packet file "${pth}" does not exist`);
-  const data=fs.readFileSync(pth), trimmed=goDecodeUtf8(data).trim();
-  if (!jsonValid(trimmed)) throw new Error(`packet "${pth}" is not valid JSON`);
-  if (!trimmed || trimmed[0] !== "{") throw new Error(`packet "${pth}" must contain a JSON object`);
-  try {
-    // The CLI packet decoder matches field names case-insensitively on a fold
-    // fallback and tolerates explicit nulls, unlike the node packet decoder, so
-    // folding is opt-in here and nulls are left to become zero values.
-    return decodePacket(data, false, false, true, false);
-  } catch (e:any) {
-    if (e.message.startsWith("unknown field ")) {
-      throw new Error(`packet "${pth}" contains an unknown JSON field: json: ${e.message}`);
-    }
-    throw new Error(`packet "${pth}" is not valid JSON: ${e.message}`);
+// loadPacket is the single packet boundary shared by every command: a read
+// followed by the strict nodepacket decode. The decoder owns the 1 MiB limit,
+// so an oversized packet is a hard decode failure rather than a load error.
+function loadPacket(pth: string): {packet:AnyObj;violations:Violation[]} {
+  let data:Buffer;
+  try{data=fs.readFileSync(pth);}
+  catch(e:any){
+    if(e&&e.code==="ENOENT") throw new Error(`packet file "${pth}" does not exist`);
+    if(e&&e.code==="EISDIR") throw new Error(`read packet "${pth}": read ${pth}: is a directory`);
+    throw new Error(`open packet "${pth}": ${e&&e.message||e}`);
   }
+  return decodePacketValid(data);
 }
-function jsonValid(s:string):boolean { try { JSON.parse(s); return true; } catch { return false; } }
+function isDecodeFailure(violations:Violation[]):boolean{return violations.length===1&&violations[0].rule==="packet_decode";}
 function details(v: Violation[]): string[] { return v.map(x=>`${x.rule}: ${x.field}: ${x.message}`); }
 
 type Verification={evidence_id:string;path:string;status:string;expected_hash:string;actual_hash?:string;line_start:number;line_end:number;message?:string};
@@ -1148,10 +1132,16 @@ function ledgerVerify(pth:string):{list:any[];tip:string}{
     throw e;
   }
 }
-function readBounded(pth:string):Buffer{
+// readBounded mirrors cli.readBounded's messages for a named input kind.
+function readBounded(pth:string,kind="packet"):Buffer{
   let data:Buffer;
-  try{data=fs.readFileSync(pth);}catch{throw new Error("read failed");}
-  if(data.length>MAX_INPUT) throw new Error("input exceeds 1 MiB");
+  try{data=fs.readFileSync(pth);}
+  catch(e:any){
+    if(e&&e.code==="ENOENT") throw new Error(`${kind} file "${pth}" does not exist`);
+    if(e&&e.code==="EISDIR") throw new Error(`read ${kind} "${pth}": read ${pth}: is a directory`);
+    throw new Error(`open ${kind} "${pth}": ${e&&e.message||e}`);
+  }
+  if(data.length>MAX_INPUT) throw new Error(`${kind} exceeds ${MAX_INPUT} byte input limit`);
   return data;
 }
 function evidenceIssues(r:any):string[]{
@@ -1222,17 +1212,20 @@ function contractCmd(a:string[],out:any):number{
   if(!a.length)return failure(out,"a contract subcommand is required","ownscout contract --help");
   if(a[0]!=="validate")return failure(out,`unknown contract subcommand '${a[0]}'`,"ownscout contract --help",a.includes("--json"));
   const q=parseFlags(a.slice(1),new Set(["--packet"]));if(q.err)return failure(out,q.err,"ownscout contract validate --help",q.j);if(!q.f["--packet"])return failure(out,"missing required --packet <file>","ownscout contract validate --help",q.j);
-  let p:any;try{p=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"contract validate",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
-  const v=validatePacket(p);if(v.length)return emit(out,q.j,{command:"contract validate",ok:false,summary:`packet is invalid (${v.length} violation(s))`,details:details(v),next_action:"Fix the listed packet fields, then run contract validation again."},1);
+  let d:any;try{d=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"contract validate",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
+  if(isDecodeFailure(d.violations))return emit(out,q.j,{command:"contract validate",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);
+  if(d.violations.length)return emit(out,q.j,{command:"contract validate",ok:false,summary:`packet is invalid (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the listed packet fields, then run contract validation again."},1);
+  const p:any=d.packet;
   return emit(out,q.j,{command:"contract validate",ok:true,summary:"packet is valid",details:["outcome: "+p.outcome,"default action: "+actions[p.outcome]],next_action:"Run evidence verification before consuming this packet."},0);
 }
 function evidenceCmd(a:string[],out:any):number{
   if(!a.length)return failure(out,"an evidence subcommand is required","ownscout evidence --help");
   if(a[0]!=="verify")return failure(out,`unknown evidence subcommand '${a[0]}'`,"ownscout evidence --help",a.includes("--json"));
   const q=parseFlags(a.slice(1),new Set(["--repo","--packet"]),new Set(["--relocate"]));if(q.err)return failure(out,q.err,"ownscout evidence verify --help",q.j);if(!q.f["--repo"]||!q.f["--packet"])return failure(out,"both --repo <dir> and --packet <file> are required","ownscout evidence verify --help",q.j);
-  let p:any;try{p=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
-  const v=validatePacket(p);if(v.length)return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet is invalid",details:details(v),next_action:"Fix the packet contract, then verify evidence again."},1);
-  let r:any;try{r=verifyEvidence(q.f["--repo"],p,{relocate:q.f["--relocate"]==="true"});}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
+  let d:any;try{d=loadPacket(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable JSON packet with --packet <file>."},2);}
+  if(isDecodeFailure(d.violations))return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);
+  if(d.violations.length)return emit(out,q.j,{command:"evidence verify",ok:false,summary:"packet is invalid",details:details(d.violations),next_action:"Fix the packet contract, then verify evidence again."},1);
+  let r:any;try{r=verifyEvidence(q.f["--repo"],d.packet,{relocate:q.f["--relocate"]==="true"});}catch(e:any){return emit(out,q.j,{command:"evidence verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
   const issues=evidenceIssues(r);
   if(!r.ok)return emit(out,q.j,{command:"evidence verify",ok:false,summary:`evidence verification failed (${issues.length} issue(s))`,details:issues,next_action:"Refresh or correct the listed evidence, then verify again."},1);
   return emit(out,q.j,{command:"evidence verify",ok:true,summary:"evidence verified",details:[`verified ${r.verified} evidence span(s)`],next_action:"The packet is ready for its declared default action."},0);
