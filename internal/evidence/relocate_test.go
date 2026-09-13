@@ -28,6 +28,13 @@ func TestWindowHashMatchesReferenceHashing(t *testing.T) {
 		"a\r\n\r\nb\r\n",
 		"a\rb\n",
 		"a\rb",
+		// A trailing "\r" on an unterminated final line is content, not a
+		// terminator. This is the shape that a "\r"-stripping contentEnd gets
+		// wrong, so it must stay in this list.
+		"a\nb\r",
+		"b\r",
+		"\r",
+		"a\r\nb\r",
 		"héllo\n🎉\n",
 		"x\xff\xfey\n",
 		"\xff\n\xfe\n",
@@ -255,6 +262,30 @@ func TestRelocationClauseDetails(t *testing.T) {
 	// keeps the message byte-identical to the pre-relocation wording.
 	if clause := relocationClause(data, total, 2, 1, strings.Repeat("0", 64)); clause != "" {
 		t.Fatalf("reversed range clause = %q, want empty", clause)
+	}
+}
+
+// A file whose final line is unterminated and ends with "\r" must be hashed by
+// the relocation path exactly as verification hashes it: the "\r" is content,
+// because there is no "\n" for it to terminate.
+func TestWindowHashKeepsTrailingCarriageReturnOnUnterminatedLine(t *testing.T) {
+	data := []byte("a\nb\r")
+	starts := lineStarts(data)
+	if total := countNormalizedLines(data); total != 2 {
+		t.Fatalf("countNormalizedLines = %d, want 2", total)
+	}
+	got := windowHash(data, starts, 2, 2)
+	want := hashSelectedLines(data, 2, 2)
+	if got != want {
+		t.Fatalf("windowHash = %s, hashSelectedLines = %s", got, want)
+	}
+	// The kept form is "b\r\n"; the stripped form would be "b\n" and must not
+	// be what the relocation path produces.
+	if got != spanHash("b\r\n") {
+		t.Fatalf("windowHash = %s, want the CR-keeping hash %s", got, spanHash("b\r\n"))
+	}
+	if got == spanHash("b\n") {
+		t.Fatal("windowHash stripped a trailing CR from an unterminated line")
 	}
 }
 

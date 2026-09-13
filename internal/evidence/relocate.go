@@ -64,19 +64,24 @@ func lineStarts(data []byte) []int {
 }
 
 // contentEnd returns the offset just past the last content byte of 1-based line
-// number, excluding its terminator. A "\r" immediately before the "\n" is part
-// of the terminator; a lone "\r" on an unterminated final line is content.
+// number, excluding its terminator. The "\r" of a "\r\n" pair belongs to the
+// terminator, but a lone "\r" on an unterminated final line is content and is
+// kept - exactly as hashSelectedLines keeps it.
 func contentEnd(data []byte, starts []int, line int) int {
 	begin := starts[line-1]
 	end := len(data)
 	if line < len(starts) {
 		end = starts[line]
 	}
+	// Strip "\r\n" or "\n" only when the line is actually terminated. An
+	// unterminated final line keeps a trailing "\r" as content; stripping it
+	// here would let a relocation match a window that verification hashes
+	// differently.
 	if end > begin && data[end-1] == '\n' {
 		end--
-	}
-	if end > begin && data[end-1] == '\r' {
-		end--
+		if end > begin && data[end-1] == '\r' {
+			end--
+		}
 	}
 	return end
 }

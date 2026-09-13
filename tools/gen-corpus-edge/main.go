@@ -331,6 +331,13 @@ func run() error {
 	if err := os.WriteFile(filepath.Join(repoDir, "shrink.txt"), []byte(strings.Join(shrinkLines, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
+	// A final line with no terminator that ends in "\r": the "\r" is content,
+	// not a terminator, because there is no "\n" for it to terminate. A
+	// relocation path that strips it would hash this window differently from
+	// the verification path and claim a false location.
+	if err := os.WriteFile(filepath.Join(repoDir, "trailcr.txt"), []byte("one\ntwo\nthree\r"), 0o644); err != nil {
+		return err
+	}
 	relocations := []struct {
 		name      string
 		path      string
@@ -342,6 +349,7 @@ func run() error {
 		{"gone", "drift.txt", nil, 1, 2},
 		{"shrink", "shrink.txt", shrinkLines[1:3], 9000, 9001},
 		{"budget", "oversize.txt", nil, 1, 20},
+		{"trailcr", "trailcr.txt", []string{"three\r"}, 1, 1},
 	}
 	for _, relocation := range relocations {
 		payload := deepCopy(packetBase)

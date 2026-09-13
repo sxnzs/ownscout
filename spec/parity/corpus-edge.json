@@ -1370,6 +1370,35 @@
         "--repo",
         "fixtures/repo",
         "--packet",
+        "fixtures/edge/packet-evidence-relocate-trailcr.json",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-trailcr-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"trailcr.txt\"): content hash mismatch: expected sha256:15be1ea9ba76241f644c9162c71ba97565e409c82cd78725461a3f36072dae4b, got 2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806; content relocates to lines 3-3 (shift +2; nearest matching window)\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-trailcr.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-trailcr-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"trailcr.txt\\\"): content hash mismatch: expected sha256:15be1ea9ba76241f644c9162c71ba97565e409c82cd78725461a3f36072dae4b, got 2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806; content relocates to lines 3-3 (shift +2; nearest matching window)\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
         "fixtures/edge/packet-evidence-relocate-moved.json"
       ],
       "exitCode": 1,

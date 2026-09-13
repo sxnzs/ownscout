@@ -59,7 +59,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (118 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (120 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), an in-repository ledger rejection, the raw-byte evidence shapes
@@ -89,15 +89,19 @@ The corpus was mutation-tested against three deliberately broken reference build
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 110/118 |
-| `next_action` renamed to `nextAction` | 20/28 | 63/118 |
-| final newline always appended to the hashed evidence range | 28/28 | 116/118 |
-| unmutated reference | 28/28 | 118/118 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 112/120 |
+| `next_action` renamed to `nextAction` | 20/28 | 64/120 |
+| final newline always appended to the hashed evidence range | 28/28 | 118/120 |
+| `\r` stripped without its `\n` in the relocation path | 28/28 | 118/120 |
+| unmutated reference | 28/28 | 120/120 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the
 shape cases exist because all three ports shipped that exact bug while passing
-the earlier 93-case corpus.
+the earlier 93-case corpus. The fourth mutation is the mirror image - stripping
+a `\r` without consuming its `\n` - and it is invisible to the base corpus,
+which is the point of keeping the two corpora separate. All four were
+re-measured against the current 120-case set.
 
 ## Behavior to preserve (read the Go source)
 
