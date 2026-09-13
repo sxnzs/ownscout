@@ -7,3 +7,4 @@ ports/*/zig-out/
 ports/*/.zig-cache/
 ports/*/node_modules/
 ports/*/dist/
+spec/parity/__pycache__/
