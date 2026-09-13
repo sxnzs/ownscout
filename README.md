@@ -48,6 +48,8 @@ producer's own claims.
 | `ownscout contract validate --packet p.json` | Is this packet well-formed and internally consistent? |
 | `ownscout evidence verify --repo R --packet p.json` | Is the cited content still byte-identical in `R`? |
 | `ownscout node verify --repo R --packet p.json --envelope e.json --ledger L` | Does the whole dependency graph check out, and what is the audit trail? |
+| `ownscout node bind --packet p.json` | What is this packet's canonical binding digest, for `packet_binding_sha256`? |
+| `ownscout ledger verify --ledger L` | Is the ledger's hash chain intact, read-only? |
 
 Packet decoding is deliberately strict: unknown fields are rejected, duplicate
 keys are rejected, trailing JSON is rejected, and there is a 1 MiB input limit.
@@ -83,9 +85,16 @@ ownscout evidence verify --repo /path/to/repo --packet packet.json
 # Same check, but a failure also reports where the content went.
 ownscout evidence verify --repo /path/to/repo --packet packet.json --relocate
 
+# Compute the binding digest an envelope must cite for this packet.
+ownscout node bind --packet packet.json
+
 # Check a dependency graph and append the ordered results to a ledger.
+# --relocate adds evidence relocation diagnostics to failure details.
 ownscout node verify --repo /path/to/repo --packet packet.json \
-  --envelope envelope.json --ledger /path/to/ownscout-ledger.jsonl
+  --envelope envelope.json --ledger /path/to/ownscout-ledger.jsonl [--relocate]
+
+# Audit a ledger's hash chain without locking or appending.
+ownscout ledger verify --ledger /path/to/ownscout-ledger.jsonl
 ```
 
 Add `--json` to any validation command for a single machine-readable line.
