@@ -129,7 +129,13 @@ fn packet_decode_accepts_compatibility_nulls_and_rejects_nested_unknowns() {
             .packet_id,
         "last"
     );
-    assert!(packet::decode(br#"{"packet_id":"\uD800"}"#).is_err());
+    // encoding/json substitutes U+FFFD for an unpaired surrogate escape.
+    assert_eq!(
+        packet::decode(br#"{"packet_id":"\uD800"}"#)
+            .unwrap()
+            .packet_id,
+        "\u{FFFD}"
+    );
 }
 
 #[test]
@@ -331,6 +337,59 @@ fn node_validation_enforces_reference_limits_and_identifier_syntax() {
     assert!(node::validate(&e, &p, &node::binding(&p))
         .unwrap_err()
         .contains("missing"));
+}
+
+#[test]
+fn node_parser_rejects_empty_evidence_ids() {
+    let p = packet();
+    let raw = format!(
+        r#"{{"schema_version":"node-envelope-v1","envelope_id":"env","packet_id":"packet-1","packet_binding_sha256":"{}","nodes":[{{"node_id":"a","depends_on":[],"verifier":"evidence.current","evidence_ids":[]}}]}}"#,
+        node::binding(&p)
+    );
+    let err = match node::parse(raw.as_bytes()) {
+        Ok(_) => panic!("empty evidence_ids was accepted"),
+        Err(err) => err,
+    };
+    assert!(err.contains("non-empty"), "{err}");
+}
+
+#[test]
+fn node_validation_checks_every_identifier_field() {
+    let p = packet();
+    let b = node::binding(&p);
+    // envelope_id: the length rule and the character rule are distinct.
+    for (value, expected) in [
+        ("env%lope-1", "is not a valid identifier"),
+        ("-env-1", "is not a valid identifier"),
+        ("e".repeat(129).as_str(), "1-128 ASCII identifier characters"),
+        ("", "1-128 ASCII identifier characters"),
+    ] {
+        let mut e = envelope(&p, vec![one_node("a")]);
+        e.envelope_id = value.into();
+        let err = node::validate(&e, &p, &b).unwrap_err();
+        assert!(err.contains(expected), "{value:?}: {err}");
+    }
+    // packet_id is an identifier too, before it is compared to the packet.
+    let mut e = envelope(&p, vec![one_node("a")]);
+    e.packet_id = "bad%id".into();
+    assert!(node::validate(&e, &p, &b)
+        .unwrap_err()
+        .contains("packet_id"));
+    // depends_on and evidence_ids entries are validated.
+    let mut e = envelope(&p, vec![one_node("a")]);
+    e.nodes[0].depends_on = vec!["bad%dep".into()];
+    assert!(node::validate(&e, &p, &b)
+        .unwrap_err()
+        .contains("is not a valid identifier"));
+    let mut e = envelope(&p, vec![one_node("a")]);
+    e.nodes[0].evidence_ids = vec!["bad%ev".into()];
+    assert!(node::validate(&e, &p, &b)
+        .unwrap_err()
+        .contains("is not a valid identifier"));
+    // Punctuation after the first byte is accepted.
+    let mut e = envelope(&p, vec![one_node("a")]);
+    e.envelope_id = "env.1_-:x".into();
+    assert!(node::validate(&e, &p, &b).is_ok());
 }
 
 #[test]

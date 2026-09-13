@@ -2,6 +2,7 @@ const std = @import("std");
 const result = @import("result.zig");
 const json = @import("json.zig");
 const contract = @import("contract.zig");
+const gofold = @import("gofold.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const RootUsage =
@@ -85,13 +86,6 @@ fn subcommand(allocator: std.mem.Allocator, args: []const []const u8, name: []co
 
 const LoadError = error{NotFound, ReadFailed, InvalidJson, ObjectRequired, UnknownField, WrongType};
 
-fn knownField(name: []const u8, fields: []const []const u8) bool {
-    for (fields) |field| {
-        if (std.mem.eql(u8, name, field)) return true;
-    }
-    return false;
-}
-
 fn normalizeJsonUtf8(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
     if (std.unicode.utf8ValidateSlice(data)) return data;
     var normalized: std.ArrayList(u8) = .empty;
@@ -111,36 +105,30 @@ fn normalizeJsonUtf8(allocator: std.mem.Allocator, data: []const u8) ![]const u8
 
 fn unknownPacketField(root: json.Value) ?[]const u8 {
     if (root != .object) return null;
-    const packet_fields = [_][]const u8{
-        "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome",
-        "freshness", "authorization", "budget", "evidence", "degradations", "provenance", "packet_hash",
-    };
     for (root.object) |field| {
-        if (!knownField(field.key, &packet_fields)) return field.key;
-        const nested_fields: []const []const u8 = if (std.mem.eql(u8, field.key, "freshness"))
-            &[_][]const u8{ "head_commit", "head_anchor", "status", "current", "is_current", "checked_at" }
-        else if (std.mem.eql(u8, field.key, "authorization"))
-            &[_][]const u8{ "level", "reason" }
-        else if (std.mem.eql(u8, field.key, "budget"))
-            &[_][]const u8{ "max_evidence", "used_evidence", "max_bytes", "used_bytes" }
-        else if (std.mem.eql(u8, field.key, "provenance"))
-            &[_][]const u8{ "collector", "tool", "version", "tool_version" }
+        // This scanner only runs for the contract/evidence path, which folds
+        // field names, so a case-varied spelling of a known field is known.
+        const canonical = topKeyMatch(field.key, true) orelse return field.key;
+        const nested_members: []const Member = if (std.mem.eql(u8, canonical, "freshness"))
+            &freshness_members
+        else if (std.mem.eql(u8, canonical, "authorization"))
+            &authorization_members
+        else if (std.mem.eql(u8, canonical, "budget"))
+            &budget_members
+        else if (std.mem.eql(u8, canonical, "provenance"))
+            &provenance_members
         else
-            &[_][]const u8{};
+            &[_]Member{};
         if (field.value == .object) {
             for (field.value.object) |nested| {
-                if (!knownField(nested.key, nested_fields)) return nested.key;
+                if (memberSpec(nested_members, nested.key, true) == null) return nested.key;
             }
         }
-        if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
-            const evidence_fields = [_][]const u8{
-                "evidence_id", "kind", "path", "commit", "line_start", "line_end", "source",
-                "content_hash", "collected_at", "verifier_status",
-            };
+        if (std.mem.eql(u8, canonical, "evidence") and field.value == .array) {
             for (field.value.array) |item| {
                 if (item != .object) continue;
                 for (item.object) |nested| {
-                    if (!knownField(nested.key, &evidence_fields)) return nested.key;
+                    if (memberSpec(&evidence_members, nested.key, true) == null) return nested.key;
                 }
             }
         }
@@ -157,14 +145,134 @@ fn loadPacket(allocator: std.mem.Allocator, path: []const u8) LoadError!contract
     const normalized = normalizeJsonUtf8(allocator, trimmed) catch return error.InvalidJson;
     const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch return error.InvalidJson;
     if (trimmed.len == 0 or trimmed[0] != '{') return error.ObjectRequired;
+    // The contract/evidence path decodes through encoding/json, which matches a
+    // field name exactly first and case-insensitively (Unicode simple fold)
+    // second. Only the matching is folded - messages keep the input spelling,
+    // which is what the reference prints.
+    //
     // The reference reports whichever decode problem comes first in the
     // document, so the ordered walk decides the error kind. The message itself
     // is still produced by the same scanners as before.
-    switch (firstIssueKind(root)) {
+    switch (firstIssueKind(root, true)) {
         .unknown => return error.UnknownField,
         .wrong_type => return error.WrongType,
         .none => {},
     }
+    return contract.decodePacket(allocator, root) catch return error.WrongType;
+}
+
+// ---------------------------------------------------------------------------
+// Strict node packet decoding (internal/nodepacket/decode.go).
+//
+// node verify does not share encoding/json's leniency. The raw bytes must be
+// valid UTF-8, surrogate escapes must be well formed, field names must match
+// exactly (no case folding), duplicate keys and explicit null are rejected, and
+// integer fields must be integral and in range. Every failure is reported to
+// the CLI as one generic "strict packet decoding failed".
+// ---------------------------------------------------------------------------
+
+fn hexEscape(data: []const u8) ?u16 {
+    if (data.len < 4) return null;
+    var value: u16 = 0;
+    for (data[0..4]) |digit| {
+        value <<= 4;
+        if (digit >= '0' and digit <= '9') {
+            value |= digit - '0';
+        } else if (digit >= 'a' and digit <= 'f') {
+            value |= digit - 'a' + 10;
+        } else if (digit >= 'A' and digit <= 'F') {
+            value |= digit - 'A' + 10;
+        } else {
+            return null;
+        }
+    }
+    return value;
+}
+
+/// Mirrors nodepacket.validUnicodeEscapes: every \uXXXX must be present and
+/// every surrogate must be part of a valid pair. encoding/json would instead
+/// substitute U+FFFD, which is why node verify checks the raw bytes itself.
+fn validUnicodeEscapes(data: []const u8) bool {
+    var index: usize = 0;
+    while (index < data.len) : (index += 1) {
+        if (data[index] != '\\') continue;
+        index += 1;
+        if (index >= data.len or data[index] != 'u') continue;
+        const value = hexEscape(data[index + 1 ..]) orelse return false;
+        index += 4;
+        if (value >= 0xdc00 and value <= 0xdfff) return false;
+        if (value >= 0xd800 and value <= 0xdbff) {
+            if (index + 6 >= data.len or data[index + 1] != '\\' or data[index + 2] != 'u') return false;
+            const low = hexEscape(data[index + 3 ..]) orelse return false;
+            if (low < 0xdc00 or low > 0xdfff) return false;
+            index += 6;
+        }
+    }
+    return true;
+}
+
+fn isIntegerToken(number: []const u8) bool {
+    _ = std.fmt.parseInt(i64, number, 10) catch return false;
+    return true;
+}
+
+fn strictTypeMatches(value: json.Value, kind: ValueKind) bool {
+    return switch (kind) {
+        .string => value == .string,
+        .boolean => value == .boolean,
+        .integer => value == .number and isIntegerToken(value.number),
+    };
+}
+
+fn strictCheckStruct(value: json.Value, members: []const Member) error{WrongType}!void {
+    if (value != .object) return error.WrongType;
+    for (value.object) |field| {
+        const member = memberSpec(members, field.key, false) orelse return error.WrongType;
+        if (!strictTypeMatches(field.value, member.kind)) return error.WrongType;
+    }
+}
+
+fn strictCheckPacket(root: json.Value) error{WrongType}!void {
+    if (root != .object) return error.WrongType;
+    for (root.object) |field| {
+        const canonical = topKeyMatch(field.key, false) orelse return error.WrongType;
+        if (isStringTopField(canonical)) {
+            if (field.value != .string) return error.WrongType;
+        } else if (std.mem.eql(u8, canonical, "freshness")) {
+            try strictCheckStruct(field.value, &freshness_members);
+        } else if (std.mem.eql(u8, canonical, "authorization")) {
+            try strictCheckStruct(field.value, &authorization_members);
+        } else if (std.mem.eql(u8, canonical, "budget")) {
+            try strictCheckStruct(field.value, &budget_members);
+        } else if (std.mem.eql(u8, canonical, "provenance")) {
+            try strictCheckStruct(field.value, &provenance_members);
+        } else if (std.mem.eql(u8, canonical, "evidence")) {
+            if (field.value != .array) return error.WrongType;
+            for (field.value.array) |item| try strictCheckStruct(item, &evidence_members);
+        } else if (std.mem.eql(u8, canonical, "degradations")) {
+            if (field.value != .array) return error.WrongType;
+            for (field.value.array) |item| {
+                if (item != .string) return error.WrongType;
+            }
+        } else {
+            return error.WrongType;
+        }
+    }
+}
+
+fn loadNodePacket(allocator: std.mem.Allocator, path: []const u8) LoadError!contract.Packet {
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
+        error.FileNotFound => return error.NotFound,
+        else => return error.ReadFailed,
+    };
+    if (!std.unicode.utf8ValidateSlice(data)) return error.WrongType;
+    if (!validUnicodeEscapes(data)) return error.WrongType;
+    const trimmed = std.mem.trim(u8, data, " \t\r\n");
+    // parse (not parseAllowDuplicateKeys) rejects duplicate keys, invalid
+    // escapes and trailing data before the fixed contract graph is checked.
+    const root = json.Parser.parse(allocator, trimmed) catch return error.WrongType;
+    if (root != .object) return error.WrongType;
+    strictCheckPacket(root) catch return error.WrongType;
     return contract.decodePacket(allocator, root) catch return error.WrongType;
 }
 
@@ -325,8 +433,41 @@ const evidence_members = [_]Member{
 
 const DecodeIssue = enum { none, unknown, wrong_type };
 
-fn memberSpec(members: []const Member, name: []const u8) ?Member {
-    for (members) |member| if (std.mem.eql(u8, member.name, name)) return member;
+fn nameMatches(a: []const u8, b: []const u8, fold: bool) bool {
+    return if (fold) gofold.foldedEqual(a, b) else std.mem.eql(u8, a, b);
+}
+
+fn memberSpec(members: []const Member, name: []const u8, fold: bool) ?Member {
+    for (members) |member| if (nameMatches(name, member.name, fold)) return member;
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Case-insensitive field names (contract/evidence path only).
+//
+// encoding/json resolves a key by an exact tag match first and a case-folded
+// match second, so the contract and evidence commands accept e.g.
+// "SCHEMA_VERSION" for schema_version. internal/nodepacket, used by node
+// verify, is exact only, so `fold` is false there.
+//
+// Only matching is folded: the reference still names the field with the input
+// spelling in a type error ("Packet.PACKET_ID"), so keys are never rewritten.
+// ---------------------------------------------------------------------------
+
+const packet_struct_fields = [_][]const u8{
+    "freshness", "authorization", "budget", "evidence", "degradations", "provenance",
+};
+
+fn isStringTopField(name: []const u8) bool {
+    for (packet_string_fields) |field| if (std.mem.eql(u8, field, name)) return true;
+    return false;
+}
+
+/// Resolve a top-level key to the canonical tag it matches, or null when it is
+/// unknown. `fold` selects case-insensitive matching.
+fn topKeyMatch(key: []const u8, fold: bool) ?[]const u8 {
+    for (packet_string_fields) |name| if (nameMatches(key, name, fold)) return name;
+    for (packet_struct_fields) |name| if (nameMatches(key, name, fold)) return name;
     return null;
 }
 
@@ -334,49 +475,52 @@ fn scalarTypeIssue(value: json.Value, kind: ValueKind) bool {
     return switch (kind) {
         .string => value != .string and value != .null,
         .boolean => value != .boolean and value != .null,
-        .integer => value != .number and value != .null,
+        // encoding/json rejects a number that is not an integral int64, not
+        // just a non-number, for an integer field.
+        .integer => value != .null and (value != .number or !isIntegerToken(value.number)),
     };
 }
 
-fn firstIssueInStruct(value: json.Value, members: []const Member) DecodeIssue {
+fn firstIssueInStruct(value: json.Value, members: []const Member, fold: bool) DecodeIssue {
     if (value == .null) return .none;
     if (value != .object) return .wrong_type;
     for (value.object) |field| {
-        const member = memberSpec(members, field.key) orelse return .unknown;
+        const member = memberSpec(members, field.key, fold) orelse return .unknown;
         if (scalarTypeIssue(field.value, member.kind)) return .wrong_type;
     }
     return .none;
 }
 
-fn firstIssueKind(root: json.Value) DecodeIssue {
+fn firstIssueKind(root: json.Value, fold: bool) DecodeIssue {
     if (root != .object) return .none;
     for (root.object) |field| {
-        if (knownField(field.key, &packet_string_fields)) {
+        const canonical = topKeyMatch(field.key, fold) orelse return .unknown;
+        if (isStringTopField(canonical)) {
             if (field.value != .string and field.value != .null) return .wrong_type;
-        } else if (std.mem.eql(u8, field.key, "freshness")) {
-            const issue = firstIssueInStruct(field.value, &freshness_members);
+        } else if (std.mem.eql(u8, canonical, "freshness")) {
+            const issue = firstIssueInStruct(field.value, &freshness_members, fold);
             if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, field.key, "authorization")) {
-            const issue = firstIssueInStruct(field.value, &authorization_members);
+        } else if (std.mem.eql(u8, canonical, "authorization")) {
+            const issue = firstIssueInStruct(field.value, &authorization_members, fold);
             if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, field.key, "budget")) {
-            const issue = firstIssueInStruct(field.value, &budget_members);
+        } else if (std.mem.eql(u8, canonical, "budget")) {
+            const issue = firstIssueInStruct(field.value, &budget_members, fold);
             if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, field.key, "provenance")) {
-            const issue = firstIssueInStruct(field.value, &provenance_members);
+        } else if (std.mem.eql(u8, canonical, "provenance")) {
+            const issue = firstIssueInStruct(field.value, &provenance_members, fold);
             if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, field.key, "evidence")) {
+        } else if (std.mem.eql(u8, canonical, "evidence")) {
             if (field.value == .null) continue;
             if (field.value != .array) return .wrong_type;
             for (field.value.array) |item| {
                 if (item == .null) continue;
                 if (item != .object) return .wrong_type;
                 for (item.object) |nested| {
-                    const member = memberSpec(&evidence_members, nested.key) orelse return .unknown;
+                    const member = memberSpec(&evidence_members, nested.key, fold) orelse return .unknown;
                     if (scalarTypeIssue(nested.value, member.kind)) return .wrong_type;
                 }
             }
-        } else if (std.mem.eql(u8, field.key, "degradations")) {
+        } else if (std.mem.eql(u8, canonical, "degradations")) {
             if (field.value == .null) continue;
             if (field.value != .array) return .wrong_type;
             for (field.value.array) |item| {
@@ -555,40 +699,55 @@ fn decodeFailureMessage(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch
         return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
     if (root == .object) {
-        const string_fields = [_][]const u8{
-            "packet_id", "schema_version", "repo_root", "head_commit", "request_id", "issued_at", "outcome", "packet_hash",
-        };
         for (root.object) |field| {
-            if (knownField(field.key, &string_fields) and field.value != .string) {
+            // Match case-insensitively, but print the key as the input spelled
+            // it: encoding/json names the field it failed on that way.
+            const canonical = topKeyMatch(field.key, true) orelse continue;
+            if (isStringTopField(canonical) and field.value != .string) {
                 if (field.value == .null) continue;
                 return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type string", .{ path, jsonTypeName(field.value), field.key });
             }
-            if (std.mem.eql(u8, field.key, "evidence") and field.value != .array) {
+            if (std.mem.eql(u8, canonical, "evidence") and field.value != .array) {
                 if (field.value == .null) continue;
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.evidence of type []contract.Evidence", .{ path, jsonTypeName(field.value) });
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type []contract.Evidence", .{ path, jsonTypeName(field.value), field.key });
             }
-            if (std.mem.eql(u8, field.key, "degradations") and field.value != .array) {
+            if (std.mem.eql(u8, canonical, "degradations") and field.value != .array) {
                 if (field.value == .null) continue;
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.degradations of type []string", .{ path, jsonTypeName(field.value) });
+                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type []string", .{ path, jsonTypeName(field.value), field.key });
             }
-            if ((std.mem.eql(u8, field.key, "freshness") or std.mem.eql(u8, field.key, "authorization") or
-                std.mem.eql(u8, field.key, "budget") or std.mem.eql(u8, field.key, "provenance")) and
+            if ((std.mem.eql(u8, canonical, "freshness") or std.mem.eql(u8, canonical, "authorization") or
+                std.mem.eql(u8, canonical, "budget") or std.mem.eql(u8, canonical, "provenance")) and
                 field.value != .object and field.value != .null)
             {
-                const type_name = if (std.mem.eql(u8, field.key, "freshness")) "contract.Freshness" else if (std.mem.eql(u8, field.key, "authorization")) "contract.Authorization" else if (std.mem.eql(u8, field.key, "budget")) "contract.Budget" else "contract.Provenance";
+                const type_name = if (std.mem.eql(u8, canonical, "freshness")) "contract.Freshness" else if (std.mem.eql(u8, canonical, "authorization")) "contract.Authorization" else if (std.mem.eql(u8, canonical, "budget")) "contract.Budget" else "contract.Provenance";
                 return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type {s}", .{ path, jsonTypeName(field.value), field.key, type_name });
             }
             if (field.value == .object) {
+                const nested_members: []const Member = if (std.mem.eql(u8, canonical, "freshness"))
+                    &freshness_members
+                else if (std.mem.eql(u8, canonical, "authorization"))
+                    &authorization_members
+                else if (std.mem.eql(u8, canonical, "budget"))
+                    &budget_members
+                else if (std.mem.eql(u8, canonical, "provenance"))
+                    &provenance_members
+                else
+                    &[_]Member{};
                 for (field.value.object) |nested| {
                     if (nested.value == .null) continue;
-                    const is_bool = (std.mem.eql(u8, field.key, "freshness") and
-                        (std.mem.eql(u8, nested.key, "current") or std.mem.eql(u8, nested.key, "is_current")));
-                    const is_integer = (std.mem.eql(u8, field.key, "budget"));
+                    const member = memberSpec(nested_members, nested.key, true) orelse continue;
+                    const is_bool = member.kind == .boolean;
+                    const is_integer = member.kind == .integer;
                     if (is_bool and nested.value != .boolean) {
                         return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type bool", .{ path, jsonTypeName(nested.value), field.key, nested.key });
                     }
-                    if (is_integer and nested.value != .number) {
-                        const type_name = if (std.mem.eql(u8, nested.key, "max_bytes") or std.mem.eql(u8, nested.key, "used_bytes")) "int64" else "int";
+                    if (is_integer and (nested.value != .number or !isIntegerToken(nested.value.number))) {
+                        const type_name = if (std.mem.eql(u8, member.name, "max_bytes") or std.mem.eql(u8, member.name, "used_bytes")) "int64" else "int";
+                        // A rejected number names its literal, as encoding/json
+                        // does in UnmarshalTypeError.Value.
+                        if (nested.value == .number) {
+                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal number {s} into Go struct field Packet.{s}.{s} of type {s}", .{ path, nested.value.number, field.key, nested.key, type_name });
+                        }
                         return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type {s}", .{ path, jsonTypeName(nested.value), field.key, nested.key, type_name });
                     }
                     if (!is_bool and !is_integer and nested.value != .string) {
@@ -596,27 +755,33 @@ fn decodeFailureMessage(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
                     }
                 }
             }
-            if (std.mem.eql(u8, field.key, "evidence") and field.value == .array) {
+            if (std.mem.eql(u8, canonical, "evidence") and field.value == .array) {
                 for (field.value.array, 0..) |item, i| {
                     if (item == .null) continue;
                     if (item != .object) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.evidence.{d} of type contract.Evidence", .{ path, jsonTypeName(item), i });
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.{s}.{d} of type contract.Evidence", .{ path, jsonTypeName(item), field.key, i });
                     }
                     for (item.object) |nested| {
                         if (nested.value == .null) continue;
-                        const numeric = std.mem.eql(u8, nested.key, "line_start") or std.mem.eql(u8, nested.key, "line_end");
-                        if ((numeric and nested.value != .number) or (!numeric and nested.value != .string)) {
-                            const type_name = if (numeric) "int" else "string";
-                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.evidence.{d}.{s} of type {s}", .{ path, jsonTypeName(nested.value), i, nested.key, type_name });
+                        const member = memberSpec(&evidence_members, nested.key, true) orelse continue;
+                        const numeric = member.kind == .integer;
+                        if (numeric and (nested.value != .number or !isIntegerToken(nested.value.number))) {
+                            if (nested.value == .number) {
+                                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal number {s} into Go struct field Packet.{s}.{d}.{s} of type int", .{ path, nested.value.number, field.key, i, nested.key });
+                            }
+                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{d}.{s} of type int", .{ path, jsonTypeName(nested.value), field.key, i, nested.key });
+                        }
+                        if (!numeric and nested.value != .string) {
+                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{d}.{s} of type string", .{ path, jsonTypeName(nested.value), field.key, i, nested.key });
                         }
                     }
                 }
             }
-            if (std.mem.eql(u8, field.key, "degradations") and field.value == .array) {
+            if (std.mem.eql(u8, canonical, "degradations") and field.value == .array) {
                 for (field.value.array, 0..) |item, i| {
                     if (item == .null) continue;
                     if (item != .string) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.degradations.{d} of type string", .{ path, jsonTypeName(item), i });
+                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.{s}.{d} of type string", .{ path, jsonTypeName(item), field.key, i });
                     }
                 }
             }
@@ -1053,8 +1218,10 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
     const packet_path = packet_value.?;
     const envelope_path = envelope_value.?;
     const ledger_path = ledger_value.?;
-    const packet = loadPacket(allocator, packet_path) catch |err| {
-        if (err == error.WrongType or err == error.InvalidJson) {
+    const packet = loadNodePacket(allocator, packet_path) catch |err| {
+        // strict packet decoding rejects every wire-format problem the same
+        // way, including an unknown (or merely differently cased) field name.
+        if (err == error.WrongType or err == error.InvalidJson or err == error.UnknownField or err == error.ObjectRequired) {
             const details = [_][]const u8{"strict packet decoding failed"};
             return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
         }
@@ -1264,13 +1431,27 @@ fn findEvidence(items: []contract.Evidence, id: []const u8) ?contract.Evidence {
     return null;
 }
 
+// Mirrors node.validateIdentifier: 1-128 bytes, alphanumeric, and after the
+// first byte also '.', '_', '-' or ':'.
+fn validIdentifier(value: []const u8) bool {
+    if (value.len < 1 or value.len > 128) return false;
+    for (value, 0..) |c, i| {
+        const alphanumeric = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9');
+        if (!alphanumeric and (i == 0 or (c != '.' and c != '_' and c != '-' and c != ':'))) return false;
+    }
+    return true;
+}
+
 fn validateEnvelope(env: Envelope, p: contract.Packet, binding: [64]u8) !void {
     if (!std.mem.eql(u8, env.schema_version, "node-envelope-v1") or env.nodes.len == 0) return error.InvalidEnvelope;
+    if (!validIdentifier(env.envelope_id) or !validIdentifier(env.packet_id)) return error.InvalidEnvelope;
     if (!std.mem.eql(u8, env.packet_id, p.packet_id) or !std.mem.eql(u8, env.packet_binding_sha256, &binding)) return error.InvalidEnvelope;
+    for (p.evidence) |evidence| if (!validIdentifier(evidence.evidence_id)) return error.InvalidEnvelope;
     for (env.nodes, 0..) |node, i| {
-        if (node.node_id.len == 0 or !std.mem.eql(u8, node.verifier, "evidence.current") or node.evidence_ids.len == 0) return error.InvalidEnvelope;
+        if (!validIdentifier(node.node_id) or !std.mem.eql(u8, node.verifier, "evidence.current") or node.evidence_ids.len == 0) return error.InvalidEnvelope;
         for (env.nodes[0..i]) |previous| if (std.mem.eql(u8, previous.node_id, node.node_id)) return error.InvalidEnvelope;
         for (node.depends_on) |dependency| {
+            if (!validIdentifier(dependency)) return error.InvalidEnvelope;
             var found = false;
             for (env.nodes) |candidate| {
                 if (std.mem.eql(u8, candidate.node_id, dependency)) {
@@ -1281,6 +1462,7 @@ fn validateEnvelope(env: Envelope, p: contract.Packet, binding: [64]u8) !void {
             if (!found or std.mem.eql(u8, dependency, node.node_id)) return error.InvalidEnvelope;
         }
         for (node.evidence_ids) |evidence_id| {
+            if (!validIdentifier(evidence_id)) return error.InvalidEnvelope;
             var found = false;
             for (p.evidence) |evidence| {
                 if (std.mem.eql(u8, evidence.evidence_id, evidence_id)) {
@@ -1309,81 +1491,360 @@ fn visitNode(nodes: []const Node, index: usize, marks: []u8) !void {
     marks[index] = 2;
 }
 
-fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [64]u8, binding: [64]u8, details: []const []const u8) !void {
-    const io = std.Options.debug_io;
-    const old = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1 << 20)) catch "";
-    var seq: u64 = 1;
-    var previous: []const u8 = "0000000000000000000000000000000000000000000000000000000000000000";
-    if (old.len != 0) {
-        var lines = std.mem.splitScalar(u8, old, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            const value = try json.Parser.parse(allocator, line);
-            const seq_value = value.objectField("seq") orelse return error.InvalidLedger;
-            const hash_value = value.objectField("record_hash") orelse return error.InvalidLedger;
-            if (seq_value != .number or hash_value != .string) return error.InvalidLedger;
-            seq = try std.fmt.parseUnsigned(u64, seq_value.number, 10) + 1;
-            previous = hash_value.string;
+// ---------------------------------------------------------------------------
+// Ledger validation and append (internal/ledger/ledger.go).
+//
+// An existing ledger is untrusted input: every line must decode strictly with
+// canonical field names, chain onto the previous record, and hash to its
+// recorded digest before a new record may be appended.
+// ---------------------------------------------------------------------------
+
+const ledger_zero_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+const ledger_max_record_size = 64 << 10;
+const ledger_max_node_results = 4096;
+
+const LedgerNodeResult = struct { node_id: []const u8, status: []const u8, reason: []const u8 = "" };
+const LedgerRecord = struct {
+    schema_version: []const u8 = "",
+    seq: u64 = 0,
+    prev_record_hash: []const u8 = "",
+    record_hash: []const u8 = "",
+    envelope_sha256: []const u8 = "",
+    packet_binding_sha256: []const u8 = "",
+    ownscout_version: []const u8 = "",
+    node_results: []const LedgerNodeResult = &.{},
+};
+
+const ledger_record_fields = [_][]const u8{
+    "schema_version",  "seq",             "prev_record_hash",     "record_hash",
+    "envelope_sha256", "packet_binding_sha256", "ownscout_version", "node_results",
+};
+const ledger_node_result_fields = [_][]const u8{ "node_id", "status", "reason" };
+
+/// Go's bytes.TrimSpace, which trims unicode.IsSpace runes.
+fn goSpaceRune(r: u21) bool {
+    return switch (r) {
+        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x85, 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000 => true,
+        0x2000...0x200A => true,
+        else => false,
+    };
+}
+
+fn trimGoSpace(value: []const u8) []const u8 {
+    var start: usize = 0;
+    while (start < value.len) {
+        const byte = value[start];
+        if (byte < 0x80) {
+            if (!goSpaceRune(byte)) break;
+            start += 1;
+            continue;
+        }
+        const length: usize = std.unicode.utf8ByteSequenceLength(byte) catch break;
+        if (start + length > value.len) break;
+        const decoded = std.unicode.utf8Decode(value[start .. start + length]) catch break;
+        if (!goSpaceRune(decoded)) break;
+        start += length;
+    }
+    var end: usize = value.len;
+    while (end > start) {
+        var rune_start = end - 1;
+        while (rune_start > start and (value[rune_start] & 0xC0) == 0x80) rune_start -= 1;
+        const byte = value[rune_start];
+        if (byte < 0x80) {
+            if (!goSpaceRune(byte)) break;
+        } else {
+            const decoded = std.unicode.utf8Decode(value[rune_start..end]) catch break;
+            if (!goSpaceRune(decoded)) break;
+        }
+        end = rune_start;
+    }
+    return value[start..end];
+}
+
+fn exactLedgerField(key: []const u8, fields: []const []const u8) ?[]const u8 {
+    for (fields) |name| if (std.mem.eql(u8, key, name)) return name;
+    return null;
+}
+
+fn hasNul(value: []const u8) bool {
+    return std.mem.indexOfScalar(u8, value, 0) != null;
+}
+
+fn isLedgerSha256(value: []const u8) bool {
+    if (value.len != 64) return false;
+    for (value) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'))) return false;
+    }
+    return true;
+}
+
+fn isLedgerStatus(status: []const u8) bool {
+    return std.mem.eql(u8, status, "evidence_current") or std.mem.eql(u8, status, "failed") or std.mem.eql(u8, status, "blocked");
+}
+
+/// Go's encoding/json string escaping with HTML escaping on (json.Marshal).
+fn appendGoJsonString(list: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
+    const digits = "0123456789abcdef";
+    try list.append(allocator, '"');
+    var index: usize = 0;
+    while (index < value.len) {
+        const byte = value[index];
+        if (byte < 0x80) {
+            index += 1;
+            switch (byte) {
+                '"' => try list.appendSlice(allocator, "\\\""),
+                '\\' => try list.appendSlice(allocator, "\\\\"),
+                '\x08' => try list.appendSlice(allocator, "\\b"),
+                '\x0c' => try list.appendSlice(allocator, "\\f"),
+                '\n' => try list.appendSlice(allocator, "\\n"),
+                '\r' => try list.appendSlice(allocator, "\\r"),
+                '\t' => try list.appendSlice(allocator, "\\t"),
+                '<' => try list.appendSlice(allocator, "\\u003c"),
+                '>' => try list.appendSlice(allocator, "\\u003e"),
+                '&' => try list.appendSlice(allocator, "\\u0026"),
+                else => {
+                    if (byte < 0x20 or byte == 0x7f) {
+                        try list.appendSlice(allocator, "\\u00");
+                        try list.append(allocator, digits[byte >> 4]);
+                        try list.append(allocator, digits[byte & 0x0f]);
+                    } else {
+                        try list.append(allocator, byte);
+                    }
+                },
+            }
+            continue;
+        }
+        const length: usize = std.unicode.utf8ByteSequenceLength(byte) catch {
+            try list.appendSlice(allocator, "\xef\xbf\xbd");
+            index += 1;
+            continue;
+        };
+        if (index + length > value.len or !std.unicode.utf8ValidateSlice(value[index .. index + length])) {
+            try list.appendSlice(allocator, "\xef\xbf\xbd");
+            index += 1;
+            continue;
+        }
+        const decoded = std.unicode.utf8Decode(value[index .. index + length]) catch {
+            try list.appendSlice(allocator, "\xef\xbf\xbd");
+            index += 1;
+            continue;
+        };
+        if (decoded == 0x2028) {
+            try list.appendSlice(allocator, "\\u2028");
+        } else if (decoded == 0x2029) {
+            try list.appendSlice(allocator, "\\u2029");
+        } else {
+            try list.appendSlice(allocator, value[index .. index + length]);
+        }
+        index += length;
+    }
+    try list.append(allocator, '"');
+}
+
+fn parseLedgerRecord(allocator: std.mem.Allocator, line: []const u8) !LedgerRecord {
+    // encoding/json coerces invalid UTF-8 to U+FFFD before decoding.
+    const normalized = try normalizeJsonUtf8(allocator, line);
+    const root = json.Parser.parse(allocator, normalized) catch return error.InvalidLedger;
+    if (root != .object) return error.InvalidLedger;
+    var record = LedgerRecord{};
+    for (root.object) |field| {
+        const canonical = exactLedgerField(field.key, &ledger_record_fields) orelse return error.InvalidLedger;
+        if (std.mem.eql(u8, canonical, "schema_version")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.schema_version = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "seq")) {
+            if (field.value != .number) return error.InvalidLedger;
+            record.seq = std.fmt.parseUnsigned(u64, field.value.number, 10) catch return error.InvalidLedger;
+        } else if (std.mem.eql(u8, canonical, "prev_record_hash")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.prev_record_hash = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "record_hash")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.record_hash = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "envelope_sha256")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.envelope_sha256 = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "packet_binding_sha256")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.packet_binding_sha256 = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "ownscout_version")) {
+            if (field.value != .string) return error.InvalidLedger;
+            record.ownscout_version = field.value.string;
+        } else if (std.mem.eql(u8, canonical, "node_results")) {
+            if (field.value != .array) return error.InvalidLedger;
+            const results = try allocator.alloc(LedgerNodeResult, field.value.array.len);
+            for (field.value.array, 0..) |item, i| {
+                if (item != .object) return error.InvalidLedger;
+                var node_result = LedgerNodeResult{ .node_id = "", .status = "" };
+                for (item.object) |member| {
+                    const name = exactLedgerField(member.key, &ledger_node_result_fields) orelse return error.InvalidLedger;
+                    if (member.value != .string) return error.InvalidLedger;
+                    if (std.mem.eql(u8, name, "node_id")) {
+                        node_result.node_id = member.value.string;
+                    } else if (std.mem.eql(u8, name, "status")) {
+                        node_result.status = member.value.string;
+                    } else {
+                        node_result.reason = member.value.string;
+                    }
+                }
+                results[i] = node_result;
+            }
+            record.node_results = results;
         }
     }
-    var record = std.ArrayList(u8).empty;
-    try record.appendSlice(allocator, "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":");
-    try record.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{seq}));
-    try record.appendSlice(allocator, ",\"prev_record_hash\":");
-    try appendJsonString(&record, allocator, previous);
-    try record.appendSlice(allocator, ",\"record_hash\":\"\",\"envelope_sha256\":");
-    try appendJsonString(&record, allocator, &envelope_hash);
-    try record.appendSlice(allocator, ",\"packet_binding_sha256\":");
-    try appendJsonString(&record, allocator, &binding);
-    try record.appendSlice(allocator, ",\"ownscout_version\":\"0.1.0\",\"node_results\":[");
-    for (details, 0..) |detail, i| {
-        if (i != 0) try record.append(allocator, ',');
+    return record;
+}
+
+fn validateLedgerRecord(record: LedgerRecord, expected_seq: u64, expected_prev: []const u8) !void {
+    if (!std.mem.eql(u8, record.schema_version, "ownscout-ledger-v1")) return error.InvalidLedger;
+    if (record.seq != expected_seq) return error.InvalidLedger;
+    if (!std.mem.eql(u8, record.prev_record_hash, expected_prev)) return error.InvalidLedger;
+    if (!isLedgerSha256(record.prev_record_hash)) return error.InvalidLedger;
+    if (!isLedgerSha256(record.record_hash)) return error.InvalidLedger;
+    if (!isLedgerSha256(record.envelope_sha256)) return error.InvalidLedger;
+    if (!isLedgerSha256(record.packet_binding_sha256)) return error.InvalidLedger;
+    if (record.ownscout_version.len == 0) return error.InvalidLedger;
+    if (record.node_results.len == 0 or record.node_results.len > ledger_max_node_results) return error.InvalidLedger;
+    if (hasNul(record.schema_version) or hasNul(record.prev_record_hash) or hasNul(record.record_hash) or
+        hasNul(record.envelope_sha256) or hasNul(record.packet_binding_sha256) or hasNul(record.ownscout_version)) return error.InvalidLedger;
+    for (record.node_results, 0..) |node_result, i| {
+        if (!validIdentifier(node_result.node_id)) return error.InvalidLedger;
+        if (!isLedgerStatus(node_result.status)) return error.InvalidLedger;
+        if (hasNul(node_result.node_id) or hasNul(node_result.status) or hasNul(node_result.reason)) return error.InvalidLedger;
+        for (record.node_results[0..i]) |previous| {
+            if (std.mem.eql(u8, previous.node_id, node_result.node_id)) return error.InvalidLedger;
+        }
+    }
+}
+
+/// The canonical record encoding hashRecord hashes: the struct field order,
+/// record_hash empty, and reason omitted when empty.
+fn ledgerRecordJson(allocator: std.mem.Allocator, record: LedgerRecord, include_hash: bool) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(allocator, "{\"schema_version\":");
+    try appendGoJsonString(&out, allocator, record.schema_version);
+    try out.appendSlice(allocator, ",\"seq\":");
+    try out.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{record.seq}));
+    try out.appendSlice(allocator, ",\"prev_record_hash\":");
+    try appendGoJsonString(&out, allocator, record.prev_record_hash);
+    try out.appendSlice(allocator, ",\"record_hash\":");
+    if (include_hash) {
+        try appendGoJsonString(&out, allocator, record.record_hash);
+    } else {
+        try out.appendSlice(allocator, "\"\"");
+    }
+    try out.appendSlice(allocator, ",\"envelope_sha256\":");
+    try appendGoJsonString(&out, allocator, record.envelope_sha256);
+    try out.appendSlice(allocator, ",\"packet_binding_sha256\":");
+    try appendGoJsonString(&out, allocator, record.packet_binding_sha256);
+    try out.appendSlice(allocator, ",\"ownscout_version\":");
+    try appendGoJsonString(&out, allocator, record.ownscout_version);
+    try out.appendSlice(allocator, ",\"node_results\":[");
+    for (record.node_results, 0..) |node_result, i| {
+        if (i != 0) try out.append(allocator, ',');
+        try out.appendSlice(allocator, "{\"node_id\":");
+        try appendGoJsonString(&out, allocator, node_result.node_id);
+        try out.appendSlice(allocator, ",\"status\":");
+        try appendGoJsonString(&out, allocator, node_result.status);
+        if (node_result.reason.len != 0) {
+            try out.appendSlice(allocator, ",\"reason\":");
+            try appendGoJsonString(&out, allocator, node_result.reason);
+        }
+        try out.append(allocator, '}');
+    }
+    try out.appendSlice(allocator, "]}");
+    return try out.toOwnedSlice(allocator);
+}
+
+fn ledgerRecordHash(allocator: std.mem.Allocator, record: LedgerRecord) ![64]u8 {
+    const encoded = try ledgerRecordJson(allocator, record, false);
+    var digest: [32]u8 = undefined;
+    Sha256.hash(encoded, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
+fn ledgerResults(allocator: std.mem.Allocator, details: []const []const u8) ![]LedgerNodeResult {
+    var out: std.ArrayList(LedgerNodeResult) = .empty;
+    for (details) |detail| {
         const node_start = std.mem.indexOf(u8, detail, "node \"") orelse continue;
         const id_start = node_start + 6;
         const id_end = std.mem.indexOfScalarPos(u8, detail, id_start, '"') orelse continue;
         const status_start = (std.mem.indexOf(u8, detail[id_end..], "\": ") orelse continue) + id_end + 3;
         const status_end = std.mem.indexOfScalarPos(u8, detail, status_start, ' ') orelse detail.len;
-        try record.appendSlice(allocator, "{\"node_id\":");
-        try appendJsonString(&record, allocator, detail[id_start..id_end]);
-        try record.appendSlice(allocator, ",\"status\":");
-        try appendJsonString(&record, allocator, detail[status_start..status_end]);
+        var reason: []const u8 = "";
         if (std.mem.indexOf(u8, detail, "failed (")) |reason_start| {
             const start = reason_start + "failed (".len;
             const end = std.mem.lastIndexOfScalar(u8, detail, ')') orelse detail.len;
-            try record.appendSlice(allocator, ",\"reason\":");
-            try appendJsonString(&record, allocator, detail[start..end]);
+            reason = detail[start..end];
         } else if (std.mem.indexOf(u8, detail, "blocked (")) |reason_start| {
             const start = reason_start + "blocked (".len;
             const end = std.mem.lastIndexOfScalar(u8, detail, ')') orelse detail.len;
-            try record.appendSlice(allocator, ",\"reason\":");
-            try appendJsonString(&record, allocator, detail[start..end]);
+            reason = detail[start..end];
         }
-        try record.append(allocator, '}');
+        try out.append(allocator, .{ .node_id = detail[id_start..id_end], .status = detail[status_start..status_end], .reason = reason });
     }
-    try record.appendSlice(allocator, "]}");
-    var hash_input = try allocator.dupe(u8, record.items);
-    const hash_pos = std.mem.indexOf(u8, hash_input, "\"record_hash\":\"\"") orelse return error.InvalidLedger;
-    _ = hash_pos;
-    var digest: [32]u8 = undefined;
-    Sha256.hash(hash_input, &digest, .{});
-    const record_hash = std.fmt.bytesToHex(digest, .lower);
-    const replacement = try std.fmt.allocPrint(allocator, "\"record_hash\":\"{s}\"", .{&record_hash});
-    const marker = "\"record_hash\":\"\"";
-    const marker_pos = std.mem.indexOf(u8, hash_input, marker).?;
-    var final = std.ArrayList(u8).empty;
-    try final.appendSlice(allocator, hash_input[0..marker_pos]);
-    try final.appendSlice(allocator, replacement);
-    try final.appendSlice(allocator, hash_input[marker_pos + marker.len ..]);
-    try final.append(allocator, '\n');
-    var output = std.ArrayList(u8).empty;
-    if (old.len != 0) {
-        try output.appendSlice(allocator, old);
-        if (old[old.len - 1] != '\n') try output.append(allocator, '\n');
-    }
-    try output.appendSlice(allocator, final.items);
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } });
+    return try out.toOwnedSlice(allocator);
 }
 
+fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [64]u8, binding: [64]u8, details: []const []const u8) !void {
+    const io = std.Options.debug_io;
+    const old: []const u8 = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
+        error.FileNotFound => "",
+        else => return error.InvalidLedger,
+    };
+    var count: u64 = 0;
+    var last_hash: []const u8 = ledger_zero_hash;
+    if (old.len != 0) {
+        if (old[old.len - 1] != '\n') return error.InvalidLedger;
+        var start: usize = 0;
+        while (start < old.len) {
+            const newline = std.mem.indexOfScalarPos(u8, old, start, '\n') orelse return error.InvalidLedger;
+            const trimmed = trimGoSpace(old[start..newline]);
+            start = newline + 1;
+            if (trimmed.len == 0) return error.InvalidLedger;
+            if (trimmed.len > ledger_max_record_size + 1) return error.InvalidLedger;
+            const record = try parseLedgerRecord(allocator, trimmed);
+            const expected_seq = count + 1;
+            const expected_prev = if (count == 0) ledger_zero_hash else last_hash;
+            try validateLedgerRecord(record, expected_seq, expected_prev);
+            const expected_hash = try ledgerRecordHash(allocator, record);
+            if (!std.mem.eql(u8, record.record_hash, &expected_hash)) return error.InvalidLedger;
+            last_hash = record.record_hash;
+            count += 1;
+        }
+    }
+    const results = try ledgerResults(allocator, details);
+    const seq = count + 1;
+    const previous = if (count == 0) ledger_zero_hash else last_hash;
+    const pending = LedgerRecord{
+        .schema_version = "ownscout-ledger-v1",
+        .seq = seq,
+        .prev_record_hash = previous,
+        .record_hash = ledger_zero_hash,
+        .envelope_sha256 = &envelope_hash,
+        .packet_binding_sha256 = &binding,
+        .ownscout_version = "0.1.0",
+        .node_results = results,
+    };
+    try validateLedgerRecord(pending, seq, previous);
+    const record_hash = try ledgerRecordHash(allocator, pending);
+    const final = LedgerRecord{
+        .schema_version = pending.schema_version,
+        .seq = pending.seq,
+        .prev_record_hash = pending.prev_record_hash,
+        .record_hash = &record_hash,
+        .envelope_sha256 = pending.envelope_sha256,
+        .packet_binding_sha256 = pending.packet_binding_sha256,
+        .ownscout_version = pending.ownscout_version,
+        .node_results = pending.node_results,
+    };
+    const encoded = try ledgerRecordJson(allocator, final, true);
+    var output = std.ArrayList(u8).empty;
+    if (old.len != 0) try output.appendSlice(allocator, old);
+    try output.appendSlice(allocator, encoded);
+    try output.append(allocator, '\n');
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } });
+}
 test "evidence verification hashes selected lines and normalizes CRLF" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -1425,7 +1886,7 @@ test "relocation window hashing agrees with the reference line hashing" {
     const allocator = arena.allocator();
     // The relocation path locates lines from a precomputed start index while
     // verification walks the file from byte zero; the two must agree on every
-    // range of every awkward payload. This is the differential oracle.
+    // range of every awkward payload. This is the differential reference.
     const payloads = [_][]const u8{
         "",                              "\n",
         "\n\n",                          "a",
@@ -1621,12 +2082,12 @@ test "decode precedence follows document order in both directions" {
 
     // An unknown field before the wrongly-typed one wins.
     const unknown_first = try json.Parser.parse(allocator, "{\"budget\":{\"aaa_unknown\":1,\"max_evidence\":\"notanint\"}}");
-    try std.testing.expectEqual(DecodeIssue.unknown, firstIssueKind(unknown_first));
+    try std.testing.expectEqual(DecodeIssue.unknown, firstIssueKind(unknown_first, true));
     try std.testing.expectEqualStrings("aaa_unknown", unknownPacketField(unknown_first).?);
 
     // A wrongly-typed field before the unknown one wins instead.
     const unknown_last = try json.Parser.parse(allocator, "{\"budget\":{\"max_evidence\":\"notanint\",\"zzz_unknown\":1}}");
-    try std.testing.expectEqual(DecodeIssue.wrong_type, firstIssueKind(unknown_last));
+    try std.testing.expectEqual(DecodeIssue.wrong_type, firstIssueKind(unknown_last, true));
 
     // The same two shapes reach the reference messages end to end.
     var tmp = std.testing.tmpDir(.{});
@@ -1643,6 +2104,163 @@ test "decode precedence follows document order in both directions" {
     const last_result = try run(allocator, &.{ "contract", "validate", "--packet", last_path });
     try std.testing.expectEqual(@as(u8, 2), last_result.code);
     try std.testing.expect(std.mem.indexOf(u8, last_result.output, "json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int") != null);
+}
+
+test "field names fold like encoding/json" {
+    try std.testing.expect(gofold.foldedEqual("SCHEMA_VERSION", "schema_version"));
+    try std.testing.expect(gofold.foldedEqual("LiNe_EnD", "line_end"));
+    try std.testing.expect(!gofold.foldedEqual("schema_version", "schema_versions"));
+    // A non-ASCII rune folds to the minimum of its SimpleFold orbit. That can
+    // never equal an ASCII tag, except for the two runes whose orbit contains
+    // one: long s folds to S and KELVIN folds to K.
+    try std.testing.expectEqual(@as(u21, 'S'), gofold.foldRune(0x17F));
+    try std.testing.expectEqual(@as(u21, 'K'), gofold.foldRune(0x212A));
+    try std.testing.expectEqual(@as(u21, 0xC9), gofold.foldRune(0xE9)); // é -> É
+    try std.testing.expect(gofold.foldedEqual("ſchema_version", "schema_version"));
+    try std.testing.expect(!gofold.foldedEqual("öutcome", "outcome"));
+}
+
+test "contract and evidence fold field names while node stays exact" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "case.json", .data = "{\"SCHEMA_VERSION\":\"v1\",\"OUTCOME\":\"complete\"}" });
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/case.json", .{tmp.sub_path});
+
+    // The contract decoder folds, so the case-varied keys are known and the
+    // packet reaches contract validation (missing fields) instead of failing
+    // to decode.
+    const contract_result = try run(allocator, &.{ "contract", "validate", "--packet", path });
+    try std.testing.expectEqual(@as(u8, 1), contract_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "packet is invalid") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "unknown field") == null);
+
+    // node verify decodes through internal/nodepacket, which is exact only.
+    const node_result = try run(allocator, &.{ "node", "verify", "--repo", ".", "--packet", path, "--envelope", "e.json", "--ledger", "l.jsonl" });
+    try std.testing.expectEqual(@as(u8, 2), node_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, node_result.output, "strict packet decoding failed") != null);
+}
+
+test "type errors on case-varied keys keep the input spelling" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cases = [_][2][]const u8{
+        .{ "top.json", "{\"PACKET_ID\":5}" },
+        .{ "evidence.json", "{\"evidence\":[{\"LINE_START\":\"x\"}]}" },
+        .{ "budget.json", "{\"budget\":{\"MAX_BYTES\":\"x\"}}" },
+        .{ "freshness.json", "{\"FRESHNESS\":{\"CURRENT\":\"x\"}}" },
+    };
+    const expected = [_][]const u8{
+        "Packet.PACKET_ID of type string",
+        "Packet.evidence.0.LINE_START of type int",
+        "Packet.budget.MAX_BYTES of type int64",
+        "Packet.FRESHNESS.CURRENT of type bool",
+    };
+    for (cases, expected) |case, want| {
+        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = case[0], .data = case[1] });
+        const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, case[0] });
+        const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
+        try std.testing.expectEqual(@as(u8, 2), response.code);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, want) != null);
+    }
+}
+
+test "non-integral and out-of-range integers name the literal" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cases = [_][2][]const u8{
+        .{ "{\"budget\":{\"max_evidence\":1.5}}", "json: cannot unmarshal number 1.5 into Go struct field Packet.budget.max_evidence of type int" },
+        .{ "{\"budget\":{\"max_bytes\":1e2}}", "json: cannot unmarshal number 1e2 into Go struct field Packet.budget.max_bytes of type int64" },
+        .{ "{\"budget\":{\"used_evidence\":99999999999999999999}}", "json: cannot unmarshal number 99999999999999999999 into Go struct field Packet.budget.used_evidence of type int" },
+        .{ "{\"evidence\":[{\"line_start\":1.5}]}", "json: cannot unmarshal number 1.5 into Go struct field Packet.evidence.0.line_start of type int" },
+        .{ "{\"budget\":{\"max_evidence\":\"x\"}}", "json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int" },
+    };
+    for (cases, 0..) |case, index| {
+        const name = try std.fmt.allocPrint(allocator, "num{d}.json", .{index});
+        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = name, .data = case[0] });
+        const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, name });
+        const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
+        try std.testing.expectEqual(@as(u8, 2), response.code);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, case[1]) != null);
+    }
+}
+
+test "envelope identifiers follow node.validateIdentifier" {
+    try std.testing.expect(validIdentifier("a"));
+    try std.testing.expect(validIdentifier("packet-1"));
+    try std.testing.expect(validIdentifier("a.b_c-d:e"));
+    try std.testing.expect(validIdentifier("Z9"));
+    try std.testing.expect(!validIdentifier(""));
+    try std.testing.expect(!validIdentifier("-env-1")); // '.' '_' '-' ':' not first
+    try std.testing.expect(!validIdentifier(".env"));
+    try std.testing.expect(!validIdentifier("env%lope-1"));
+    try std.testing.expect(!validIdentifier("no de"));
+    try std.testing.expect(validIdentifier("e" ** 128));
+    try std.testing.expect(!validIdentifier("e" ** 129));
+}
+
+test "strict node decoding rejects duplicate keys, nulls, and invalid utf8" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Duplicate keys: encoding/json keeps the last, nodepacket rejects.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "dup.json", .data = "{\"packet_id\":\"a\",\"packet_id\":\"b\"}" });
+    const dup_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/dup.json", .{tmp.sub_path});
+    try std.testing.expectEqualStrings("b", (try loadPacket(allocator, dup_path)).packet_id);
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, dup_path));
+
+    // An explicit null is absent for the contract path and rejected by node.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "null.json", .data = "{\"issued_at\":null}" });
+    const null_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/null.json", .{tmp.sub_path});
+    try std.testing.expectEqualStrings("", (try loadPacket(allocator, null_path)).issued_at);
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, null_path));
+
+    // Invalid UTF-8: the contract path substitutes U+FFFD, node rejects.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "bad.json", .data = "{\"packet_id\":\"a\xff\"}" });
+    const bad_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/bad.json", .{tmp.sub_path});
+    try std.testing.expectEqualStrings("a\u{fffd}", (try loadPacket(allocator, bad_path)).packet_id);
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, bad_path));
+
+    // A lone surrogate escape is U+FFFD for the contract path and rejected by
+    // node, which checks the raw escapes before tokenizing.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "surrogate.json", .data = "{\"packet_id\":\"\\uD800\"}" });
+    const surrogate_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/surrogate.json", .{tmp.sub_path});
+    try std.testing.expectEqualStrings("\u{fffd}", (try loadPacket(allocator, surrogate_path)).packet_id);
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, surrogate_path));
+}
+
+test "strict node decoding accepts the exact valid shape" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const valid = "{\"packet_id\":\"p\",\"freshness\":{\"current\":true},\"budget\":{\"max_evidence\":1},\"evidence\":[{\"line_start\":1}],\"degradations\":[\"x\"]}";
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "valid.json", .data = valid });
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/valid.json", .{tmp.sub_path});
+    const packet = try loadNodePacket(allocator, path);
+    try std.testing.expectEqualStrings("p", packet.packet_id);
+    try std.testing.expect(packet.freshness.current);
+    try std.testing.expectEqual(@as(i64, 1), packet.budget.max_evidence);
+    try std.testing.expectEqual(@as(i64, 1), packet.evidence[0].line_start);
+    // A case-varied or wrongly typed key is rejected by the strict path.
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "case.json", .data = "{\"PACKET_ID\":\"p\"}" });
+    const case_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/case.json", .{tmp.sub_path});
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, case_path));
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "frac.json", .data = "{\"budget\":{\"max_evidence\":1.5}}" });
+    const frac_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/frac.json", .{tmp.sub_path});
+    try std.testing.expectError(error.WrongType, loadNodePacket(allocator, frac_path));
 }
 
 test "envelope validation rejects duplicate nodes and cycles" {
@@ -1693,6 +2311,130 @@ test "ledger append chains sequence and previous hash" {
     try std.testing.expectEqualStrings("1", first.objectField("seq").?.number);
     try std.testing.expectEqualStrings("2", second.objectField("seq").?.number);
     try std.testing.expectEqualStrings(first.objectField("record_hash").?.string, second.objectField("prev_record_hash").?.string);
+}
+
+fn replaceFirst(allocator: std.mem.Allocator, text: []const u8, needle: []const u8, replacement: []const u8) ![]u8 {
+    const index = std.mem.indexOf(u8, text, needle) orelse return error.NotFound;
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(allocator, text[0..index]);
+    try out.appendSlice(allocator, replacement);
+    try out.appendSlice(allocator, text[index + needle.len ..]);
+    return try out.toOwnedSlice(allocator);
+}
+
+test "ledger canonical hash matches the reference encoding" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const build_result = [_]LedgerNodeResult{.{ .node_id = "build", .status = "evidence_current" }};
+    const record = LedgerRecord{
+        .schema_version = "ownscout-ledger-v1",
+        .seq = 1,
+        .prev_record_hash = ledger_zero_hash,
+        .record_hash = "",
+        .envelope_sha256 = "2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3",
+        .packet_binding_sha256 = "63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca",
+        .ownscout_version = "0.1.0",
+        .node_results = &build_result,
+    };
+    try std.testing.expectEqualStrings("15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6", &(try ledgerRecordHash(allocator, record)));
+
+    // reason is included only when non-empty, and its quotes are escaped.
+    const failed = [_]LedgerNodeResult{
+        .{ .node_id = "a", .status = "failed", .reason = "evidence \"evidence-1\" is missing or not verified" },
+        .{ .node_id = "b", .status = "blocked", .reason = "dependency \"a\" is not evidence_current" },
+    };
+    const stale = LedgerRecord{
+        .schema_version = "ownscout-ledger-v1",
+        .seq = 1,
+        .prev_record_hash = ledger_zero_hash,
+        .record_hash = "",
+        .envelope_sha256 = "3fd0720a467d8d703a0f21719b904a94bd3de06f0da3602084222ea5f392ca36",
+        .packet_binding_sha256 = "6388241add28c6bcf26d1a146a67d47331076fc1acbbc4a5c56701527db2c337",
+        .ownscout_version = "0.1.0",
+        .node_results = &failed,
+    };
+    try std.testing.expectEqualStrings("93fb4f66b99266af232b7f5b9f2a4990528f88222a0702549f4d4f439cf86570", &(try ledgerRecordHash(allocator, stale)));
+
+    // json.Marshal escaping: HTML characters, the named C escapes (including
+    // \b and \f), and U+2028/U+2029 all have to match for the hash to line up.
+    const special = [_]LedgerNodeResult{.{ .node_id = "build", .status = "failed", .reason = "<a>&\"b\\c\x08\x0c\u{2028}\u{2029}z\ttab" }};
+    const escaped = LedgerRecord{
+        .schema_version = "ownscout-ledger-v1",
+        .seq = 1,
+        .prev_record_hash = ledger_zero_hash,
+        .record_hash = "",
+        .envelope_sha256 = "2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3",
+        .packet_binding_sha256 = "63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca",
+        .ownscout_version = "0.1.0",
+        .node_results = &special,
+    };
+    try std.testing.expectEqualStrings("6442268913c9a628cec5a076b5dad248cb6c0b6717db1b9378b9e5728aeff9f7", &(try ledgerRecordHash(allocator, escaped)));
+}
+
+test "ledger validation rejects forged records and preserves the chain" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/ledger.jsonl", .{tmp.sub_path});
+    const envelope = [_]u8{'a'} ** 64;
+    const binding = [_]u8{'b'} ** 64;
+    const ones = [_]u8{'1'} ** 64;
+    const effs = [_]u8{'f'} ** 64;
+    const details = [_][]const u8{"node \"build\": evidence_current"};
+
+    try appendLedger(allocator, path, envelope, binding, &details);
+    const good = try std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20));
+    const marker = "\"record_hash\":\"";
+    const hash_start = std.mem.indexOf(u8, good, marker).? + marker.len;
+    const stored_hash = good[hash_start .. hash_start + 64];
+
+    const forgeries = [_][2][]const u8{
+        .{ stored_hash, ledger_zero_hash }, // forged record_hash
+        .{ "\"seq\":1", "\"seq\":99" }, // broken sequence
+        .{ ledger_zero_hash, &effs }, // forged prev_record_hash
+        .{ "\"schema_version\":\"ownscout-ledger-v1\"", "\"schema_version\":\"WRONG\"" },
+        .{ "\"status\":\"evidence_current\"", "\"status\":\"bogus\"" },
+        .{ "\"schema_version\"", "\"SCHEMA_VERSION\"" }, // non-canonical field name
+        .{ &envelope, &ones }, // forged envelope_sha256 (hash no longer matches)
+    };
+    for (forgeries) |forgery| {
+        const text = try replaceFirst(allocator, good, forgery[0], forgery[1]);
+        try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = text, .flags = .{ .truncate = true, .permissions = .default_file } });
+        try std.testing.expectError(error.InvalidLedger, appendLedger(allocator, path, envelope, binding, &details));
+    }
+
+    // An unmodified ledger still appends.
+    try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = good, .flags = .{ .truncate = true, .permissions = .default_file } });
+    try appendLedger(allocator, path, envelope, binding, &details);
+    const appended = try std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20));
+    try std.testing.expect(appended.len > good.len);
+    try std.testing.expect(std.mem.startsWith(u8, appended, good));
+}
+
+test "ledger validation rejects malformed framing" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/ledger.jsonl", .{tmp.sub_path});
+    const envelope = [_]u8{'a'} ** 64;
+    const binding = [_]u8{'b'} ** 64;
+    const details = [_][]const u8{"node \"build\": evidence_current"};
+
+    const frames = [_][]const u8{
+        "{}", // no trailing LF
+        "\n", // blank line
+        "not a ledger record\n", // not JSON
+        "{\"schema_version\":\"ownscout-ledger-v1\"}\n", // missing fields
+    };
+    for (frames) |frame| {
+        try std.Io.Dir.cwd().writeFile(std.Options.debug_io, .{ .sub_path = path, .data = frame, .flags = .{ .truncate = true, .permissions = .default_file } });
+        try std.testing.expectError(error.InvalidLedger, appendLedger(allocator, path, envelope, binding, &details));
+    }
 }
 
 test "CLI exposes stable help and version output" {

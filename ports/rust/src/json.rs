@@ -37,12 +37,50 @@ pub fn unique_object(fields: &[(String, Value)]) -> Result<BTreeMap<&str, &Value
     Ok(result)
 }
 
-pub fn object_map(fields: &[(String, Value)]) -> BTreeMap<&str, &Value> {
-    let mut result = BTreeMap::new();
-    for (key, value) in fields {
-        result.insert(key.as_str(), value);
+// push_go_utf8 decodes a run of non-ASCII bytes the way Go's json.unquoteBytes
+// does: utf8.DecodeRune yields U+FFFD and advances a single byte for every
+// invalid byte, so a truncated sequence becomes one replacement rune per byte
+// rather than one for the whole run.
+fn push_go_utf8(out: &mut String, bytes: &[u8]) {
+    let mut index = 0;
+    while index < bytes.len() {
+        match std::str::from_utf8(&bytes[index..]) {
+            Ok(rest) => {
+                out.push_str(rest);
+                return;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                if valid > 0 {
+                    out.push_str(std::str::from_utf8(&bytes[index..index + valid]).unwrap());
+                    index += valid;
+                }
+                if index < bytes.len() {
+                    out.push('\u{FFFD}');
+                    index += 1;
+                }
+            }
+        }
     }
-    result
+}
+
+// peek_hex4 decodes exactly four hex digits without advancing, or returns None
+// when the input does not start with four hex digits.
+fn peek_hex4(data: &[u8]) -> Option<u16> {
+    if data.len() < 4 {
+        return None;
+    }
+    let mut value = 0u16;
+    for &digit in &data[..4] {
+        value = value.checked_mul(16)?
+            + match digit {
+                b'0'..=b'9' => (digit - b'0') as u16,
+                b'a'..=b'f' => (digit - b'a' + 10) as u16,
+                b'A'..=b'F' => (digit - b'A' + 10) as u16,
+                _ => return None,
+            };
+    }
+    Some(value)
 }
 
 struct Parser<'a> {
@@ -107,24 +145,38 @@ impl<'a> Parser<'a> {
                         b't' => out.push('\t'),
                         b'u' => {
                             let hi = self.hex4()?;
-                            if (0xd800..=0xdbff).contains(&hi) {
-                                if self.data.get(self.pos..self.pos + 2) != Some(b"\\u") {
-                                    return Err("invalid Unicode escape".into());
+                            // Go's unquoteBytes substitutes U+FFFD for an
+                            // unpaired surrogate instead of failing, and it
+                            // does not consume a following escape that is not
+                            // a valid low surrogate.
+                            let combined = if (0xd800..=0xdbff).contains(&hi)
+                                && self.data.get(self.pos..self.pos + 2) == Some(b"\\u")
+                            {
+                                match peek_hex4(&self.data[self.pos + 2..]) {
+                                    Some(lo) if (0xdc00..=0xdfff).contains(&lo) => {
+                                        let code = 0x10000
+                                            + ((hi - 0xd800) as u32) * 0x400
+                                            + (lo - 0xdc00) as u32;
+                                        let c = char::from_u32(code);
+                                        if c.is_some() {
+                                            self.pos += 6;
+                                        }
+                                        c
+                                    }
+                                    _ => None,
                                 }
-                                self.pos += 2;
-                                let lo = self.hex4()?;
-                                if !(0xdc00..=0xdfff).contains(&lo) {
-                                    return Err("invalid Unicode escape".into());
-                                }
-                                let code =
-                                    0x10000 + ((hi - 0xd800) as u32) * 0x400 + (lo - 0xdc00) as u32;
-                                out.push(char::from_u32(code).ok_or("invalid Unicode escape")?);
-                            } else if (0xdc00..=0xdfff).contains(&hi) {
-                                return Err("invalid Unicode escape".into());
                             } else {
-                                out.push(
-                                    char::from_u32(hi as u32).ok_or("invalid Unicode escape")?,
-                                );
+                                None
+                            };
+                            match combined {
+                                Some(c) => out.push(c),
+                                None if (0xd800..=0xdfff).contains(&hi) => out.push('\u{FFFD}'),
+                                None => {
+                                    out.push(
+                                        char::from_u32(hi as u32)
+                                            .ok_or("invalid Unicode escape")?,
+                                    );
+                                }
                             }
                         }
                         _ => return Err("invalid JSON".into()),
@@ -136,12 +188,7 @@ impl<'a> Parser<'a> {
                     while self.pos < self.data.len() && self.data[self.pos] >= 0x80 {
                         self.pos += 1;
                     }
-                    let bytes = if self.pos == start + 1 {
-                        &self.data[start..self.pos]
-                    } else {
-                        &self.data[start..self.pos]
-                    };
-                    out.push_str(&String::from_utf8_lossy(bytes));
+                    push_go_utf8(&mut out, &self.data[start..self.pos]);
                 }
             }
         }
@@ -258,5 +305,27 @@ impl<'a> Parser<'a> {
                 _ => return Err("invalid JSON".into()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_utf8_decodes_one_replacement_per_byte() {
+        let mut out = String::new();
+        push_go_utf8(&mut out, b"\xf0\x9f");
+        assert_eq!(out, "\u{fffd}\u{fffd}");
+        out.clear();
+        push_go_utf8(&mut out, b"\xe0\xa0");
+        assert_eq!(out, "\u{fffd}\u{fffd}");
+        out.clear();
+        // A valid encoding of U+FFFD is copied, not treated as an error.
+        push_go_utf8(&mut out, b"\xef\xbf\xbd");
+        assert_eq!(out, "\u{fffd}");
+        out.clear();
+        push_go_utf8(&mut out, b"caf\xc3\xa9");
+        assert_eq!(out, "café");
     }
 }

@@ -67,9 +67,96 @@ export function goQuote(s:string):string {
   }
   return out+'"';
 }
+// goFoldName mirrors encoding/json's foldName for matching a decoded key
+// against a schema field name. Go folds ASCII a-z to A-Z and every non-ASCII
+// rune to the minimum of its unicode.SimpleFold orbit. These schemas use ASCII
+// field names, so a non-ASCII rune can only ever help a match when SimpleFold
+// folds it into ASCII - exactly two runes do, U+017F (long s) and U+212A (Kelvin
+// sign). Every other rune is left unchanged, which is observationally identical
+// to Go for an ASCII field name; in particular "öutcome" folds to "Öutcome" in
+// Go and "öutcome" here, neither of which equals "OUTCOME".
+export function goFoldName(s:string):string {
+  let out="";
+  for (const ch of s) {
+    const r=ch.codePointAt(0)!;
+    if (r>=0x61 && r<=0x7a) out+=String.fromCharCode(r-0x20);
+    else if (r===0x17f) out+="S";
+    else if (r===0x212a) out+="K";
+    else out+=ch;
+  }
+  return out;
+}
 function utf8(data: Buffer): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(data); }
   catch { throw new Error("input is not valid UTF-8"); }
+}
+// Go's utf8.DecodeRune: a valid rune is returned with its width, and every
+// malformed sequence is reported as RuneError with width 1. TextDecoder instead
+// collapses a maximal subpart into a single U+FFFD, so a raw "\xf0\x9f" becomes
+// one replacement rune where Go produces two. The tables below are the first
+// byte-class and continuation-accept tables from Go's unicode/utf8.
+const GO_AS=0xf0, GO_XX=0xf1, GO_S1=0x02, GO_S2=0x13, GO_S3=0x03, GO_S4=0x23, GO_S5=0x34, GO_S6=0x04, GO_S7=0x44;
+const goAccept=[{lo:0x80,hi:0xbf},{lo:0xa0,hi:0xbf},{lo:0x80,hi:0x9f},{lo:0x90,hi:0xbf},{lo:0x80,hi:0x8f}];
+function goFirstByte(b:number):number {
+  if (b<0x80) return GO_AS;
+  if (b<0xc2) return GO_XX;
+  if (b<0xe0) return GO_S1;
+  if (b===0xe0) return GO_S2;
+  if (b<0xed) return GO_S3;
+  if (b===0xed) return GO_S4;
+  if (b<0xf0) return GO_S3;
+  if (b===0xf0) return GO_S5;
+  if (b<0xf4) return GO_S6;
+  if (b===0xf4) return GO_S7;
+  return GO_XX;
+}
+export function goDecodeRune(data:Buffer,off:number):{r:number;size:number} {
+  const n=data.length-off;
+  if (n<1) return {r:0xfffd,size:0};
+  const p0=data[off], x=goFirstByte(p0);
+  if (x===GO_AS) return {r:p0,size:1};
+  if (x===GO_XX) return {r:0xfffd,size:1};
+  const sz=x&7, acc=goAccept[x>>4];
+  if (n<sz) return {r:0xfffd,size:1};
+  const b1=data[off+1];
+  if (b1<acc.lo || acc.hi<b1) return {r:0xfffd,size:1};
+  if (sz<=2) return {r:((p0&0x1f)<<6)|(b1&0x3f),size:2};
+  const b2=data[off+2];
+  if (b2<0x80 || 0xbf<b2) return {r:0xfffd,size:1};
+  if (sz<=3) return {r:((p0&0x0f)<<12)|((b1&0x3f)<<6)|(b2&0x3f),size:3};
+  const b3=data[off+3];
+  if (b3<0x80 || 0xbf<b3) return {r:0xfffd,size:1};
+  return {r:((p0&0x07)<<18)|((b1&0x3f)<<12)|((b2&0x3f)<<6)|(b3&0x3f),size:4};
+}
+// goDecodeUtf8 decodes a whole buffer with Go's replacement semantics. ASCII
+// runs are copied in bulk so a large all-ASCII packet stays cheap.
+export function goDecodeUtf8(data:Buffer):string {
+  let out="";
+  let i=0;
+  while (i<data.length) {
+    if (data[i]<0x80) {
+      let j=i+1;
+      while (j<data.length && data[j]<0x80) j++;
+      out+=data.toString("latin1",i,j);
+      i=j;
+      continue;
+    }
+    const decoded=goDecodeRune(data,i);
+    out+=String.fromCodePoint(decoded.r);
+    i+=decoded.size;
+  }
+  return out;
+}
+
+// resolveSchemaField returns the schema key a decoded object key names. An
+// exact own-property match wins; when fold is set, a Go foldName comparison is
+// the fallback, mirroring encoding/json's byExactName then byFoldedName lookup.
+function resolveSchemaField(schema:AnyObj,key:string,fold:boolean):string|undefined {
+  if (Object.prototype.hasOwnProperty.call(schema,key)) return key;
+  if (!fold) return undefined;
+  const folded=goFoldName(key);
+  for (const candidate of Object.keys(schema)) if (goFoldName(candidate)===folded) return candidate;
+  return undefined;
 }
 
 class StrictParser {
@@ -78,10 +165,15 @@ class StrictParser {
   private readonly rejectDuplicates: boolean;
   private readonly goErrors: boolean;
   private readonly defaultNulls: boolean;
-  constructor(s: string, rejectDuplicates = true, goErrors = false, defaultNulls = false) {
+  private readonly foldFields: boolean;
+  private readonly rejectNull: boolean;
+  constructor(s: string, rejectDuplicates = true, goErrors = false, defaultNulls = false, foldFields = false, rejectNull = false) {
     this.s = s; this.rejectDuplicates = rejectDuplicates; this.goErrors = goErrors; this.defaultNulls = defaultNulls;
+    this.foldFields = foldFields; this.rejectNull = rejectNull;
   }
-  private ws() { while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++; }
+  // JSON whitespace is exactly space, tab, LF and CR. JavaScript's \s also
+  // matches \v, \f and NBSP, which encoding/json rejects.
+  private ws() { while (this.i < this.s.length) { const c=this.s.charCodeAt(this.i); if (c===0x20||c===0x09||c===0x0a||c===0x0d) this.i++; else break; } }
   private fail(msg = "invalid JSON"): never { throw new Error(msg); }
   private wireType(): string {
     if (this.s.startsWith("null", this.i)) return "null";
@@ -118,6 +210,9 @@ class StrictParser {
     this.requireType(schema, fieldPath, goType);
     if (this.s.startsWith("null", this.i)) {
       this.i += 4;
+      // The strict node packet decoder rejects an explicit null for any field;
+      // encoding/json (contract/evidence) tolerates it and leaves a zero value.
+      if (this.rejectNull) this.fail("unexpected null");
       if (!this.defaultNulls) return null;
       if (schema?.array) return null;
       if (schema && typeof schema === "object") return {};
@@ -166,11 +261,16 @@ class StrictParser {
         const key = this.string(); this.ws();
         if (seen.has(key) && this.rejectDuplicates) this.fail("duplicate key");
         seen.add(key);
-        if (!(key in schema)) this.fail(`unknown field ${goQuote(key)}`);
+        // The CLI packet path falls back to a case-folded match, exactly as
+        // encoding/json does; the node-envelope decoder matches exactly only.
+        const field=resolveSchemaField(schema,key,this.foldFields);
+        if (field===undefined) this.fail(`unknown field ${goQuote(key)}`);
         this.ws();
         if (this.s[this.i++] !== ":") this.fail();
+        // The value is stored under the canonical field, but Go's type-error
+        // message names the key exactly as it appeared in the document.
         const childPath = `${fieldPath}.${key}`;
-        out[key] = this.value(schema[key], childPath, goFieldType(schema, key)); this.ws();
+        out[field] = this.value(schema[field], childPath, goFieldType(schema, field)); this.ws();
         if (this.s[this.i] === "}") { this.i++; return out; }
         if (this.s[this.i++] !== ",") this.fail();
         this.ws();
@@ -233,27 +333,56 @@ function goFieldType(schema: any, key: string): string {
   if (key === "max_bytes" || key === "used_bytes") return "int64";
   return "string";
 }
-function decodePacket(data: Buffer, rejectDuplicates = true, strictUtf8 = true): AnyObj {
-  if (data.length > MAX_INPUT) throw new Error("input exceeds 1 MiB");
-  const text = strictUtf8 ? utf8(data) : new TextDecoder("utf-8").decode(data);
-  // Reject unpaired UTF-16 escapes, matching the Go decoder's preflight.
-  for (let i = 0; strictUtf8 && i < text.length - 1; i++) if (text[i] === "\\" && text[i + 1] === "u") {
-    const h = text.slice(i + 2, i + 6);
-    if (!/^[0-9a-fA-F]{4}$/.test(h)) throw new Error("invalid Unicode escape");
-    const n = parseInt(h, 16);
-    if (n >= 0xdc00 && n <= 0xdfff) throw new Error("invalid Unicode escape");
-    if (n >= 0xd800 && n <= 0xdbff) {
-      if (text.slice(i + 6, i + 12) !== "\\u" || !/^[0-9a-fA-F]{4}$/.test(text.slice(i + 8, i + 12)) ||
-          parseInt(text.slice(i + 8, i + 12), 16) < 0xdc00 || parseInt(text.slice(i + 8, i + 12), 16) > 0xdfff)
-        throw new Error("invalid Unicode escape");
-      i += 6;
+// hexEscape4 reads four hex digits at s[at..at+3], or -1 when any is not hex,
+// mirroring nodepacket.hexEscape.
+function hexEscape4(s:string,at:number):number {
+  if (at+4>s.length) return -1;
+  let value=0;
+  for (let k=0;k<4;k++) {
+    const c=s.charCodeAt(at+k);
+    value<<=4;
+    if (c>=0x30 && c<=0x39) value|=c-0x30;
+    else if (c>=0x61 && c<=0x66) value|=c-0x61+10;
+    else if (c>=0x41 && c<=0x46) value|=c-0x41+10;
+    else return -1;
+  }
+  return value;
+}
+// validUnicodeEscapes mirrors nodepacket.validUnicodeEscapes: encoding/json
+// replaces unpaired surrogate escapes with U+FFFD, but the strict node decoder
+// rejects them before tokenization. An escaped backslash is skipped exactly as
+// Go skips it, so "\ud83c\udf89" is accepted and a lone "\ud800" is not.
+function validUnicodeEscapes(s:string):boolean {
+  for (let index=0; index<s.length; index++) {
+    if (s[index] !== "\\") continue;
+    index++;
+    if (index >= s.length || s[index] !== "u") continue;
+    const value=hexEscape4(s,index+1);
+    if (value < 0) return false;
+    index += 4;
+    if (value >= 0xdc00 && value <= 0xdfff) return false;
+    if (value >= 0xd800 && value <= 0xdbff) {
+      if (index+6 >= s.length || s[index+1] !== "\\" || s[index+2] !== "u") return false;
+      const low=hexEscape4(s,index+3);
+      if (low < 0 || low < 0xdc00 || low > 0xdfff) return false;
+      index += 6;
     }
   }
-  return new StrictParser(text, rejectDuplicates, !rejectDuplicates, true).parse(packetSchema);
+  return true;
+}
+function decodePacket(data: Buffer, rejectDuplicates = true, strictUtf8 = true, foldFields = false, rejectNull = false): AnyObj {
+  if (data.length > MAX_INPUT) throw new Error("input exceeds 1 MiB");
+  const text = strictUtf8 ? utf8(data) : goDecodeUtf8(data);
+  // Reject unpaired UTF-16 escapes, matching the Go decoder's preflight.
+  if (strictUtf8 && !validUnicodeEscapes(text)) throw new Error("invalid Unicode escape");
+  return new StrictParser(text, rejectDuplicates, !rejectDuplicates, true, foldFields, rejectNull).parse(packetSchema);
 }
 function decodePacketValid(data: Buffer): { packet: AnyObj; violations: Violation[] } {
   try {
-    const packet = decodePacket(data);
+    // The node command uses the strict nodepacket decoder: exact field names,
+    // duplicate keys and explicit nulls are rejected, and the input must be
+    // valid UTF-8. This is deliberately not the lenient loadPacket path.
+    const packet = decodePacket(data, true, true, false, true);
     return { packet, violations: validatePacket(packet) };
   } catch (e: any) {
     return { packet: {}, violations: [{ rule: "packet_decode", field: "packet", message: "nodepacket: packet: " + e.message }] };
@@ -313,12 +442,16 @@ function validatePacket(p: AnyObj): Violation[] {
   {
     const evidenceList = Array.isArray(p.evidence) ? p.evidence : [];
     for (let i=0;i<evidenceList.length;i++) {
-      const e=evidenceList[i], f=`evidence[${i}]`;
+      // A null element decodes to Go's zero-valued struct: an empty object whose
+      // integer fields are 0, so the line range rules below fire.
+      const e=evidenceList[i]||{}, f=`evidence[${i}]`;
+      const lineStart=typeof e.line_start==="number"?e.line_start:0;
+      const lineEnd=typeof e.line_end==="number"?e.line_end:0;
       for (const k of ["evidence_id","kind","path","commit","source","content_hash","collected_at","verifier_status"])
         if (!String(e[k] ?? "").trim()) add("malformed_evidence",`${f}.${k}`,"required evidence field is missing");
-      if (e.line_start < 1) add("malformed_evidence",`${f}.line_start`,"line_start must be at least 1");
-      if (e.line_end < 1) add("malformed_evidence",`${f}.line_end`,"line_end must be at least 1");
-      if (e.line_start >= 1 && e.line_end >= 1 && e.line_end < e.line_start) add("malformed_evidence",f,"line_end must be greater than or equal to line_start");
+      if (lineStart < 1) add("malformed_evidence",`${f}.line_start`,"line_start must be at least 1");
+      if (lineEnd < 1) add("malformed_evidence",`${f}.line_end`,"line_end must be at least 1");
+      if (lineStart >= 1 && lineEnd >= 1 && lineEnd < lineStart) add("malformed_evidence",f,"line_end must be greater than or equal to line_start");
       if (!["verified","unverified","failed","unavailable","pending"].includes(e.verifier_status)) add("malformed_evidence",`${f}.verifier_status`,"unknown verifier status");
       if (p.outcome === "complete" && e.verifier_status !== "verified") add("evidence",`${f}.verifier_status`,"complete packet requires verified evidence");
     }
@@ -348,11 +481,14 @@ function packetCanonical(p: AnyObj): AnyObj {
 
 function loadPacket(pth: string): AnyObj {
   if (!fs.existsSync(pth)) throw new Error(`packet file "${pth}" does not exist`);
-  const data=fs.readFileSync(pth), trimmed=data.toString().trim();
+  const data=fs.readFileSync(pth), trimmed=goDecodeUtf8(data).trim();
   if (!jsonValid(trimmed)) throw new Error(`packet "${pth}" is not valid JSON`);
   if (!trimmed || trimmed[0] !== "{") throw new Error(`packet "${pth}" must contain a JSON object`);
   try {
-    return decodePacket(data, false, false);
+    // The CLI packet decoder matches field names case-insensitively on a fold
+    // fallback and tolerates explicit nulls, unlike the node packet decoder, so
+    // folding is opt-in here and nulls are left to become zero values.
+    return decodePacket(data, false, false, true, false);
   } catch (e:any) {
     if (e.message.startsWith("unknown field ")) {
       throw new Error(`packet "${pth}" contains an unknown JSON field: json: ${e.message}`);
@@ -651,7 +787,7 @@ function nodeCmd(a:string[],out:any):number{
   if(a[0]!=="verify")return failure(out,`unknown node subcommand '${a[0]}'`,"ownscout node --help",a.includes("--json"));
   const q=parseFlags(a.slice(1),new Set(["--repo","--packet","--envelope","--ledger"]));if(q.err)return failure(out,q.err,"ownscout node verify --help",q.j);
   for(const x of ["--repo","--packet","--envelope","--ledger"])if(!q.f[x])return failure(out,`missing required ${x} value`,"ownscout node verify --help",q.j);
-  let p:any,env:any,ord:number[],b:string;try{const pd=fs.readFileSync(q.f["--packet"]);const ed=fs.readFileSync(q.f["--envelope"]);const d=decodePacketValid(pd);if(d.violations.length){if(d.violations.length===1&&d.violations[0].rule==="packet_decode")return emit(out,q.j,{command:"node verify",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);if(d.violations.length>1)return emit(out,q.j,{command:"node verify",ok:false,summary:`packet contract failed (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the packet contract, then run node verification again."},2);}p=d.packet;try{env=parseEnvelope(ed);}catch(e:any){throw new Error("ENVELOPE_PARSE: "+e.message);}b=binding(p);ord=validateEnvelope(env,p,b);
+  let p:any,env:any,ord:number[],b:string;try{const pd=fs.readFileSync(q.f["--packet"]);const ed=fs.readFileSync(q.f["--envelope"]);const d=decodePacketValid(pd);if(d.violations.length){if(d.violations.length===1&&d.violations[0].rule==="packet_decode")return emit(out,q.j,{command:"node verify",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);return emit(out,q.j,{command:"node verify",ok:false,summary:`packet contract failed (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the packet contract, then run node verification again."},2);}p=d.packet;try{env=parseEnvelope(ed);}catch(e:any){throw new Error("ENVELOPE_PARSE: "+e.message);}b=binding(p);ord=validateEnvelope(env,p,b);
     let ledger:any;try{ledger=ledgerOpen(q.f["--ledger"],q.f["--repo"]);}catch{ return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be opened",details:["ledger open failed"],next_action:"Provide a writable ledger path outside the repository and try again."},2); }const report=verifyEvidence(q.f["--repo"],p);const ev=evaluate(env,p,b,report,ord);const results=ev.results.map((x:any)=>({node_id:x.node_id,status:x.status,...(x.reason?{reason:x.reason}:{})}));appendLedger(ledger,b,sha256(ed),results);
     const det=ev.results.map((x:any)=>`node "${x.node_id}": ${x.status}${x.reason?" ("+x.reason+")":""}`);
     return emit(out,q.j,{command:"node verify",ok:ev.ok,summary:ev.ok?"all nodes are evidence_current":"node evaluation failed",details:det,next_action:ev.ok?"The node envelope is recorded and ready for its declared workflow.":"Refresh or correct the failed evidence, then run node verification again."},ev.ok?0:1);

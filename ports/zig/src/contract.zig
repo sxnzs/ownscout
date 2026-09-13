@@ -126,7 +126,9 @@ pub fn validate(allocator: std.mem.Allocator, p: Packet) ![]Violation {
     return try out.toOwnedSlice(allocator);
 }
 
-fn field(obj: json.Value, name: []const u8) ?json.Value { return obj.objectField(name); }
+// Packet decoding uses the contract/evidence path's case-folding field match
+// (exact first, then Unicode simple fold), matching encoding/json.
+fn field(obj: json.Value, name: []const u8) ?json.Value { return obj.objectFieldFolded(name); }
 fn text(obj: json.Value, name: []const u8) ![]const u8 {
     const v = field(obj, name) orelse return "";
     if (v == .null) return "";

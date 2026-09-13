@@ -105,6 +105,21 @@ pub fn parse(data: &[u8]) -> Result<Envelope, String> {
     if nodes.is_empty() {
         return Err("nodes must contain at least one node".into());
     }
+    // Go's ParseEnvelope runs validateLimits here: evidence_ids must be a
+    // non-empty array and the envelope must stay under the total reference cap.
+    let mut total = 0usize;
+    for (i, n) in nodes.iter().enumerate() {
+        if n.evidence_ids.is_empty() {
+            return Err(format!(
+                "nodes[{}].evidence_ids must be a non-empty, non-null array",
+                i
+            ));
+        }
+        total += n.depends_on.len() + n.evidence_ids.len();
+        if total > 4096 {
+            return Err("envelope exceeds 4096 total reference limit".into());
+        }
+    }
     Ok(Envelope {
         schema_version: strv(&m, "schema_version")?,
         envelope_id: strv(&m, "envelope_id")?,
@@ -210,10 +225,11 @@ pub fn canonical_packet(p: &Packet) -> Vec<u8> {
     o.into_bytes()
 }
 pub fn validate(e: &Envelope, p: &Packet, b: &str) -> Result<Vec<usize>, String> {
-    let _envelope_id = &e.envelope_id;
     if e.schema_version != "node-envelope-v1" {
         return Err("schema_version must equal \"node-envelope-v1\"".into());
     }
+    validate_identifier("envelope_id", &e.envelope_id)?;
+    validate_identifier("packet_id", &e.packet_id)?;
     if e.packet_id != p.packet_id {
         return Err("packet_id does not match packet".into());
     }
@@ -223,20 +239,22 @@ pub fn validate(e: &Envelope, p: &Packet, b: &str) -> Result<Vec<usize>, String>
     }
     let mut evid = HashSet::new();
     for x in p.evidence.as_ref().into_iter().flatten() {
-        if !valid_id(&x.evidence_id) {
-            return Err("packet evidence_id must contain 1-128 ASCII identifier characters".into());
-        }
+        validate_identifier("packet evidence_id", &x.evidence_id)?;
         if !evid.insert(x.evidence_id.clone()) {
-            return Err(format!("duplicate packet evidence_id {:?}", x.evidence_id));
+            return Err(format!(
+                "duplicate packet evidence_id {}",
+                crate::packet::go_quote(&x.evidence_id)
+            ));
         }
     }
     let mut ix = HashMap::new();
     for (i, n) in e.nodes.iter().enumerate() {
-        if !valid_id(&n.node_id) {
-            return Err(format!("node_id {:?} is not a valid identifier", n.node_id));
-        }
+        validate_identifier("node_id", &n.node_id)?;
         if ix.insert(n.node_id.clone(), i).is_some() {
-            return Err(format!("duplicate node_id {:?}", n.node_id));
+            return Err(format!(
+                "duplicate node_id {}",
+                crate::packet::go_quote(&n.node_id)
+            ));
         }
         if n.verifier != "evidence.current" {
             return Err(format!(
@@ -302,21 +320,39 @@ pub fn validate(e: &Envelope, p: &Packet, b: &str) -> Result<Vec<usize>, String>
 fn refs(v: &[String], f: &str) -> Result<(), String> {
     let mut s = HashSet::new();
     for x in v {
-        if !valid_id(x) {
-            return Err(format!("{} {:?} is not a valid identifier", f, x));
-        }
+        validate_identifier(f, x)?;
         if !s.insert(x) {
-            return Err(format!("duplicate {} reference {:?}", f, x));
+            return Err(format!(
+                "duplicate {} reference {}",
+                f,
+                crate::packet::go_quote(x)
+            ));
         }
     }
     Ok(())
 }
-fn valid_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 128
-        && s.bytes().enumerate().all(|(i, c)| {
-            c.is_ascii_alphanumeric() || (i > 0 && matches!(c, b'.' | b'_' | b'-' | b':'))
-        })
+
+// validate_identifier mirrors internal/node/validate.go's validateIdentifier:
+// 1..128 bytes, every byte ASCII alphanumeric except that '.', '_', '-' and ':'
+// are also allowed when they are not the first byte.
+fn validate_identifier(field: &str, value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 128 {
+        return Err(format!(
+            "{} must contain 1-128 ASCII identifier characters",
+            field
+        ));
+    }
+    for (i, c) in value.bytes().enumerate() {
+        let alphanumeric = c.is_ascii_alphanumeric();
+        if !alphanumeric && (i == 0 || !matches!(c, b'.' | b'_' | b'-' | b':')) {
+            return Err(format!(
+                "{} {} is not a valid identifier",
+                field,
+                crate::packet::go_quote(value)
+            ));
+        }
+    }
+    Ok(())
 }
 pub fn evaluate(e: &Envelope, p: &Packet, b: &str, r: &Report) -> Evaluation {
     let order = match validate(e, p, b) {

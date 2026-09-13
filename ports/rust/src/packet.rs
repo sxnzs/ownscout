@@ -1,4 +1,4 @@
-use crate::json::{object, object_map, Value};
+use crate::json::{object, Value};
 
 #[derive(Clone, Default)]
 pub struct Packet {
@@ -66,8 +66,48 @@ fn unknown_field(key: &str) -> String {
     format!("unknown field {}", go_quote(key))
 }
 
+// fold_rune mirrors Go's encoding/json foldRune for the orbits that can reach
+// ASCII. Every declared field name is plain ASCII, so a key can only
+// fold-match a field when the whole key folds to ASCII. An exhaustive scan of
+// Go's orbit table shows the only non-ASCII runes that fold to ASCII are the
+// long s (U+017F -> S) and the Kelvin sign (U+212A -> K); every other rune
+// folds within non-ASCII, so leaving it unchanged cannot change whether a name
+// matches an ASCII tag. fold_name is therefore matching-equivalent to Go's
+// foldName for this packet even though it is not byte-identical for non-ASCII
+// input (Go maps U+00F6 to U+00D6; this leaves it as U+00F6, and neither can
+// equal an ASCII field name).
+fn fold_rune(c: char) -> char {
+    match c {
+        'a'..='z' => c.to_ascii_uppercase(),
+        '\u{017f}' => 'S',
+        '\u{212a}' => 'K',
+        _ => c,
+    }
+}
+fn fold_name(name: &str) -> String {
+    name.chars().map(fold_rune).collect()
+}
+
+// canonical_field resolves a JSON key to the declared field it names. The
+// contract/evidence decoder (Go's encoding/json adapter) looks for an exact
+// match first and only then falls back to a case-folded one; the strict
+// node-packet decoder (Go's nodepacket) matches exact names only.
+fn canonical_field<'a>(key: &str, allowed: &[&'a str], fold: bool) -> Option<&'a str> {
+    if let Some(field) = allowed.iter().find(|field| **field == key) {
+        return Some(field);
+    }
+    if !fold {
+        return None;
+    }
+    let folded = fold_name(key);
+    allowed
+        .iter()
+        .find(|field| fold_name(field) == folded)
+        .copied()
+}
+
 // go_quote renders a string the way Go's strconv.Quote does.
-fn go_quote(s: &str) -> String {
+pub(crate) fn go_quote(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -379,59 +419,112 @@ fn object_fields<'a>(
         _ => Err(type_error(path, expected, value)),
     }
 }
+const PACKET_FIELDS: &[&str] = &[
+    "packet_id",
+    "schema_version",
+    "repo_root",
+    "head_commit",
+    "request_id",
+    "issued_at",
+    "outcome",
+    "freshness",
+    "authorization",
+    "budget",
+    "evidence",
+    "degradations",
+    "provenance",
+    "packet_hash",
+];
+
 pub fn decode(data: &[u8]) -> Result<Packet, String> {
+    decode_packet(data, true)
+}
+
+// decode_strict mirrors internal/nodepacket.Decode, the wire-shape decoder used
+// on the node command boundary: input must be valid UTF-8 with no unpaired
+// surrogate escapes, field names match exactly, and duplicate keys, unknown
+// keys, explicit nulls and values of the wrong JSON type are rejected. The
+// contract/evidence path keeps encoding/json behaviour via `decode`.
+pub fn decode_strict(data: &[u8]) -> Result<Packet, String> {
+    if data.len() > 1 << 20 {
+        return Err("nodepacket: packet: input exceeds 1 MiB".into());
+    }
+    if std::str::from_utf8(data).is_err() {
+        return Err("nodepacket: packet: input is not valid UTF-8".into());
+    }
+    if !valid_unicode_escapes(data) {
+        return Err("nodepacket: packet: invalid Unicode escape".into());
+    }
+    let value =
+        crate::json::parse(data).map_err(|_| "nodepacket: packet: invalid JSON".to_string())?;
+    check_strict(&value)?;
+    build_packet(&value, false)
+}
+
+fn decode_packet(data: &[u8], fold: bool) -> Result<Packet, String> {
     if data.len() > 1 << 20 {
         return Err("nodepacket: packet: input exceeds 1 MiB".into());
     }
     let value = crate::json::parse(data).map_err(|e| format!("nodepacket: packet: {}", e))?;
-    let raw_fields = object(&value)?;
-    let map = object_map(raw_fields);
+    build_packet(&value, fold)
+}
+
+fn build_packet(value: &Value, fold: bool) -> Result<Packet, String> {
+    let raw_fields = object(value)?;
+    // Resolve each key to its declared field, in document order, validating as
+    // we go. The resolved map is keyed by the declared name so the construction
+    // below works for case-variant keys too.
+    let mut map = std::collections::BTreeMap::new();
     for (key, value) in raw_fields {
-        match key.as_str() {
+        let Some(field) = canonical_field(key, PACKET_FIELDS, fold) else {
+            return Err(unknown_field(key));
+        };
+        match field {
             "packet_id" | "schema_version" | "repo_root" | "head_commit" | "request_id"
             | "issued_at" | "outcome" | "packet_hash" => {
-                string_at(&map, key, &format!("Packet.{}", key))?;
+                string_value(value, &format!("Packet.{}", field))?;
             }
             "freshness" => {
-                parse_freshness(value)?;
+                parse_freshness(value, fold)?;
             }
             "authorization" => {
-                parse_authorization(value)?;
+                parse_authorization(value, fold)?;
             }
             "budget" => {
-                parse_budget(value)?;
+                parse_budget(value, fold)?;
             }
             "evidence" => {
-                parse_evidence(value)?;
+                parse_evidence(value, fold)?;
             }
             "degradations" => {
-                strings_at(&map, key, "Packet.degradations")?;
+                strings_value(value, "Packet.degradations")?;
             }
             "provenance" => {
-                parse_provenance(value)?;
+                parse_provenance(value, fold)?;
             }
             _ => return Err(unknown_field(key)),
         }
+        map.insert(field, value);
     }
     let freshness = match map.get("freshness") {
-        Some(v) => parse_freshness(v)?,
+        Some(v) => parse_freshness(v, fold)?,
         None => Freshness::default(),
     };
     let authorization = match map.get("authorization") {
-        Some(v) => parse_authorization(v)?,
+        Some(v) => parse_authorization(v, fold)?,
         None => Authorization::default(),
     };
     let budget = match map.get("budget") {
-        Some(v) => parse_budget(v)?,
+        Some(v) => parse_budget(v, fold)?,
         None => Budget::default(),
     };
     let evidence = match map.get("evidence") {
-        Some(v) => parse_evidence(v)?,
+        Some(v) => parse_evidence(v, fold)?,
         None => None,
     };
     let degradations = strings(&map, "degradations")?;
     let provenance = match map.get("provenance") {
-        Some(v) => parse_provenance(v)?,
+        Some(v) => parse_provenance(v, fold)?,
         None => Provenance::default(),
     };
     Ok(Packet {
@@ -451,11 +544,245 @@ pub fn decode(data: &[u8]) -> Result<Packet, String> {
         packet_hash: string(&map, "packet_hash")?,
     })
 }
-fn parse_freshness(v: &Value) -> Result<Freshness, String> {
+
+// ---- strict node-packet wire shape (internal/nodepacket/decode.go) ----
+
+type FieldsCheck = fn(&[(String, Value)], &str) -> Result<(), String>;
+
+enum FieldKind {
+    Str,
+    Bool,
+    Int,
+    Object(FieldsCheck),
+    StrArray,
+    ObjectArray(FieldsCheck),
+}
+
+const PACKET_SPEC: &[(&str, FieldKind)] = &[
+    ("packet_id", FieldKind::Str),
+    ("schema_version", FieldKind::Str),
+    ("repo_root", FieldKind::Str),
+    ("head_commit", FieldKind::Str),
+    ("request_id", FieldKind::Str),
+    ("issued_at", FieldKind::Str),
+    ("outcome", FieldKind::Str),
+    ("freshness", FieldKind::Object(check_freshness_fields)),
+    ("authorization", FieldKind::Object(check_authorization_fields)),
+    ("budget", FieldKind::Object(check_budget_fields)),
+    ("evidence", FieldKind::ObjectArray(check_evidence_fields)),
+    ("degradations", FieldKind::StrArray),
+    ("provenance", FieldKind::Object(check_provenance_fields)),
+    ("packet_hash", FieldKind::Str),
+];
+const FRESHNESS_SPEC: &[(&str, FieldKind)] = &[
+    ("head_commit", FieldKind::Str),
+    ("head_anchor", FieldKind::Str),
+    ("status", FieldKind::Str),
+    ("current", FieldKind::Bool),
+    ("is_current", FieldKind::Bool),
+    ("checked_at", FieldKind::Str),
+];
+const AUTHORIZATION_SPEC: &[(&str, FieldKind)] = &[
+    ("level", FieldKind::Str),
+    ("reason", FieldKind::Str),
+];
+const BUDGET_SPEC: &[(&str, FieldKind)] = &[
+    ("max_evidence", FieldKind::Int),
+    ("used_evidence", FieldKind::Int),
+    ("max_bytes", FieldKind::Int),
+    ("used_bytes", FieldKind::Int),
+];
+const EVIDENCE_SPEC: &[(&str, FieldKind)] = &[
+    ("evidence_id", FieldKind::Str),
+    ("kind", FieldKind::Str),
+    ("path", FieldKind::Str),
+    ("commit", FieldKind::Str),
+    ("line_start", FieldKind::Int),
+    ("line_end", FieldKind::Int),
+    ("source", FieldKind::Str),
+    ("content_hash", FieldKind::Str),
+    ("collected_at", FieldKind::Str),
+    ("verifier_status", FieldKind::Str),
+];
+const PROVENANCE_SPEC: &[(&str, FieldKind)] = &[
+    ("collector", FieldKind::Str),
+    ("tool", FieldKind::Str),
+    ("version", FieldKind::Str),
+    ("tool_version", FieldKind::Str),
+];
+
+fn check_freshness_fields(fields: &[(String, Value)], path: &str) -> Result<(), String> {
+    check_object(fields, FRESHNESS_SPEC, path)
+}
+fn check_authorization_fields(fields: &[(String, Value)], path: &str) -> Result<(), String> {
+    check_object(fields, AUTHORIZATION_SPEC, path)
+}
+fn check_budget_fields(fields: &[(String, Value)], path: &str) -> Result<(), String> {
+    check_object(fields, BUDGET_SPEC, path)
+}
+fn check_evidence_fields(fields: &[(String, Value)], path: &str) -> Result<(), String> {
+    check_object(fields, EVIDENCE_SPEC, path)
+}
+fn check_provenance_fields(fields: &[(String, Value)], path: &str) -> Result<(), String> {
+    check_object(fields, PROVENANCE_SPEC, path)
+}
+
+fn check_strict(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Object(fields) => check_object(fields, PACKET_SPEC, ""),
+        _ => reject("packet", "expected object"),
+    }
+}
+
+fn check_object(
+    fields: &[(String, Value)],
+    spec: &[(&str, FieldKind)],
+    path: &str,
+) -> Result<(), String> {
+    let mut seen: Vec<&str> = Vec::new();
+    for (key, value) in fields {
+        let Some((name, kind)) = spec.iter().find(|(name, _)| *name == key.as_str()) else {
+            return reject(path, "unknown field");
+        };
+        if seen.contains(name) {
+            return reject(path, "duplicate key");
+        }
+        seen.push(name);
+        let field_path = if path.is_empty() {
+            (*name).to_string()
+        } else {
+            format!("{}.{}", path, name)
+        };
+        check_kind(kind, value, &field_path)?;
+    }
+    Ok(())
+}
+
+fn check_kind(kind: &FieldKind, value: &Value, path: &str) -> Result<(), String> {
+    match kind {
+        FieldKind::Str => match value {
+            Value::String(_) => Ok(()),
+            _ => reject(path, "expected string"),
+        },
+        FieldKind::Bool => match value {
+            Value::Bool(_) => Ok(()),
+            _ => reject(path, "expected boolean"),
+        },
+        FieldKind::Int => match value {
+            Value::Number(n) => n
+                .parse::<i64>()
+                .map(|_| ())
+                .map_err(|_| format!("nodepacket: {}: integer is out of range or not integral", path)),
+            _ => reject(path, "expected integer"),
+        },
+        FieldKind::Object(check) => match value {
+            Value::Object(fields) => check(fields, path),
+            _ => reject(path, "expected object"),
+        },
+        FieldKind::StrArray => match value {
+            Value::Array(items) => {
+                if items.iter().all(|item| matches!(item, Value::String(_))) {
+                    Ok(())
+                } else {
+                    reject(path, "expected string")
+                }
+            }
+            _ => reject(path, "expected array"),
+        },
+        FieldKind::ObjectArray(check) => match value {
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    match item {
+                        Value::Object(fields) => check(fields, &format!("{}[{}]", path, index))?,
+                        _ => return reject(path, "expected object"),
+                    }
+                }
+                Ok(())
+            }
+            _ => reject(path, "expected array"),
+        },
+    }
+}
+
+fn reject(path: &str, reason: &str) -> Result<(), String> {
+    let path = if path.is_empty() { "packet" } else { path };
+    Err(format!("nodepacket: {}: {}", path, reason))
+}
+
+// valid_unicode_escapes mirrors internal/nodepacket's preflight: encoding/json
+// replaces unpaired surrogate escapes with U+FFFD, but the strict node decoder
+// rejects them. Literal escaped backslashes and actual U+FFFD characters pass.
+fn valid_unicode_escapes(data: &[u8]) -> bool {
+    let mut index = 0usize;
+    while index < data.len() {
+        if data[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        if index >= data.len() || data[index] != b'u' {
+            index += 1;
+            continue;
+        }
+        let Some(value) = hex_escape(&data[index + 1..]) else {
+            return false;
+        };
+        index += 4;
+        match value {
+            v if (0xdc00..=0xdfff).contains(&v) => return false,
+            v if (0xd800..=0xdbff).contains(&v) => {
+                if index + 6 >= data.len() || data[index + 1] != b'\\' || data[index + 2] != b'u'
+                {
+                    return false;
+                }
+                let Some(low) = hex_escape(&data[index + 3..]) else {
+                    return false;
+                };
+                if !(0xdc00..=0xdfff).contains(&low) {
+                    return false;
+                }
+                index += 6;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    true
+}
+
+fn hex_escape(data: &[u8]) -> Option<u16> {
+    if data.len() < 4 {
+        return None;
+    }
+    let mut value = 0u16;
+    for &digit in &data[..4] {
+        value = value.checked_mul(16)?
+            + match digit {
+                b'0'..=b'9' => (digit - b'0') as u16,
+                b'a'..=b'f' => (digit - b'a' + 10) as u16,
+                b'A'..=b'F' => (digit - b'A' + 10) as u16,
+                _ => return None,
+            };
+    }
+    Some(value)
+}
+
+const FRESHNESS_FIELDS: &[&str] = &[
+    "head_commit",
+    "head_anchor",
+    "status",
+    "current",
+    "is_current",
+    "checked_at",
+];
+fn parse_freshness(v: &Value, fold: bool) -> Result<Freshness, String> {
     let raw = object_fields(v, "Packet.freshness", "contract.Freshness")?;
     let mut out = Freshness::default();
     for (key, value) in raw {
-        match key.as_str() {
+        let Some(field) = canonical_field(key, FRESHNESS_FIELDS, fold) else {
+            return Err(unknown_field(key));
+        };
+        match field {
             "head_commit" => out.head_commit = string_value(value, "Packet.freshness.head_commit")?,
             "head_anchor" => out.head_anchor = string_value(value, "Packet.freshness.head_anchor")?,
             "status" => out.status = string_value(value, "Packet.freshness.status")?,
@@ -467,11 +794,15 @@ fn parse_freshness(v: &Value) -> Result<Freshness, String> {
     }
     Ok(out)
 }
-fn parse_authorization(v: &Value) -> Result<Authorization, String> {
+const AUTHORIZATION_FIELDS: &[&str] = &["level", "reason"];
+fn parse_authorization(v: &Value, fold: bool) -> Result<Authorization, String> {
     let raw = object_fields(v, "Packet.authorization", "contract.Authorization")?;
     let mut out = Authorization::default();
     for (key, value) in raw {
-        match key.as_str() {
+        let Some(field) = canonical_field(key, AUTHORIZATION_FIELDS, fold) else {
+            return Err(unknown_field(key));
+        };
+        match field {
             "level" => out.level = string_value(value, "Packet.authorization.level")?,
             "reason" => out.reason = string_value(value, "Packet.authorization.reason")?,
             _ => return Err(unknown_field(key)),
@@ -479,11 +810,15 @@ fn parse_authorization(v: &Value) -> Result<Authorization, String> {
     }
     Ok(out)
 }
-fn parse_budget(v: &Value) -> Result<Budget, String> {
+const BUDGET_FIELDS: &[&str] = &["max_evidence", "used_evidence", "max_bytes", "used_bytes"];
+fn parse_budget(v: &Value, fold: bool) -> Result<Budget, String> {
     let raw = object_fields(v, "Packet.budget", "contract.Budget")?;
     let mut out = Budget::default();
     for (key, value) in raw {
-        match key.as_str() {
+        let Some(field) = canonical_field(key, BUDGET_FIELDS, fold) else {
+            return Err(unknown_field(key));
+        };
+        match field {
             "max_evidence" => {
                 out.max_evidence = integer_value(value, "Packet.budget.max_evidence")?
             }
@@ -497,7 +832,19 @@ fn parse_budget(v: &Value) -> Result<Budget, String> {
     }
     Ok(out)
 }
-fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
+fn parse_evidence(v: &Value, fold: bool) -> Result<Option<Vec<Evidence>>, String> {
+    const EVIDENCE_FIELDS: &[&str] = &[
+        "evidence_id",
+        "kind",
+        "path",
+        "commit",
+        "line_start",
+        "line_end",
+        "source",
+        "content_hash",
+        "collected_at",
+        "verifier_status",
+    ];
     let items = match v {
         Value::Array(v) => v,
         Value::Null => return Ok(None),
@@ -509,10 +856,13 @@ fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
         let m = match item {
             Value::Null => std::collections::BTreeMap::new(),
             Value::Object(fields) => {
-                let m = object_map(fields);
+                let mut m = std::collections::BTreeMap::new();
                 for (key, value) in fields {
-                    let field_path = format!("{}.{}", path, key);
-                    match key.as_str() {
+                    let Some(field) = canonical_field(key, EVIDENCE_FIELDS, fold) else {
+                        return Err(unknown_field(key));
+                    };
+                    let field_path = format!("{}.{}", path, field);
+                    match field {
                         "evidence_id" | "kind" | "path" | "commit" | "source" | "content_hash"
                         | "collected_at" | "verifier_status" => {
                             if !matches!(value, Value::String(_) | Value::Null) {
@@ -526,6 +876,7 @@ fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
                         }
                         _ => return Err(unknown_field(key)),
                     }
+                    m.insert(field, value);
                 }
                 m
             }
@@ -550,11 +901,15 @@ fn parse_evidence(v: &Value) -> Result<Option<Vec<Evidence>>, String> {
     }
     Ok(Some(out))
 }
-fn parse_provenance(v: &Value) -> Result<Provenance, String> {
+const PROVENANCE_FIELDS: &[&str] = &["collector", "tool", "version", "tool_version"];
+fn parse_provenance(v: &Value, fold: bool) -> Result<Provenance, String> {
     let raw = object_fields(v, "Packet.provenance", "contract.Provenance")?;
     let mut out = Provenance::default();
     for (key, value) in raw {
-        match key.as_str() {
+        let Some(field) = canonical_field(key, PROVENANCE_FIELDS, fold) else {
+            return Err(unknown_field(key));
+        };
+        match field {
             "collector" => out.collector = string_value(value, "Packet.provenance.collector")?,
             "tool" => out.tool = string_value(value, "Packet.provenance.tool")?,
             "version" => out.version = string_value(value, "Packet.provenance.version")?,
@@ -632,6 +987,115 @@ mod tests {
         assert_eq!(
             decode_err(br#"{"budget":{"aaa_unknown":1},"packet_id":123}"#),
             "unknown field \"aaa_unknown\""
+        );
+    }
+
+    fn decode_error(data: &[u8]) -> String {
+        match decode(data) {
+            Ok(_) => panic!("expected a decode error for {:?}", data),
+            Err(e) => e,
+        }
+    }
+    fn decode_strict_error(data: &[u8]) -> String {
+        match decode_strict(data) {
+            Ok(_) => panic!("expected a strict decode error for {:?}", data),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn case_variant_field_names_fold_only_on_the_contract_path() {
+        // The encoding/json adapter folds a key to its declared field.
+        assert!(decode(br#"{"SCHEMA_VERSION":"v1","packet_id":"p"}"#).is_ok());
+        // The strict nodepacket decoder matches exact names only.
+        assert_eq!(
+            decode_strict_error(br#"{"SCHEMA_VERSION":"v1"}"#),
+            "nodepacket: packet: unknown field"
+        );
+        // Nested fields fold as well.
+        assert!(decode(br#"{"evidence":[{"LINE_START":1}]}"#).is_ok());
+        assert!(decode_strict(br#"{"evidence":[{"LINE_START":1}]}"#).is_err());
+        // A non-ASCII case variant folds within non-ASCII and cannot equal the
+        // ASCII tag, on either path.
+        assert_eq!(
+            decode_error("{\"\u{f6}utcome\":1}".as_bytes()),
+            "unknown field \"\u{f6}utcome\""
+        );
+    }
+
+    #[test]
+    fn decode_substitutes_unpaired_surrogates() {
+        fn decoded(data: &[u8]) -> Packet {
+            match decode(data) {
+                Ok(p) => p,
+                Err(e) => panic!("decode failed: {e}"),
+            }
+        }
+        assert_eq!(decoded(br#"{"packet_id":"\uD800"}"#).packet_id, "\u{FFFD}");
+        assert_eq!(decoded(br#"{"packet_id":"\uDC00"}"#).packet_id, "\u{FFFD}");
+        // A non-partner escape after a high surrogate is not consumed.
+        assert_eq!(
+            decoded(br#"{"packet_id":"\uD800\u0041"}"#).packet_id,
+            "\u{FFFD}A"
+        );
+        // Two high surrogates yield two replacement runes.
+        assert_eq!(
+            decoded(br#"{"packet_id":"\uD800\uD800"}"#).packet_id,
+            "\u{FFFD}\u{FFFD}"
+        );
+        // A valid pair still combines.
+        assert_eq!(
+            decoded(br#"{"packet_id":"\uD83C\uDF89"}"#).packet_id,
+            "\u{1F389}"
+        );
+    }
+
+    #[test]
+    fn decode_strict_matches_the_node_packet_decoder() {
+        // Contract validation tolerates a duplicate key (last wins); the strict
+        // decoder rejects it.
+        assert!(decode(br#"{"packet_id":"a","packet_id":"b"}"#).is_ok());
+        assert!(decode_strict(br#"{"packet_id":"a","packet_id":"b"}"#).is_err());
+        // Explicit null is rejected.
+        assert!(decode_strict(br#"{"issued_at":null}"#).is_err());
+        // Raw invalid UTF-8 is rejected.
+        assert!(decode_strict(b"{\"packet_id\":\"\xff\"}").is_err());
+        // Unpaired surrogate escapes are rejected...
+        assert!(decode_strict(br#"{"packet_id":"\uD800"}"#).is_err());
+        assert!(decode_strict(br#"{"packet_id":"\uDC00"}"#).is_err());
+        // ...but a valid pair and a literal escaped backslash are accepted.
+        assert!(decode_strict(br#"{"packet_id":"\uD83C\uDF89"}"#).is_ok());
+        assert!(decode_strict(br#"{"packet_id":"\\uD800"}"#).is_ok());
+    }
+
+    #[test]
+    fn fold_name_covers_the_ascii_reaching_orbits() {
+        assert_eq!(fold_name("schema_version"), "SCHEMA_VERSION");
+        assert_eq!(fold_name("SCHEMA_VERSION"), "SCHEMA_VERSION");
+        // The long s (U+017F) and Kelvin sign (U+212A) orbits reach ASCII.
+        assert_eq!(fold_name("\u{017f}chema_version"), "SCHEMA_VERSION");
+        assert_eq!(fold_name("pac\u{212a}et_id"), "PACKET_ID");
+        // Other non-ASCII runes are left alone; Go folds them within non-ASCII,
+        // so neither form can equal an ASCII field name.
+        assert_eq!(fold_name("\u{f6}utcome"), "\u{f6}UTCOME");
+    }
+
+    #[test]
+    fn invalid_utf8_field_name_yields_one_replacement_per_byte() {
+        // A truncated four-byte sequence is two invalid bytes, so two U+FFFD.
+        assert_eq!(
+            decode_error(b"{\"\xf0\x9f\":1}"),
+            "unknown field \"\u{fffd}\u{fffd}\""
+        );
+        // A truncated three-byte sequence behaves the same way.
+        assert_eq!(
+            decode_error(b"{\"\xe0\xa0\":1}"),
+            "unknown field \"\u{fffd}\u{fffd}\""
+        );
+        // A well-formed non-ASCII name stays literal.
+        assert_eq!(
+            decode_error("{\"caf\u{e9}\":1}".as_bytes()),
+            "unknown field \"caf\u{e9}\""
         );
     }
 }

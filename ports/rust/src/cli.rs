@@ -135,21 +135,59 @@ fn load_error(json: bool, detail: &str) -> (String, i32) {
     ))
 }
 
+// PacketError separates an unreadable packet input from a packet that was read
+// but did not decode, because the node path reports the two differently.
+enum PacketError {
+    Read(String),
+    Decode(String),
+}
+
 fn load_packet(path: &str) -> Result<packet::Packet, String> {
+    load_packet_typed(path).map_err(|e| match e {
+        PacketError::Read(detail) | PacketError::Decode(detail) => detail,
+    })
+}
+
+// load_packet_typed decodes a packet the way the contract/evidence adapter
+// does: encoding/json semantics, including case-folded field names.
+fn load_packet_typed(path: &str) -> Result<packet::Packet, PacketError> {
     let data = fs::read(path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
+        PacketError::Read(if e.kind() == std::io::ErrorKind::NotFound {
             format!("packet file {:?} does not exist", path)
         } else {
             format!("read packet {:?}: {}", path, e)
-        }
+        })
     })?;
     let trimmed = trim_json_space(&data);
-    let value =
-        crate::json::parse(trimmed).map_err(|_| format!("packet {:?} is not valid JSON", path))?;
+    let value = crate::json::parse(trimmed)
+        .map_err(|_| PacketError::Decode(format!("packet {:?} is not valid JSON", path)))?;
     if !matches!(value, crate::json::Value::Object(_)) {
-        return Err(format!("packet {:?} must contain a JSON object", path));
+        return Err(PacketError::Decode(format!(
+            "packet {:?} must contain a JSON object",
+            path
+        )));
     }
-    packet::decode(trimmed).map_err(|e| format!("packet {:?} {}", path, packet_decode_error(&e)))
+    packet::decode(trimmed)
+        .map_err(|e| PacketError::Decode(format!("packet {:?} {}", path, packet_decode_error(&e))))
+}
+
+// load_packet_strict decodes a packet the way the node command boundary does,
+// using the strict nodepacket decoder. Go reads the packet with a 1 MiB bound
+// first, so an oversize input is a read failure rather than a decode failure.
+fn load_packet_strict(path: &str) -> Result<packet::Packet, PacketError> {
+    let data = fs::read(path).map_err(|e| {
+        PacketError::Read(if e.kind() == std::io::ErrorKind::NotFound {
+            format!("packet file {:?} does not exist", path)
+        } else {
+            format!("read packet {:?}: {}", path, e)
+        })
+    })?;
+    if data.len() > 1 << 20 {
+        return Err(PacketError::Read(
+            "packet exceeds 1048576 byte input limit".into(),
+        ));
+    }
+    packet::decode_strict(&data).map_err(PacketError::Decode)
 }
 
 fn trim_json_space(data: &[u8]) -> &[u8] {
@@ -430,7 +468,7 @@ fn node_command(args: &[String]) -> (String, i32) {
         i += 2;
     }
     // The reference checks the four paths in this order and reports the first
-    // one that is missing, so the reported flag is part of the oracle.
+    // one that is missing, so the reported flag is part of the contract.
     let missing = [
         ("--repo", repo.is_none()),
         ("--packet", packet_path.is_none()),
@@ -480,15 +518,24 @@ fn node_command(args: &[String]) -> (String, i32) {
             )
         }
     };
-    let p = match load_packet(&packet_path) {
+    let p = match load_packet_strict(&packet_path) {
         Ok(v) => v,
-        Err(e) => {
+        Err(PacketError::Read(_)) => {
             return node_error(
                 json,
                 "packet could not be loaded",
-                &e,
+                "packet input could not be read",
                 2,
-                "Fix the packet contract, then run node verification again.",
+                "Provide a readable packet file with --packet <file>.",
+            )
+        }
+        Err(PacketError::Decode(_)) => {
+            return node_error(
+                json,
+                "packet could not be decoded",
+                "strict packet decoding failed",
+                2,
+                "Provide one valid packet-v1 JSON object with --packet <file>.",
             )
         }
     };

@@ -1,4 +1,5 @@
 const std = @import("std");
+const gofold = @import("gofold.zig");
 
 pub const Error = error{
     OutOfMemory,
@@ -8,6 +9,23 @@ pub const Error = error{
     TrailingData,
     LimitExceeded,
 };
+
+/// Reads four hex digits at `start` without consuming them, or null when they
+/// are not all hex or run past the end.
+fn peekHex4(data: []const u8, start: usize) ?u16 {
+    if (start + 4 > data.len) return null;
+    var value: u16 = 0;
+    for (data[start .. start + 4]) |c| {
+        value <<= 4;
+        value |= switch (c) {
+            '0'...'9' => c - '0',
+            'a'...'f' => c - 'a' + 10,
+            'A'...'F' => c - 'A' + 10,
+            else => return null,
+        };
+    }
+    return value;
+}
 
 pub const Field = struct {
     key: []const u8,
@@ -28,6 +46,20 @@ pub const Value = union(enum) {
         while (i > 0) {
             i -= 1;
             if (std.mem.eql(u8, self.object[i].key, key)) return self.object[i].value;
+        }
+        return null;
+    }
+
+    /// Like objectField, but a key that folds equal (encoding/json foldName)
+    /// also matches, with the last match in document order winning. This is the
+    /// lookup the contract/evidence packet decoder uses; the node-envelope and
+    /// ledger parsers keep the exact lookup.
+    pub fn objectFieldFolded(self: Value, key: []const u8) ?Value {
+        if (self != .object) return null;
+        var i = self.object.len;
+        while (i > 0) {
+            i -= 1;
+            if (gofold.foldedEqual(self.object[i].key, key)) return self.object[i].value;
         }
         return null;
     }
@@ -145,13 +177,22 @@ pub const Parser = struct {
                 'u' => {
                     const first = try self.hex4();
                     var codepoint: u21 = first;
-                    if (first >= 0xd800 and first <= 0xdbff) {
-                        if (self.index + 6 > self.data.len or self.data[self.index] != '\\' or self.data[self.index + 1] != 'u') return Error.InvalidJson;
-                        self.index += 2;
-                        const low = try self.hex4();
-                        if (low < 0xdc00 or low > 0xdfff) return Error.InvalidJson;
-                        codepoint = 0x10000 + (@as(u21, first) - 0xd800) * 0x400 + (low - 0xdc00);
-                    } else if (first >= 0xdc00 and first <= 0xdfff) return Error.InvalidJson;
+                    if (first >= 0xd800 and first <= 0xdfff) {
+                        // A surrogate escape: combine it with an immediately
+                        // following \uXXXX low surrogate when that forms a
+                        // valid pair. Otherwise substitute U+FFFD and leave the
+                        // following escape unconsumed, exactly as
+                        // encoding/json's unquoteBytes does.
+                        codepoint = 0xFFFD;
+                        if (self.index + 6 <= self.data.len and self.data[self.index] == '\\' and self.data[self.index + 1] == 'u') {
+                            if (peekHex4(self.data, self.index + 2)) |second| {
+                                if (first <= 0xdbff and second >= 0xdc00 and second <= 0xdfff) {
+                                    codepoint = 0x10000 + (@as(u21, first) - 0xd800) * 0x400 + (@as(u21, second) - 0xdc00);
+                                    self.index += 6;
+                                }
+                            }
+                        }
+                    }
                     var encoded: [4]u8 = undefined;
                     const len = std.unicode.utf8Encode(codepoint, &encoded) catch return Error.InvalidJson;
                     try result.appendSlice(self.allocator, encoded[0..len]);
@@ -234,12 +275,27 @@ test "parser rejects duplicate keys and trailing data" {
     try std.testing.expectError(Error.TrailingData, Parser.parse(arena.allocator(), "true false"));
 }
 
-test "parser decodes unicode escapes and rejects malformed escapes" {
+test "parser decodes unicode escapes and substitutes unpaired surrogates" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const value = try Parser.parse(arena.allocator(), "{\"message\":\"\\uD83D\\uDE00\"}");
+    const allocator = arena.allocator();
+    const value = try Parser.parse(allocator, "{\"message\":\"\\uD83D\\uDE00\"}");
     try std.testing.expectEqualStrings("😀", value.objectField("message").?.string);
-    try std.testing.expectError(Error.InvalidJson, Parser.parse(arena.allocator(), "\"\\uD800\""));
+    try std.testing.expectError(Error.InvalidJson, Parser.parse(allocator, "\"\\uZZZZ\""));
+    // encoding/json/unquoteBytes replaces an unpaired surrogate with U+FFFD
+    // and does not consume a following escape unless it forms a valid pair.
+    const lone_high = try Parser.parse(allocator, "\"\\uD800\"");
+    try std.testing.expectEqualStrings("\u{fffd}", lone_high.string);
+    const lone_low = try Parser.parse(allocator, "\"\\uDC00\"");
+    try std.testing.expectEqualStrings("\u{fffd}", lone_low.string);
+    const high_high = try Parser.parse(allocator, "\"\\uD800\\uD800\"");
+    try std.testing.expectEqualStrings("\u{fffd}\u{fffd}", high_high.string);
+    const high_ascii = try Parser.parse(allocator, "\"\\uD800\\u0041\"");
+    try std.testing.expectEqualStrings("\u{fffd}A", high_ascii.string);
+    const high_escape = try Parser.parse(allocator, "\"\\uD800\\n\"");
+    try std.testing.expectEqualStrings("\u{fffd}\n", high_escape.string);
+    const valid = try Parser.parse(allocator, "\"\\uD83D\\uDE00\\uD800\"");
+    try std.testing.expectEqualStrings("😀\u{fffd}", valid.string);
 }
 
 test "parser enforces JSON number boundaries" {
