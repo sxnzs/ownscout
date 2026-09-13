@@ -1432,6 +1432,121 @@
     },
     {
       "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-specials.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-specials-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-unknown-specials.json\" contains an unknown JSON field: json: unknown field \"a\\\"b\\\\c\\td\\ne\\x7ff\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-specials.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-specials-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-unknown-specials.json\\\" contains an unknown JSON field: json: unknown field \\\"a\\\\\\\"b\\\\\\\\c\\\\td\\\\ne\\\\x7ff\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-controls.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-controls-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-unknown-controls.json\" contains an unknown JSON field: json: unknown field \"x\\x01y\\x1fz\\rw\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-controls.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-controls-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-unknown-controls.json\\\" contains an unknown JSON field: json: unknown field \\\"x\\\\x01y\\\\x1fz\\\\rw\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-nonascii.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-nonascii-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-unknown-nonascii.json\" contains an unknown JSON field: json: unknown field \"héllo🎉\\u00a0\\u2028\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-nonascii.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-unknown-nonascii-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-unknown-nonascii.json\\\" contains an unknown JSON field: json: unknown field \\\"héllo🎉\\\\u00a0\\\\u2028\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-precedence-unknown-first.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-precedence-unknown-first-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-precedence-unknown-first.json\" contains an unknown JSON field: json: unknown field \"aaa_unknown\"\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-precedence-unknown-first.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-precedence-unknown-first-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-precedence-unknown-first.json\\\" contains an unknown JSON field: json: unknown field \\\"aaa_unknown\\\"\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-precedence-unknown-last.json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-precedence-unknown-last-human",
+      "stdout": "ERROR: packet could not be loaded\n  - packet \"fixtures/edge/packet-edge-precedence-unknown-last.json\" is not valid JSON: json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int\nNext action: Provide a readable JSON packet with --packet \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/edge/packet-edge-precedence-unknown-last.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-precedence-unknown-last-json",
+      "stdout": "{\"command\":\"contract validate\",\"ok\":false,\"summary\":\"packet could not be loaded\",\"details\":[\"packet \\\"fixtures/edge/packet-edge-precedence-unknown-last.json\\\" is not valid JSON: json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int\"],\"next_action\":\"Provide a readable JSON packet with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify"
       ],

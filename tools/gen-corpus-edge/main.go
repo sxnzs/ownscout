@@ -379,6 +379,59 @@ func run() error {
 		spec{"contract-edge-relocate-unknown-flag-human", []string{"contract", "validate", "--packet", "fixtures/packet-valid.json", "--relocate"}},
 		spec{"contract-edge-relocate-unknown-flag-json", []string{"contract", "validate", "--packet", "fixtures/packet-valid.json", "--relocate", "--json"}},
 	)
+	// Unknown-field reporting. Two independent behaviours are pinned here: the
+	// field name is quoted exactly as Go's %q quotes it (so a control byte is
+	// \xNN, not a raw byte or a host-language escape, and a printable non-ASCII
+	// rune is kept), and the error reported is the first one in document order,
+	// including inside a nested object. Go marshals map keys in sorted order, so
+	// the unknown field's name alone decides whether it precedes or follows the
+	// badly typed field.
+	unknownNames := []struct {
+		name string
+		key  string
+	}{
+		{"specials", "a\"b\\c\td\ne\x7ff"},
+		{"controls", "x\x01y\x1fz\rw"},
+		{"nonascii", "héllo🎉\u00a0\u2028"},
+	}
+	for _, unknown := range unknownNames {
+		payload := deepCopy(packetBase)
+		payload[unknown.key] = 1
+		file := "packet-edge-unknown-" + unknown.name + ".json"
+		if err := writeJSON(filepath.Join(edge, file), payload); err != nil {
+			return err
+		}
+		args := []string{"contract", "validate", "--packet", "fixtures/edge/" + file}
+		cases = append(cases,
+			spec{"contract-edge-unknown-" + unknown.name + "-human", args},
+			spec{"contract-edge-unknown-" + unknown.name + "-json", append(append([]string{}, args...), "--json")},
+		)
+	}
+	for _, order := range []struct {
+		name  string
+		field string
+	}{
+		{"unknown-first", "aaa_unknown"},
+		{"unknown-last", "zzz_unknown"},
+	} {
+		payload := deepCopy(packetBase)
+		payload["budget"] = map[string]any{
+			"max_evidence":  "notanint",
+			"used_evidence": 1,
+			"max_bytes":     1000,
+			"used_bytes":    12,
+			order.field:     1,
+		}
+		file := "packet-edge-precedence-" + order.name + ".json"
+		if err := writeJSON(filepath.Join(edge, file), payload); err != nil {
+			return err
+		}
+		args := []string{"contract", "validate", "--packet", "fixtures/edge/" + file}
+		cases = append(cases,
+			spec{"contract-edge-precedence-" + order.name + "-human", args},
+			spec{"contract-edge-precedence-" + order.name + "-json", append(append([]string{}, args...), "--json")},
+		)
+	}
 	cases = append(cases,
 		// The reference checks node verify's four paths in a fixed order and
 		// reports the first one missing, and its usage errors honour --json.
