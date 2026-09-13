@@ -13,7 +13,7 @@ import (
 // the verification path walks the file from byte zero. The two must agree on
 // every range of every awkward payload, or a relocation could point at a window
 // that verification would have hashed differently. This is the differential
-// oracle for that equivalence.
+// reference for that equivalence.
 func TestWindowHashMatchesReferenceHashing(t *testing.T) {
 	payloads := []string{
 		"",

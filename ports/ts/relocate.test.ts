@@ -24,7 +24,7 @@ function run(...args: string[]) {
 // The relocation path locates lines through a precomputed start index, while
 // verification walks the file from byte zero. They must agree on every range of
 // every awkward payload, or a relocation could name a window that verification
-// would have hashed differently. This is the differential oracle for that
+// would have hashed differently. This is the differential reference for that
 // equivalence, matching TestWindowHashMatchesReferenceHashing in the reference.
 test("window hashing equals reference hashing for awkward payloads", () => {
   const payloads: Buffer[] = [

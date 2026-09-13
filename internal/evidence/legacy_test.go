@@ -9,7 +9,7 @@ import (
 )
 
 // legacySplitNormalizedLines is the historical implementation, kept verbatim
-// as the oracle for the streaming line scanner and hasher. Any change to
+// as the golden reference for the streaming line scanner and hasher. Any change to
 // countNormalizedLines or hashSelectedLines must keep these equal.
 func legacySplitNormalizedLines(data []byte) []string {
 	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
