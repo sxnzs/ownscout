@@ -1,0 +1,1 @@
+{"envelope_id":"-env-1","nodes":[{"depends_on":[],"evidence_ids":["evidence-1"],"node_id":"a","verifier":"evidence.current"},{"depends_on":["a"],"evidence_ids":["evidence-1"],"node_id":"b","verifier":"evidence.current"}],"packet_binding_sha256":"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca","packet_id":"packet-1","schema_version":"node-envelope-v1"}
