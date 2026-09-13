@@ -1,7 +1,7 @@
 GO ?= go
 REF ?= spec/parity/reference-ownscout
 
-.PHONY: build gate test corpus corpus-check reference fuzz fuzz-sweep verify-ports ports ports-test
+.PHONY: build gate test corpus corpus-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
 
 build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
@@ -55,5 +55,21 @@ fuzz-sweep: reference ports
 
 verify-ports:
 	spec/parity/verify-all.sh
+
+# Which reference code do the corpora actually exercise? A path no case reaches
+# is a path a port can skip and still pass, which is how the append-time ledger
+# cap and the symlinked-ancestor check stayed invisible. Build the reference with
+# coverage, replay both corpora against it, and list what never ran.
+COVDIR ?= /tmp/ownscout-cov
+COVREF ?= /tmp/ownscout-cover
+
+coverage:
+	rm -rf $(COVDIR) && mkdir -p $(COVDIR)
+	$(GO) build -cover -o $(COVREF) ./cmd/ownscout
+	GOCOVERDIR=$(COVDIR) python3 spec/parity/harness.py --bin $(COVREF) >/dev/null
+	GOCOVERDIR=$(COVDIR) python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin $(COVREF) >/dev/null
+	$(GO) tool covdata percent -i=$(COVDIR)
+	@echo "--- never executed ---"
+	@$(GO) tool covdata func -i=$(COVDIR) | awk '$$1 ~ /^ownscout/ && $$NF == "0.0%" { print "  " $$0 }'
 
 gate: test corpus-check
