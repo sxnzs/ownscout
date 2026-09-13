@@ -1,5 +1,4 @@
 const std = @import("std");
-const gofold = @import("gofold.zig");
 
 pub const Error = error{
     OutOfMemory,
@@ -50,19 +49,6 @@ pub const Value = union(enum) {
         return null;
     }
 
-    /// Like objectField, but a key that folds equal (encoding/json foldName)
-    /// also matches, with the last match in document order winning. This is the
-    /// lookup the contract/evidence packet decoder uses; the node-envelope and
-    /// ledger parsers keep the exact lookup.
-    pub fn objectFieldFolded(self: Value, key: []const u8) ?Value {
-        if (self != .object) return null;
-        var i = self.object.len;
-        while (i > 0) {
-            i -= 1;
-            if (gofold.foldedEqual(self.object[i].key, key)) return self.object[i].value;
-        }
-        return null;
-    }
 };
 
 pub const Parser = struct {

@@ -126,36 +126,33 @@ pub fn validate(allocator: std.mem.Allocator, p: Packet) ![]Violation {
     return try out.toOwnedSlice(allocator);
 }
 
-// Packet decoding uses the contract/evidence path's case-folding field match
-// (exact first, then Unicode simple fold), matching encoding/json.
-fn field(obj: json.Value, name: []const u8) ?json.Value { return obj.objectFieldFolded(name); }
+// Packet decoding is reached only after the shared strict packet boundary has
+// checked exact field names and rejected explicit nulls. Missing fields retain
+// their zero values so contract validation can report the corresponding
+// required-field violations.
+fn field(obj: json.Value, name: []const u8) ?json.Value { return obj.objectField(name); }
 fn text(obj: json.Value, name: []const u8) ![]const u8 {
     const v = field(obj, name) orelse return "";
-    if (v == .null) return "";
     if (v != .string) return error.WrongType;
     return v.string;
 }
 fn optionalText(obj: json.Value, name: []const u8) ![]const u8 {
     const v = field(obj, name) orelse return "";
-    if (v == .null) return "";
     if (v != .string) return error.WrongType;
     return v.string;
 }
 fn boolean(obj: json.Value, name: []const u8) !bool {
     const v = field(obj, name) orelse return false;
-    if (v == .null) return false;
     if (v != .boolean) return error.WrongType;
     return v.boolean;
 }
 fn integer(obj: json.Value, name: []const u8) !i64 {
     const v = field(obj, name) orelse return 0;
-    if (v == .null) return 0;
     if (v != .number) return error.WrongType;
     return std.fmt.parseInt(i64, v.number, 10) catch return error.WrongType;
 }
 fn object(obj: json.Value, name: []const u8) !json.Value {
     const v = field(obj, name) orelse return json.Value.null;
-    if (v == .null) return .{ .object = &.{} };
     if (v != .object) return error.WrongType;
     return v;
 }
@@ -172,26 +169,21 @@ pub fn decodePacket(allocator: std.mem.Allocator, root: json.Value) !Packet {
     const p = object(root, "provenance") catch |err| return err;
     const ev_field = field(root, "evidence");
     const dg_field = field(root, "degradations");
-    const ev = if (ev_field == null or ev_field.? == .null) json.Value{ .array = &.{} } else ev_field.?;
-    const dg = if (dg_field == null or dg_field.? == .null) json.Value{ .array = &.{} } else dg_field.?;
+    const ev = if (ev_field == null) json.Value{ .array = &.{} } else ev_field.?;
+    const dg = if (dg_field == null) json.Value{ .array = &.{} } else dg_field.?;
     if (ev != .array or dg != .array) return error.WrongType;
-    var evidence: []Evidence = if (ev_field == null or ev_field.? == .null) &.{} else try allocator.alloc(Evidence, ev.array.len);
+    var evidence: []Evidence = if (ev_field == null) &.{} else try allocator.alloc(Evidence, ev.array.len);
     for (ev.array, 0..) |item, i| {
-        const item_object = if (item == .null) json.Value{ .object = &.{} } else item;
-        if (item_object != .object) return error.WrongType;
+        if (item != .object) return error.WrongType;
         evidence[i] = .{
-            .evidence_id = try text(item_object, "evidence_id"), .kind = try text(item_object, "kind"), .path = try text(item_object, "path"),
-            .commit = try text(item_object, "commit"), .line_start = try integer(item_object, "line_start"), .line_end = try integer(item_object, "line_end"),
-            .source = try text(item_object, "source"), .content_hash = try text(item_object, "content_hash"), .collected_at = try text(item_object, "collected_at"),
-            .verifier_status = try text(item_object, "verifier_status"),
+            .evidence_id = try text(item, "evidence_id"), .kind = try text(item, "kind"), .path = try text(item, "path"),
+            .commit = try text(item, "commit"), .line_start = try integer(item, "line_start"), .line_end = try integer(item, "line_end"),
+            .source = try text(item, "source"), .content_hash = try text(item, "content_hash"), .collected_at = try text(item, "collected_at"),
+            .verifier_status = try text(item, "verifier_status"),
         };
     }
-    var degradations: [][]const u8 = if (dg_field == null or dg_field.? == .null) &.{} else try allocator.alloc([]const u8, dg.array.len);
+    var degradations: [][]const u8 = if (dg_field == null) &.{} else try allocator.alloc([]const u8, dg.array.len);
     for (dg.array, 0..) |item, i| {
-        if (item == .null) {
-            degradations[i] = "";
-            continue;
-        }
         if (item != .string) return error.WrongType;
         degradations[i] = item.string;
     }
@@ -214,8 +206,8 @@ pub fn decodePacket(allocator: std.mem.Allocator, root: json.Value) !Packet {
         .freshness_present = !emptyFreshness(freshness),
         .authorization_present = hasText(a, "level"),
         .budget_present = !emptyBudget(budget),
-        .evidence_present = !(ev_field == null or ev_field.? == .null),
-        .degradations_present = !(dg_field == null or dg_field.? == .null),
+        .evidence_present = ev_field != null,
+        .degradations_present = dg_field != null,
         .provenance_present = hasText(p, "collector") or hasText(p, "tool") or hasText(p, "version") or hasText(p, "tool_version"),
     };
 }

@@ -125,7 +125,10 @@ fn nodeBind(allocator: std.mem.Allocator, args: []const []const u8, json_output:
     return .{ .output = try result.render(allocator, .{ .command = "node bind", .ok = true, .summary = "packet binding computed", .details = &details, .next_action = "Use this as packet_binding_sha256 in a node-envelope-v1 document." }, json_output), .code = 0 };
 }
 
-const LoadError = error{NotFound, ReadFailed, InvalidJson, ObjectRequired, UnknownField, WrongType};
+const LoadError = error{ NotFound, ReadFailed, TooBig, WrongType };
+
+/// nodepacket.MaxInputBytes: the inclusive packet size limit, including whitespace.
+const max_packet_bytes: usize = 1 << 20;
 
 fn normalizeJsonUtf8(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
     if (std.unicode.utf8ValidateSlice(data)) return data;
@@ -144,72 +147,14 @@ fn normalizeJsonUtf8(allocator: std.mem.Allocator, data: []const u8) ![]const u8
     return try normalized.toOwnedSlice(allocator);
 }
 
-fn unknownPacketField(root: json.Value) ?[]const u8 {
-    if (root != .object) return null;
-    for (root.object) |field| {
-        // This scanner only runs for the contract/evidence path, which folds
-        // field names, so a case-varied spelling of a known field is known.
-        const canonical = topKeyMatch(field.key, true) orelse return field.key;
-        const nested_members: []const Member = if (std.mem.eql(u8, canonical, "freshness"))
-            &freshness_members
-        else if (std.mem.eql(u8, canonical, "authorization"))
-            &authorization_members
-        else if (std.mem.eql(u8, canonical, "budget"))
-            &budget_members
-        else if (std.mem.eql(u8, canonical, "provenance"))
-            &provenance_members
-        else
-            &[_]Member{};
-        if (field.value == .object) {
-            for (field.value.object) |nested| {
-                if (memberSpec(nested_members, nested.key, true) == null) return nested.key;
-            }
-        }
-        if (std.mem.eql(u8, canonical, "evidence") and field.value == .array) {
-            for (field.value.array) |item| {
-                if (item != .object) continue;
-                for (item.object) |nested| {
-                    if (memberSpec(&evidence_members, nested.key, true) == null) return nested.key;
-                }
-            }
-        }
-    }
-    return null;
-}
-
-fn loadPacket(allocator: std.mem.Allocator, path: []const u8) LoadError!contract.Packet {
-    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
-        error.FileNotFound => return error.NotFound,
-        else => return error.ReadFailed,
-    };
-    const trimmed = std.mem.trim(u8, data, " \t\r\n");
-    const normalized = normalizeJsonUtf8(allocator, trimmed) catch return error.InvalidJson;
-    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch return error.InvalidJson;
-    if (trimmed.len == 0 or trimmed[0] != '{') return error.ObjectRequired;
-    // The contract/evidence path decodes through encoding/json, which matches a
-    // field name exactly first and case-insensitively (Unicode simple fold)
-    // second. Only the matching is folded - messages keep the input spelling,
-    // which is what the reference prints.
-    //
-    // The reference reports whichever decode problem comes first in the
-    // document, so the ordered walk decides the error kind. The message itself
-    // is still produced by the same scanners as before.
-    switch (firstIssueKind(root, true)) {
-        .unknown => return error.UnknownField,
-        .wrong_type => return error.WrongType,
-        .none => {},
-    }
-    return contract.decodePacket(allocator, root) catch return error.WrongType;
-}
-
 // ---------------------------------------------------------------------------
 // Strict node packet decoding (internal/nodepacket/decode.go).
 //
-// node verify does not share encoding/json's leniency. The raw bytes must be
-// valid UTF-8, surrogate escapes must be well formed, field names must match
-// exactly (no case folding), duplicate keys and explicit null are rejected, and
-// integer fields must be integral and in range. Every failure is reported to
-// the CLI as one generic "strict packet decoding failed".
+// Every command decodes its packet at this one strict boundary: the raw bytes
+// must be valid UTF-8, surrogate escapes must be well formed, field names must
+// match exactly (no case folding), duplicate keys and explicit null are
+// rejected, and integer fields must be integral and in range. Every failure is
+// reported to the CLI as one generic "strict packet decoding failed".
 // ---------------------------------------------------------------------------
 
 fn hexEscape(data: []const u8) ?u16 {
@@ -268,7 +213,7 @@ fn strictTypeMatches(value: json.Value, kind: ValueKind) bool {
 fn strictCheckStruct(value: json.Value, members: []const Member) error{WrongType}!void {
     if (value != .object) return error.WrongType;
     for (value.object) |field| {
-        const member = memberSpec(members, field.key, false) orelse return error.WrongType;
+        const member = memberSpec(members, field.key) orelse return error.WrongType;
         if (!strictTypeMatches(field.value, member.kind)) return error.WrongType;
     }
 }
@@ -276,7 +221,7 @@ fn strictCheckStruct(value: json.Value, members: []const Member) error{WrongType
 fn strictCheckPacket(root: json.Value) error{WrongType}!void {
     if (root != .object) return error.WrongType;
     for (root.object) |field| {
-        const canonical = topKeyMatch(field.key, false) orelse return error.WrongType;
+        const canonical = topKeyMatch(field.key) orelse return error.WrongType;
         if (isStringTopField(canonical)) {
             if (field.value != .string) return error.WrongType;
         } else if (std.mem.eql(u8, canonical, "freshness")) {
@@ -302,10 +247,14 @@ fn strictCheckPacket(root: json.Value) error{WrongType}!void {
 }
 
 fn loadNodePacket(allocator: std.mem.Allocator, path: []const u8) LoadError!contract.Packet {
-    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
+    // Go reads at most limit+1 bytes and rejects len(data) > limit, so a packet
+    // of exactly 1 MiB is accepted; Zig's limit errors when reached, hence +1.
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(max_packet_bytes + 1)) catch |err| switch (err) {
         error.FileNotFound => return error.NotFound,
+        error.StreamTooLong => return error.TooBig,
         else => return error.ReadFailed,
     };
+    if (data.len > max_packet_bytes) return error.TooBig;
     if (!std.unicode.utf8ValidateSlice(data)) return error.WrongType;
     if (!validUnicodeEscapes(data)) return error.WrongType;
     const trimmed = std.mem.trim(u8, data, " \t\r\n");
@@ -316,15 +265,6 @@ fn loadNodePacket(allocator: std.mem.Allocator, path: []const u8) LoadError!cont
     strictCheckPacket(root) catch return error.WrongType;
     return contract.decodePacket(allocator, root) catch return error.WrongType;
 }
-
-fn unknownPacketFieldFromFile(allocator: std.mem.Allocator, path: []const u8) ?[]const u8 {
-    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch return null;
-    const trimmed = std.mem.trim(u8, data, " \t\r\n");
-    const normalized = normalizeJsonUtf8(allocator, trimmed) catch return null;
-    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch return null;
-    return unknownPacketField(root);
-}
-
 
 const is_print16 = [_]u16{
     0x0020, 0x007e, 0x00a1, 0x0377, 0x037a, 0x037f, 0x0384, 0x0556, 0x0559, 0x058a, 0x058d, 0x05c7, 0x05d0, 0x05ea,
@@ -433,13 +373,10 @@ const is_not_print32 = [_]u16{
 };
 
 // ---------------------------------------------------------------------------
-// Go-compatible decode diagnostics.
+// Strict packet field graph (internal/nodepacket/decode.go).
 //
-// The reference decodes with encoding/json and DisallowUnknownFields, which
-// walks each object's keys in document order and recurses. The FIRST problem -
-// an unknown field or a wrongly-typed value - is therefore whichever appears
-// first in the input. firstIssueKind mirrors that walk so loadPacket reports
-// the same error the reference would.
+// The allowed field names and their kinds, used by strictCheckPacket to reject
+// anything the strict decoder would not accept. Exact names only.
 // ---------------------------------------------------------------------------
 
 const ValueKind = enum { string, boolean, integer };
@@ -472,29 +409,6 @@ const evidence_members = [_]Member{
     .{ .name = "collected_at", .kind = .string }, .{ .name = "verifier_status", .kind = .string },
 };
 
-const DecodeIssue = enum { none, unknown, wrong_type };
-
-fn nameMatches(a: []const u8, b: []const u8, fold: bool) bool {
-    return if (fold) gofold.foldedEqual(a, b) else std.mem.eql(u8, a, b);
-}
-
-fn memberSpec(members: []const Member, name: []const u8, fold: bool) ?Member {
-    for (members) |member| if (nameMatches(name, member.name, fold)) return member;
-    return null;
-}
-
-// ---------------------------------------------------------------------------
-// Case-insensitive field names (contract/evidence path only).
-//
-// encoding/json resolves a key by an exact tag match first and a case-folded
-// match second, so the contract and evidence commands accept e.g.
-// "SCHEMA_VERSION" for schema_version. internal/nodepacket, used by node
-// verify, is exact only, so `fold` is false there.
-//
-// Only matching is folded: the reference still names the field with the input
-// spelling in a type error ("Packet.PACKET_ID"), so keys are never rewritten.
-// ---------------------------------------------------------------------------
-
 const packet_struct_fields = [_][]const u8{
     "freshness", "authorization", "budget", "evidence", "degradations", "provenance",
 };
@@ -504,75 +418,17 @@ fn isStringTopField(name: []const u8) bool {
     return false;
 }
 
-/// Resolve a top-level key to the canonical tag it matches, or null when it is
-/// unknown. `fold` selects case-insensitive matching.
-fn topKeyMatch(key: []const u8, fold: bool) ?[]const u8 {
-    for (packet_string_fields) |name| if (nameMatches(key, name, fold)) return name;
-    for (packet_struct_fields) |name| if (nameMatches(key, name, fold)) return name;
+fn memberSpec(members: []const Member, name: []const u8) ?Member {
+    for (members) |member| if (std.mem.eql(u8, name, member.name)) return member;
     return null;
 }
 
-fn scalarTypeIssue(value: json.Value, kind: ValueKind) bool {
-    return switch (kind) {
-        .string => value != .string and value != .null,
-        .boolean => value != .boolean and value != .null,
-        // encoding/json rejects a number that is not an integral int64, not
-        // just a non-number, for an integer field.
-        .integer => value != .null and (value != .number or !isIntegerToken(value.number)),
-    };
-}
-
-fn firstIssueInStruct(value: json.Value, members: []const Member, fold: bool) DecodeIssue {
-    if (value == .null) return .none;
-    if (value != .object) return .wrong_type;
-    for (value.object) |field| {
-        const member = memberSpec(members, field.key, fold) orelse return .unknown;
-        if (scalarTypeIssue(field.value, member.kind)) return .wrong_type;
-    }
-    return .none;
-}
-
-fn firstIssueKind(root: json.Value, fold: bool) DecodeIssue {
-    if (root != .object) return .none;
-    for (root.object) |field| {
-        const canonical = topKeyMatch(field.key, fold) orelse return .unknown;
-        if (isStringTopField(canonical)) {
-            if (field.value != .string and field.value != .null) return .wrong_type;
-        } else if (std.mem.eql(u8, canonical, "freshness")) {
-            const issue = firstIssueInStruct(field.value, &freshness_members, fold);
-            if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, canonical, "authorization")) {
-            const issue = firstIssueInStruct(field.value, &authorization_members, fold);
-            if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, canonical, "budget")) {
-            const issue = firstIssueInStruct(field.value, &budget_members, fold);
-            if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, canonical, "provenance")) {
-            const issue = firstIssueInStruct(field.value, &provenance_members, fold);
-            if (issue != .none) return issue;
-        } else if (std.mem.eql(u8, canonical, "evidence")) {
-            if (field.value == .null) continue;
-            if (field.value != .array) return .wrong_type;
-            for (field.value.array) |item| {
-                if (item == .null) continue;
-                if (item != .object) return .wrong_type;
-                for (item.object) |nested| {
-                    const member = memberSpec(&evidence_members, nested.key, fold) orelse return .unknown;
-                    if (scalarTypeIssue(nested.value, member.kind)) return .wrong_type;
-                }
-            }
-        } else if (std.mem.eql(u8, canonical, "degradations")) {
-            if (field.value == .null) continue;
-            if (field.value != .array) return .wrong_type;
-            for (field.value.array) |item| {
-                if (item == .null) continue;
-                if (item != .string) return .wrong_type;
-            }
-        } else {
-            return .unknown;
-        }
-    }
-    return .none;
+/// Resolve a top-level key to the canonical tag it matches, or null when it is
+/// unknown. The strict decoder is exact only: a case-varied spelling is unknown.
+fn topKeyMatch(key: []const u8) ?[]const u8 {
+    for (packet_string_fields) |name| if (std.mem.eql(u8, key, name)) return name;
+    for (packet_struct_fields) |name| if (std.mem.eql(u8, key, name)) return name;
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -731,106 +587,6 @@ fn jsonTypeName(value: json.Value) []const u8 {
     };
 }
 
-fn decodeFailureMessage(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const data = std.Io.Dir.cwd().readFileAlloc(std.Options.debug_io, path, allocator, .limited(1 << 20)) catch
-        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
-    const trimmed = std.mem.trim(u8, data, " \t\r\n");
-    const normalized = normalizeJsonUtf8(allocator, trimmed) catch
-        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
-    const root = json.Parser.parseAllowDuplicateKeys(allocator, normalized) catch
-        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
-    if (root == .object) {
-        for (root.object) |field| {
-            // Match case-insensitively, but print the key as the input spelled
-            // it: encoding/json names the field it failed on that way.
-            const canonical = topKeyMatch(field.key, true) orelse continue;
-            if (isStringTopField(canonical) and field.value != .string) {
-                if (field.value == .null) continue;
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type string", .{ path, jsonTypeName(field.value), field.key });
-            }
-            if (std.mem.eql(u8, canonical, "evidence") and field.value != .array) {
-                if (field.value == .null) continue;
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type []contract.Evidence", .{ path, jsonTypeName(field.value), field.key });
-            }
-            if (std.mem.eql(u8, canonical, "degradations") and field.value != .array) {
-                if (field.value == .null) continue;
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type []string", .{ path, jsonTypeName(field.value), field.key });
-            }
-            if ((std.mem.eql(u8, canonical, "freshness") or std.mem.eql(u8, canonical, "authorization") or
-                std.mem.eql(u8, canonical, "budget") or std.mem.eql(u8, canonical, "provenance")) and
-                field.value != .object and field.value != .null)
-            {
-                const type_name = if (std.mem.eql(u8, canonical, "freshness")) "contract.Freshness" else if (std.mem.eql(u8, canonical, "authorization")) "contract.Authorization" else if (std.mem.eql(u8, canonical, "budget")) "contract.Budget" else "contract.Provenance";
-                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s} of type {s}", .{ path, jsonTypeName(field.value), field.key, type_name });
-            }
-            if (field.value == .object) {
-                const nested_members: []const Member = if (std.mem.eql(u8, canonical, "freshness"))
-                    &freshness_members
-                else if (std.mem.eql(u8, canonical, "authorization"))
-                    &authorization_members
-                else if (std.mem.eql(u8, canonical, "budget"))
-                    &budget_members
-                else if (std.mem.eql(u8, canonical, "provenance"))
-                    &provenance_members
-                else
-                    &[_]Member{};
-                for (field.value.object) |nested| {
-                    if (nested.value == .null) continue;
-                    const member = memberSpec(nested_members, nested.key, true) orelse continue;
-                    const is_bool = member.kind == .boolean;
-                    const is_integer = member.kind == .integer;
-                    if (is_bool and nested.value != .boolean) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type bool", .{ path, jsonTypeName(nested.value), field.key, nested.key });
-                    }
-                    if (is_integer and (nested.value != .number or !isIntegerToken(nested.value.number))) {
-                        const type_name = if (std.mem.eql(u8, member.name, "max_bytes") or std.mem.eql(u8, member.name, "used_bytes")) "int64" else "int";
-                        // A rejected number names its literal, as encoding/json
-                        // does in UnmarshalTypeError.Value.
-                        if (nested.value == .number) {
-                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal number {s} into Go struct field Packet.{s}.{s} of type {s}", .{ path, nested.value.number, field.key, nested.key, type_name });
-                        }
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type {s}", .{ path, jsonTypeName(nested.value), field.key, nested.key, type_name });
-                    }
-                    if (!is_bool and !is_integer and nested.value != .string) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{s} of type string", .{ path, jsonTypeName(nested.value), field.key, nested.key });
-                    }
-                }
-            }
-            if (std.mem.eql(u8, canonical, "evidence") and field.value == .array) {
-                for (field.value.array, 0..) |item, i| {
-                    if (item == .null) continue;
-                    if (item != .object) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.{s}.{d} of type contract.Evidence", .{ path, jsonTypeName(item), field.key, i });
-                    }
-                    for (item.object) |nested| {
-                        if (nested.value == .null) continue;
-                        const member = memberSpec(&evidence_members, nested.key, true) orelse continue;
-                        const numeric = member.kind == .integer;
-                        if (numeric and (nested.value != .number or !isIntegerToken(nested.value.number))) {
-                            if (nested.value == .number) {
-                                return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal number {s} into Go struct field Packet.{s}.{d}.{s} of type int", .{ path, nested.value.number, field.key, i, nested.key });
-                            }
-                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{d}.{s} of type int", .{ path, jsonTypeName(nested.value), field.key, i, nested.key });
-                        }
-                        if (!numeric and nested.value != .string) {
-                            return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Go struct field Packet.{s}.{d}.{s} of type string", .{ path, jsonTypeName(nested.value), field.key, i, nested.key });
-                        }
-                    }
-                }
-            }
-            if (std.mem.eql(u8, canonical, "degradations") and field.value == .array) {
-                for (field.value.array, 0..) |item, i| {
-                    if (item == .null) continue;
-                    if (item != .string) {
-                        return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON: json: cannot unmarshal {s} into Packet.{s}.{d} of type string", .{ path, jsonTypeName(item), field.key, i });
-                    }
-                }
-            }
-        }
-    }
-    return try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path});
-}
-
 fn parseValueFlag(args: []const []const u8, flag: []const u8) ?[]const u8 {
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, arg, flag) and i + 1 < args.len and !std.mem.startsWith(u8, args[i + 1], "-")) return args[i + 1];
@@ -844,6 +600,24 @@ fn invalidPacketDetails(allocator: std.mem.Allocator, violations: []const contra
     return try details.toOwnedSlice(allocator);
 }
 
+/// The strict packet boundary shared by every command: a read failure is
+/// "packet could not be loaded"; any decode rejection is "packet could not be
+/// decoded". Mirrors loadPacket plus isDecodeFailure in internal/cli/adapter.go.
+fn packetLoadFailure(allocator: std.mem.Allocator, command: []const u8, path: []const u8, err: LoadError, json_output: bool) !RunResult {
+    if (err == error.NotFound or err == error.ReadFailed) {
+        const detail = if (err == error.NotFound)
+            try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{path})
+        else
+            try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{path});
+        const details = [_][]const u8{detail};
+        return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable JSON packet with --packet <file>." }, json_output), .code = 2 };
+    }
+    // All strict decoder failures, including the size limit, use one generic
+    // response and never expose packet data or decoder diagnostics.
+    const details = [_][]const u8{"strict packet decoding failed"};
+    return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
+}
+
 fn contractValidate(allocator: std.mem.Allocator, args: []const []const u8, json_output: bool) !RunResult {
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, arg, "--packet") and (i + 1 >= args.len or std.mem.startsWith(u8, args[i + 1], "-"))) return fail(allocator, "--packet requires a value", "ownscout contract validate --help", json_output);
@@ -852,21 +626,7 @@ fn contractValidate(allocator: std.mem.Allocator, args: []const []const u8, json
     for (args) |arg| {
         if (!std.mem.eql(u8, arg, "--packet") and !std.mem.eql(u8, arg, "--json") and !std.mem.eql(u8, arg, path)) return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout contract validate --help", json_output);
     }
-    const packet = loadPacket(allocator, path) catch |err| {
-        const detail = switch (err) {
-            error.NotFound => try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{path}),
-            error.InvalidJson => try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{path}),
-            error.ObjectRequired => try std.fmt.allocPrint(allocator, "packet \"{s}\" must contain a JSON object", .{path}),
-            error.UnknownField => blk: {
-                const field = unknownPacketFieldFromFile(allocator, path) orelse "unknown";
-                break :blk try std.fmt.allocPrint(allocator, "packet \"{s}\" contains an unknown JSON field: json: unknown field {s}", .{ path, try quoteGoString(allocator, field) });
-            },
-            error.WrongType => try decodeFailureMessage(allocator, path),
-            else => try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{path}),
-        };
-        const details = [_][]const u8{detail};
-        return .{ .output = try result.render(allocator, .{ .command = "contract validate", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable JSON packet with --packet <file>." }, json_output), .code = 2 };
-    };
+    const packet = loadNodePacket(allocator, path) catch |err| return packetLoadFailure(allocator, "contract validate", path, err, json_output);
     const violations = try contract.validate(allocator, packet);
     if (violations.len != 0) {
         const details = try invalidPacketDetails(allocator, violations);
@@ -906,21 +666,7 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
         return fail(allocator, try std.fmt.allocPrint(allocator, "unknown flag or argument '{s}'", .{arg}), "ownscout evidence verify --help", json_output);
     }
     if (repo == null or repo.?.len == 0 or packet_path == null or packet_path.?.len == 0) return fail(allocator, "both --repo <dir> and --packet <file> are required", "ownscout evidence verify --help", json_output);
-    const packet = loadPacket(allocator, packet_path.?) catch |err| {
-        const detail = switch (err) {
-            error.NotFound => try std.fmt.allocPrint(allocator, "packet file \"{s}\" does not exist", .{packet_path.?}),
-            error.InvalidJson => try std.fmt.allocPrint(allocator, "packet \"{s}\" is not valid JSON", .{packet_path.?}),
-            error.ObjectRequired => try std.fmt.allocPrint(allocator, "packet \"{s}\" must contain a JSON object", .{packet_path.?}),
-            error.UnknownField => blk: {
-                const field = unknownPacketFieldFromFile(allocator, packet_path.?) orelse "unknown";
-                break :blk try std.fmt.allocPrint(allocator, "packet \"{s}\" contains an unknown JSON field: json: unknown field {s}", .{ packet_path.?, try quoteGoString(allocator, field) });
-            },
-            error.WrongType => try decodeFailureMessage(allocator, packet_path.?),
-            else => try std.fmt.allocPrint(allocator, "read packet \"{s}\" failed", .{packet_path.?}),
-        };
-        const details = [_][]const u8{detail};
-        return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable JSON packet with --packet <file>." }, json_output), .code = 2 };
-    };
+    const packet = loadNodePacket(allocator, packet_path.?) catch |err| return packetLoadFailure(allocator, "evidence verify", packet_path.?, err, json_output);
     const violations = try contract.validate(allocator, packet);
     if (violations.len != 0) {
         const details = try invalidPacketDetails(allocator, violations);
@@ -1270,14 +1016,14 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
     const envelope_path = envelope_value.?;
     const ledger_path = ledger_value.?;
     const packet = loadNodePacket(allocator, packet_path) catch |err| {
-        // strict packet decoding rejects every wire-format problem the same
-        // way, including an unknown (or merely differently cased) field name.
-        if (err == error.WrongType or err == error.InvalidJson or err == error.UnknownField or err == error.ObjectRequired) {
-            const details = [_][]const u8{"strict packet decoding failed"};
-            return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
+        // Every strict decoder rejection, including an oversized packet, is
+        // generic; only filesystem failures retain the loaded shape.
+        if (err == error.NotFound or err == error.ReadFailed) {
+            const details = [_][]const u8{"packet input could not be read"};
+            return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable packet file with --packet <file>." }, json_output), .code = 2 };
         }
-        const details = [_][]const u8{"packet input could not be read"};
-        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be loaded", .details = &details, .next_action = "Provide a readable packet file with --packet <file>." }, json_output), .code = 2 };
+        const details = [_][]const u8{"strict packet decoding failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "packet could not be decoded", .details = &details, .next_action = "Provide one valid packet-v1 JSON object with --packet <file>." }, json_output), .code = 2 };
     };
     const violations = try contract.validate(allocator, packet);
     if (violations.len != 0) {
@@ -2291,10 +2037,11 @@ fn consumeObjectDetailed(allocator: std.mem.Allocator, data: []const u8, start: 
         }
         if (data[index] == '}') return index + 1;
         if (data[index] != '"') {
-            // The token reader returns delimiters and digits lazily, so { and [
-            // and 0-9 reach the member-name check unchanged; a literal or a
-            // negative number is scanned first and its own error wins.
-            if (data[index] == '{' or data[index] == '[' or (data[index] >= '0' and data[index] <= '9')) {
+            // The token reader returns the { and [ delimiters lazily, so they
+            // reach the member-name check unchanged. A number or literal is
+            // scanned first, so its own syntax error wins: "0envelope" fails at
+            // the 'n' in the exponent before the name is rejected.
+            if (data[index] == '{' or data[index] == '[') {
                 error_out.* = "malformed JSON: object member name must be a string";
                 return null;
             }
@@ -2302,7 +2049,7 @@ fn consumeObjectDetailed(allocator: std.mem.Allocator, data: []const u8, start: 
                 't' => _ = scanLiteralDetailed(allocator, data, index, "true", error_out) orelse return null,
                 'f' => _ = scanLiteralDetailed(allocator, data, index, "false", error_out) orelse return null,
                 'n' => _ = scanLiteralDetailed(allocator, data, index, "null", error_out) orelse return null,
-                '-' => _ = scanNumberDetailed(allocator, data, index, error_out) orelse return null,
+                '-', '0'...'9' => _ = scanNumberDetailed(allocator, data, index, error_out) orelse return null,
                 else => {
                     scanErrorAt(allocator, error_out, data, index, "looking for beginning of value");
                     return null;
@@ -3001,44 +2748,34 @@ test "printability matches Go for representative runes" {
     try std.testing.expect(!strconvIsPrint(0x10fffe)); // astral noncharacter
 }
 
-test "decode precedence follows document order in both directions" {
+test "every command rejects unknown and wrongly-typed fields as a decode failure" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-
-    // An unknown field before the wrongly-typed one wins.
-    const unknown_first = try json.Parser.parse(allocator, "{\"budget\":{\"aaa_unknown\":1,\"max_evidence\":\"notanint\"}}");
-    try std.testing.expectEqual(DecodeIssue.unknown, firstIssueKind(unknown_first, true));
-    try std.testing.expectEqualStrings("aaa_unknown", unknownPacketField(unknown_first).?);
-
-    // A wrongly-typed field before the unknown one wins instead.
-    const unknown_last = try json.Parser.parse(allocator, "{\"budget\":{\"max_evidence\":\"notanint\",\"zzz_unknown\":1}}");
-    try std.testing.expectEqual(DecodeIssue.wrong_type, firstIssueKind(unknown_last, true));
-
-    // The same two shapes reach the reference messages end to end.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "unknown_first.json", .data = "{\"budget\":{\"aaa_unknown\":1,\"max_evidence\":\"notanint\"}}" });
-    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "unknown_last.json", .data = "{\"budget\":{\"max_evidence\":\"notanint\",\"zzz_unknown\":1}}" });
-    const first_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/unknown_first.json", .{tmp.sub_path});
-    const last_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/unknown_last.json", .{tmp.sub_path});
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "unknown.json", .data = "{\"budget\":{\"aaa_unknown\":1}}" });
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "wrong_type.json", .data = "{\"budget\":{\"max_evidence\":\"notanint\"}}" });
+    const unknown_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/unknown.json", .{tmp.sub_path});
+    const wrong_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/wrong_type.json", .{tmp.sub_path});
 
-    const first_result = try run(allocator, &.{ "contract", "validate", "--packet", first_path });
-    try std.testing.expectEqual(@as(u8, 2), first_result.code);
-    try std.testing.expect(std.mem.indexOf(u8, first_result.output, "json: unknown field \"aaa_unknown\"") != null);
-
-    const last_result = try run(allocator, &.{ "contract", "validate", "--packet", last_path });
-    try std.testing.expectEqual(@as(u8, 2), last_result.code);
-    try std.testing.expect(std.mem.indexOf(u8, last_result.output, "json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int") != null);
+    for ([_][]const u8{ unknown_path, wrong_path }) |path| {
+        const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
+        try std.testing.expectEqual(@as(u8, 2), response.code);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "packet could not be decoded") != null);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "strict packet decoding failed") != null);
+    }
 }
 
-test "field names fold like encoding/json" {
+test "ledger field matching follows Go simple-fold semantics" {
     try std.testing.expect(gofold.foldedEqual("SCHEMA_VERSION", "schema_version"));
     try std.testing.expect(gofold.foldedEqual("LiNe_EnD", "line_end"));
     try std.testing.expect(!gofold.foldedEqual("schema_version", "schema_versions"));
+    // The packet decoder is exact-only; this helper remains solely for the
+    // ledger's diagnostic that distinguishes non-canonical field spellings.
     // A non-ASCII rune folds to the minimum of its SimpleFold orbit. That can
-    // never equal an ASCII tag, except for the two runes whose orbit contains
-    // one: long s folds to S and KELVIN folds to K.
+    // never equal an ASCII ledger tag, except for the two runes whose orbit
+    // contains one: long s folds to S and KELVIN folds to K.
     try std.testing.expectEqual(@as(u21, 'S'), gofold.foldRune(0x17F));
     try std.testing.expectEqual(@as(u21, 'K'), gofold.foldRune(0x212A));
     try std.testing.expectEqual(@as(u21, 0xC9), gofold.foldRune(0xE9)); // é -> É
@@ -3046,7 +2783,7 @@ test "field names fold like encoding/json" {
     try std.testing.expect(!gofold.foldedEqual("öutcome", "outcome"));
 }
 
-test "contract and evidence fold field names while node stays exact" {
+test "contract and evidence decode exactly, like node verify" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -3055,67 +2792,62 @@ test "contract and evidence fold field names while node stays exact" {
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "case.json", .data = "{\"SCHEMA_VERSION\":\"v1\",\"OUTCOME\":\"complete\"}" });
     const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/case.json", .{tmp.sub_path});
 
-    // The contract decoder folds, so the case-varied keys are known and the
-    // packet reaches contract validation (missing fields) instead of failing
-    // to decode.
+    // Every command shares internal/nodepacket, which is exact only, so a
+    // case-varied packet fails to decode rather than reaching validation.
     const contract_result = try run(allocator, &.{ "contract", "validate", "--packet", path });
-    try std.testing.expectEqual(@as(u8, 1), contract_result.code);
-    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "packet is invalid") != null);
-    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "unknown field") == null);
+    try std.testing.expectEqual(@as(u8, 2), contract_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "strict packet decoding failed") != null);
 
-    // node verify decodes through internal/nodepacket, which is exact only.
+    const evidence_result = try run(allocator, &.{ "evidence", "verify", "--repo", ".", "--packet", path });
+    try std.testing.expectEqual(@as(u8, 2), evidence_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, evidence_result.output, "strict packet decoding failed") != null);
+
     const node_result = try run(allocator, &.{ "node", "verify", "--repo", ".", "--packet", path, "--envelope", "e.json", "--ledger", "l.jsonl" });
     try std.testing.expectEqual(@as(u8, 2), node_result.code);
     try std.testing.expect(std.mem.indexOf(u8, node_result.output, "strict packet decoding failed") != null);
 }
 
-test "type errors on case-varied keys keep the input spelling" {
+test "case-varied field names are rejected by every command" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const cases = [_][2][]const u8{
-        .{ "top.json", "{\"PACKET_ID\":5}" },
-        .{ "evidence.json", "{\"evidence\":[{\"LINE_START\":\"x\"}]}" },
-        .{ "budget.json", "{\"budget\":{\"MAX_BYTES\":\"x\"}}" },
-        .{ "freshness.json", "{\"FRESHNESS\":{\"CURRENT\":\"x\"}}" },
+    const cases = [_][]const u8{
+        "{\"PACKET_ID\":\"p\"}",
+        "{\"budget\":{\"MAX_BYTES\":1}}",
+        "{\"FRESHNESS\":{\"current\":true}}",
     };
-    const expected = [_][]const u8{
-        "Packet.PACKET_ID of type string",
-        "Packet.evidence.0.LINE_START of type int",
-        "Packet.budget.MAX_BYTES of type int64",
-        "Packet.FRESHNESS.CURRENT of type bool",
-    };
-    for (cases, expected) |case, want| {
-        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = case[0], .data = case[1] });
-        const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, case[0] });
-        const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
-        try std.testing.expectEqual(@as(u8, 2), response.code);
-        try std.testing.expect(std.mem.indexOf(u8, response.output, want) != null);
-    }
-}
-
-test "non-integral and out-of-range integers name the literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const cases = [_][2][]const u8{
-        .{ "{\"budget\":{\"max_evidence\":1.5}}", "json: cannot unmarshal number 1.5 into Go struct field Packet.budget.max_evidence of type int" },
-        .{ "{\"budget\":{\"max_bytes\":1e2}}", "json: cannot unmarshal number 1e2 into Go struct field Packet.budget.max_bytes of type int64" },
-        .{ "{\"budget\":{\"used_evidence\":99999999999999999999}}", "json: cannot unmarshal number 99999999999999999999 into Go struct field Packet.budget.used_evidence of type int" },
-        .{ "{\"evidence\":[{\"line_start\":1.5}]}", "json: cannot unmarshal number 1.5 into Go struct field Packet.evidence.0.line_start of type int" },
-        .{ "{\"budget\":{\"max_evidence\":\"x\"}}", "json: cannot unmarshal string into Go struct field Packet.budget.max_evidence of type int" },
-    };
-    for (cases, 0..) |case, index| {
-        const name = try std.fmt.allocPrint(allocator, "num{d}.json", .{index});
-        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = name, .data = case[0] });
+    for (cases, 0..) |data, index| {
+        const name = try std.fmt.allocPrint(allocator, "case{d}.json", .{index});
+        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = name, .data = data });
         const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, name });
         const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
         try std.testing.expectEqual(@as(u8, 2), response.code);
-        try std.testing.expect(std.mem.indexOf(u8, response.output, case[1]) != null);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "strict packet decoding failed") != null);
+    }
+}
+
+test "non-integral and out-of-range integers are decode failures" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cases = [_][]const u8{
+        "{\"budget\":{\"max_evidence\":1.5}}",
+        "{\"budget\":{\"max_bytes\":1e2}}",
+        "{\"budget\":{\"used_evidence\":99999999999999999999}}",
+        "{\"evidence\":[{\"line_start\":1.5}]}",
+        "{\"budget\":{\"max_evidence\":\"x\"}}",
+    };
+    for (cases, 0..) |data, index| {
+        const name = try std.fmt.allocPrint(allocator, "num{d}.json", .{index});
+        try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = name, .data = data });
+        const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, name });
+        const response = try run(allocator, &.{ "contract", "validate", "--packet", path });
+        try std.testing.expectEqual(@as(u8, 2), response.code);
+        try std.testing.expect(std.mem.indexOf(u8, response.output, "strict packet decoding failed") != null);
     }
 }
 
@@ -3140,29 +2872,25 @@ test "strict node decoding rejects duplicate keys, nulls, and invalid utf8" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    // Duplicate keys: encoding/json keeps the last, nodepacket rejects.
+    // Duplicate keys are rejected, unlike the encoding/json last-wins rule.
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "dup.json", .data = "{\"packet_id\":\"a\",\"packet_id\":\"b\"}" });
     const dup_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/dup.json", .{tmp.sub_path});
-    try std.testing.expectEqualStrings("b", (try loadPacket(allocator, dup_path)).packet_id);
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, dup_path));
 
-    // An explicit null is absent for the contract path and rejected by node.
+    // An explicit null is rejected rather than treated as absent.
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "null.json", .data = "{\"issued_at\":null}" });
     const null_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/null.json", .{tmp.sub_path});
-    try std.testing.expectEqualStrings("", (try loadPacket(allocator, null_path)).issued_at);
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, null_path));
 
-    // Invalid UTF-8: the contract path substitutes U+FFFD, node rejects.
+    // Invalid UTF-8 is rejected rather than substituted with U+FFFD.
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "bad.json", .data = "{\"packet_id\":\"a\xff\"}" });
     const bad_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/bad.json", .{tmp.sub_path});
-    try std.testing.expectEqualStrings("a\u{fffd}", (try loadPacket(allocator, bad_path)).packet_id);
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, bad_path));
 
-    // A lone surrogate escape is U+FFFD for the contract path and rejected by
-    // node, which checks the raw escapes before tokenizing.
+    // A lone surrogate escape is rejected; the raw escapes are checked before
+    // tokenizing.
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "surrogate.json", .data = "{\"packet_id\":\"\\uD800\"}" });
     const surrogate_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/surrogate.json", .{tmp.sub_path});
-    try std.testing.expectEqualStrings("\u{fffd}", (try loadPacket(allocator, surrogate_path)).packet_id);
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, surrogate_path));
 }
 
@@ -3187,6 +2915,31 @@ test "strict node decoding accepts the exact valid shape" {
     try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "frac.json", .data = "{\"budget\":{\"max_evidence\":1.5}}" });
     const frac_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/frac.json", .{tmp.sub_path});
     try std.testing.expectError(error.WrongType, loadNodePacket(allocator, frac_path));
+}
+
+test "oversized packets are generic decode failures for packet commands" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const data = try allocator.alloc(u8, max_packet_bytes + 1);
+    @memset(data, ' ');
+    data[0] = '{';
+    data[data.len - 1] = '}';
+    try tmp.dir.writeFile(std.Options.debug_io, .{ .sub_path = "oversized.json", .data = data });
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/oversized.json", .{tmp.sub_path});
+
+    const contract_result = try run(allocator, &.{ "contract", "validate", "--packet", path, "--json" });
+    try std.testing.expectEqual(@as(u8, 2), contract_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "strict packet decoding failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contract_result.output, "oversized.json") == null);
+
+    const evidence_result = try run(allocator, &.{ "evidence", "verify", "--repo", ".", "--packet", path, "--json" });
+    try std.testing.expectEqual(@as(u8, 2), evidence_result.code);
+    try std.testing.expect(std.mem.indexOf(u8, evidence_result.output, "strict packet decoding failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, evidence_result.output, "oversized.json") == null);
 }
 
 test "envelope validation rejects duplicate nodes and cycles" {
