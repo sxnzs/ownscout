@@ -36,10 +36,26 @@ type Report struct {
 	SkippedCount  int            `json:"skipped_count"`
 }
 
+// Options selects optional verification behaviour. The zero value is the
+// historical, always-on behaviour: a span is verified, or it is not.
+type Options struct {
+	// Relocate re-resolves an evidence span whose content hash does not match
+	// at the cited lines, and annotates the failure with where the same content
+	// now lives. It is diagnostic only: relocation never changes a span's
+	// status, the report counters, or the exit code.
+	Relocate bool
+}
+
 // VerifyPacket verifies each evidence span against the repository's current
 // working tree. The packet is treated as input only; in particular, its
 // verifier_status fields are not updated or trusted.
 func VerifyPacket(repoRoot string, packet contract.Packet) (Report, error) {
+	return VerifyPacketWithOptions(repoRoot, packet, Options{})
+}
+
+// VerifyPacketWithOptions is VerifyPacket with optional behaviour enabled. See
+// Options for the only option that exists.
+func VerifyPacketWithOptions(repoRoot string, packet contract.Packet, options Options) (Report, error) {
 	root, err := repositoryRoot(repoRoot)
 	if err != nil {
 		return Report{}, err
@@ -51,7 +67,7 @@ func VerifyPacket(repoRoot string, packet contract.Packet) (Report, error) {
 		Results:  make([]Verification, 0, len(packet.Evidence)),
 	}
 	for _, item := range packet.Evidence {
-		result := verifyOne(root, item)
+		result := verifyOne(root, item, options)
 		report.Results = append(report.Results, result)
 		switch result.Status {
 		case "verified":
@@ -95,7 +111,7 @@ func repositoryRoot(repoRoot string) (string, error) {
 	return filepath.Clean(root), nil
 }
 
-func verifyOne(root string, item contract.Evidence) Verification {
+func verifyOne(root string, item contract.Evidence, options Options) Verification {
 	result := Verification{
 		EvidenceID:   item.EvidenceID,
 		Path:         item.Path,
@@ -120,6 +136,7 @@ func verifyOne(root string, item contract.Evidence) Verification {
 	lines := countNormalizedLines(data)
 	if item.LineStart < 1 || item.LineEnd < item.LineStart || item.LineEnd > lines {
 		result.Message = fmt.Sprintf("invalid line range %d-%d for %d line(s)", item.LineStart, item.LineEnd, lines)
+		result.Message += locationClause(data, lines, item.LineStart, item.LineEnd, item.ContentHash, options)
 		return result
 	}
 
@@ -132,11 +149,25 @@ func verifyOne(root string, item contract.Evidence) Verification {
 	result.ActualHash = hashSelectedLines(data, item.LineStart, item.LineEnd)
 	if result.ActualHash != expected {
 		result.Message = fmt.Sprintf("content hash mismatch: expected %s, got %s", item.ContentHash, result.ActualHash)
+		result.Message += locationClause(data, lines, item.LineStart, item.LineEnd, item.ContentHash, options)
 		return result
 	}
 
 	result.Status = "verified"
 	return result
+}
+
+// locationClause renders the relocation diagnostic for a failed span, or "" when
+// relocation is disabled or the recorded fingerprint is unusable.
+func locationClause(data []byte, totalLines, lineStart, lineEnd int, contentHash string, options Options) string {
+	if !options.Relocate {
+		return ""
+	}
+	expected, err := normalizedExpectedHash(contentHash)
+	if err != nil {
+		return ""
+	}
+	return relocationClause(data, totalLines, lineStart, lineEnd, expected)
 }
 
 func safeEvidencePath(root, rawPath string) (string, error) {

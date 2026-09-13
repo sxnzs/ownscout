@@ -144,6 +144,65 @@ func BenchmarkVerifyPacketManySpans(b *testing.B) {
 	}
 }
 
+// Relocation is opt-in. Resolving one span costs a single pass over the file to
+// index line starts, plus a handful of window hashes for a nearby shift: total
+// cost grows with the file, while the probing itself does not. The second
+// benchmark pins the opposite end - content that is absent, where the search has
+// to stop on the byte budget instead of scanning without bound.
+func BenchmarkRelocateNearbyShift(b *testing.B) {
+	// A small span, as real evidence is. Probe cost is proportional to the
+	// cited extent rather than the file, so a shift is found in a few probes
+	// however large the file is; the index pass is what the numbers show.
+	const extent = 16
+	for _, size := range []int{64 << 10, 1 << 20, 8 << 20} {
+		b.Run(fmt.Sprintf("%dKiB", size>>10), func(b *testing.B) {
+			root, packet := benchRepo(b, size, benchLines)
+			data := mustRead(b, filepath.Join(root, "generated.txt"))
+			total := len(legacySplitNormalizedLines(data))
+			// The recorded fingerprint belongs eight lines below the citation.
+			target := total*3/4 + 1
+			packet.Evidence[0].LineStart = target - 8
+			packet.Evidence[0].LineEnd = target - 8 + extent - 1
+			packet.Evidence[0].ContentHash = "sha256:" + hashRange(b, data, target, target+extent-1)
+			b.SetBytes(int64(size))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				report, err := VerifyPacketWithOptions(root, packet, Options{Relocate: true})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if report.Ok {
+					b.Fatal("expected a failed span")
+				}
+				if !strings.Contains(report.Results[0].Message, "relocates to lines") {
+					b.Fatalf("expected a relocation, got %q", report.Results[0].Message)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkRelocateAbsentContent(b *testing.B) {
+	root, packet := benchRepo(b, 1<<20, benchLines)
+	packet.Evidence[0].LineStart = 1
+	packet.Evidence[0].LineEnd = 16
+	packet.Evidence[0].ContentHash = "sha256:" + strings.Repeat("0", 64)
+	b.SetBytes(1 << 20)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		report, err := VerifyPacketWithOptions(root, packet, Options{Relocate: true})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if report.Ok {
+			b.Fatal("expected a failed span")
+		}
+		if !strings.Contains(report.Results[0].Message, "byte budget") {
+			b.Fatalf("expected the search to stop on its budget, got %q", report.Results[0].Message)
+		}
+	}
+}
+
 func countLines(b *testing.B, path string) int {
 	b.Helper()
 	data := mustRead(b, path)

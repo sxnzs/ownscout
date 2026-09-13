@@ -26,7 +26,7 @@ Usage:
   ownscout doctor
   ownscout version
   ownscout contract validate --packet <file> [--json]
-  ownscout evidence verify --repo <dir> --packet <file> [--json]
+  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
   ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]
 
 Use "ownscout <command> --help" for command details.`
@@ -252,7 +252,7 @@ func runEvidence(args []string, out io.Writer) int {
 	if args[0] != "verify" {
 		return usageFailureWithJSON(out, "unknown evidence subcommand "+quote(args[0]), "ownscout evidence --help", hasJSON(args))
 	}
-	flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{"--repo": true, "--packet": true})
+	flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{"--repo": true, "--packet": true}, "--relocate")
 	if err != nil {
 		return usageFailureWithJSON(out, err.Error(), "ownscout evidence verify --help", hasJSON(args))
 	}
@@ -268,7 +268,7 @@ func runEvidence(args []string, out io.Writer) int {
 	if violations := validatePacket(packet); len(violations) > 0 {
 		return result(out, jsonOutput, resultData{"evidence verify", false, "packet is invalid", violations, "Fix the packet contract, then verify evidence again."}, 1)
 	}
-	report, err := evidence.VerifyPacket(repo, packet)
+	report, err := evidence.VerifyPacketWithOptions(repo, packet, evidence.Options{Relocate: flags["--relocate"] != ""})
 	if err != nil {
 		return result(out, jsonOutput, resultData{"evidence verify", false, "repository could not be checked", []string{err.Error()}, "Provide a readable repository directory with --repo <dir>."}, 2)
 	}
@@ -299,7 +299,7 @@ func writeHelp(args []string, out io.Writer) int {
 		case "contract":
 			text = "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules."
 		case "evidence":
-			text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nVerifies packet evidence spans against a local repository."
+			text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository."
 		case "node":
 			text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nVerifies a node-envelope-v1 graph against fresh repository evidence and records the ordered results."
 		}
@@ -308,7 +308,7 @@ func writeHelp(args []string, out io.Writer) int {
 		text = "Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file."
 	}
 	if len(args) >= 2 && args[0] == "evidence" && args[1] == "verify" {
-		text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun."
+		text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun."
 	}
 	if len(args) >= 2 && args[0] == "node" && args[1] == "verify" {
 		text = "Usage: ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]\n\nStrictly validates the packet and node-envelope-v1 graph, verifies fresh evidence, evaluates in deterministic graph order, and appends every result once.\n\nNext action: provide all four paths and rerun."
@@ -317,13 +317,24 @@ func writeHelp(args []string, out io.Writer) int {
 	return 0
 }
 
-func parseFlags(args []string, valued map[string]bool) (map[string]string, bool, error) {
+// parseFlags parses a subcommand's flags. Flags named in valued take a value;
+// flags named in boolean are switches. --json is always accepted and reported
+// separately because every command renders both modes. A switch is recorded as
+// "true" in the returned map, so callers test the same way they test a valued
+// flag being present.
+func parseFlags(args []string, valued map[string]bool, boolean ...string) (map[string]string, bool, error) {
 	values := map[string]string{}
+	switches := make(map[string]bool, len(boolean))
+	for _, name := range boolean {
+		switches[name] = true
+	}
 	jsonOutput := false
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--json":
+		switch {
+		case args[i] == "--json":
 			jsonOutput = true
+		case switches[args[i]]:
+			values[args[i]] = "true"
 		default:
 			if !valued[args[i]] {
 				return nil, false, fmt.Errorf("unknown flag or argument %s", quote(args[i]))
