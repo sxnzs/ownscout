@@ -7,6 +7,15 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
+}
 
 const ZERO: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 #[derive(Clone)]
@@ -33,18 +42,11 @@ pub struct Store {
 pub fn open(path: &str, repo: &str) -> Result<Store, String> {
     let repo =
         fs::canonicalize(repo).map_err(|e| format!("resolve repository path {:?}: {}", repo, e))?;
-    let abs = fs::canonicalize(Path::new(path).parent().unwrap_or(Path::new(".")))
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
-    let full = abs.join(Path::new(path).file_name().unwrap_or_default());
-    let full = full.canonicalize().unwrap_or(full);
-    if inside(&repo, &full) {
-        return Err(format!(
-            "ledger path {:?} is inside repository {:?}",
-            full.display(),
-            repo.display()
-        ));
-    }
-    reject_ancestors(&full)?;
+    // The append path hardens the ledger location before touching it: the
+    // absolute (unresolved) path may not contain a symlink ancestor. The read
+    // path (`verify`) deliberately skips this check.
+    let full = abs_clean(path);
+    reject_symlink_ancestors(&full)?;
     if let Ok(m) = fs::symlink_metadata(&full) {
         if m.file_type().is_symlink() {
             return Err(format!("ledger path {:?} is a symlink", full.display()));
@@ -52,6 +54,14 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
         if !m.is_file() {
             return Err(format!("ledger {:?} is not a regular file", full.display()));
         }
+    }
+    let resolved = resolve_ledger_path(&full);
+    if inside(&repo, &resolved) {
+        return Err(format!(
+            "ledger path {:?} is inside repository {:?}",
+            resolved.display(),
+            repo.display()
+        ));
     }
     let mut f = OpenOptions::new()
         .read(true)
@@ -282,21 +292,54 @@ fn hex64(s: &str) -> bool {
 fn inside(root: &Path, p: &Path) -> bool {
     p.strip_prefix(root).is_ok()
 }
-fn reject_ancestors(p: &Path) -> Result<(), String> {
+// reject_symlink_ancestors mirrors internal/ledger's hardening: no component of
+// the unresolved absolute ledger path may be a symlink, except the permitted
+// macOS /var system link. Non-existent components are skipped so a not-yet
+// created ledger can still be opened.
+fn reject_symlink_ancestors(p: &Path) -> Result<(), String> {
     let mut cur = PathBuf::new();
     for c in p.components() {
         cur.push(c);
-        if let Ok(m) = fs::symlink_metadata(&cur) {
-            if m.file_type().is_symlink() {
+        match fs::symlink_metadata(&cur) {
+            Ok(m) if m.file_type().is_symlink() => {
+                if permitted_system_symlink(&cur) {
+                    continue;
+                }
                 return Err(format!(
                     "ledger path {:?} has symlink ancestor {:?}",
                     p.display(),
                     cur.display()
                 ));
             }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(format!(
+                    "inspect ledger path ancestor {:?}: {}",
+                    cur.display(),
+                    e
+                ))
+            }
         }
     }
     Ok(())
+}
+
+fn permitted_system_symlink(path: &Path) -> bool {
+    if path.to_string_lossy() != "/var" {
+        return false;
+    }
+    matches!(fs::canonicalize(path), Ok(resolved) if resolved == Path::new("/private/var"))
+}
+
+// resolve_ledger_path resolves the ledger's parent directory the way the
+// reference does, keeping the final component unresolved.
+fn resolve_ledger_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    match fs::canonicalize(parent) {
+        Ok(resolved) => resolved.join(path.file_name().unwrap_or_default()),
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +354,7 @@ pub struct Summary {
     pub tip: String,
 }
 
+#[derive(Debug)]
 pub enum VerifyError {
     Read(String),
     Validation(String),
@@ -356,6 +400,157 @@ pub fn verify(path: &str) -> Result<Summary, VerifyError> {
     }
     validate_ledger(&data)
         .map_err(|e| VerifyError::Validation(format!("validate ledger {}: {}", quoted, e)))
+}
+
+// rotate archives a valid, non-empty ledger by renaming it to
+// "<path>.<first 8 chars of the chain tip>", leaving the live name absent so the
+// next append starts a fresh chain. A ledger that fails validation, or one with
+// no records, keeps its live name.
+pub fn rotate(path: &str) -> Result<(Summary, String), VerifyError> {
+    let ledger_path = abs_clean(path);
+    let display = ledger_path.display().to_string();
+    let quoted = crate::packet::go_quote(&display);
+    // Like the append path, rotation hardens the location before touching it.
+    reject_symlink_ancestors(&ledger_path).map_err(VerifyError::Read)?;
+    let info = match fs::symlink_metadata(&ledger_path) {
+        Ok(info) => info,
+        Err(e) => {
+            return Err(VerifyError::Read(format!(
+                "read ledger {}: lstat {}: {}",
+                quoted,
+                display,
+                go_errno(&e)
+            )))
+        }
+    };
+    if !info.is_file() {
+        return Err(VerifyError::Read(format!(
+            "read ledger {}: not a regular file",
+            quoted
+        )));
+    }
+
+    // Keep the descriptor open and exclusively locked for the complete audit
+    // and rename. Reading by path after acquiring the lock would allow a path
+    // replacement to escape the inode that was actually locked.
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    options.custom_flags(nofollow_flag());
+    let mut file = options.open(&ledger_path).map_err(|e| {
+        VerifyError::Read(format!("open ledger {}: {}", quoted, go_errno(&e)))
+    })?;
+    lock_exclusive(&file).map_err(|e| {
+        VerifyError::Read(format!("lock ledger {}: {}", quoted, go_errno(&e)))
+    })?;
+    let _lock = LedgerLock::new(&file);
+
+    let mut data = Vec::new();
+    if let Err(e) = (&mut file)
+        .take((MAX_LEDGER_SIZE + 1) as u64)
+        .read_to_end(&mut data)
+    {
+        return Err(VerifyError::Read(format!(
+            "read ledger {}: {}",
+            quoted,
+            go_errno(&e)
+        )));
+    }
+    if data.len() > MAX_LEDGER_SIZE {
+        return Err(VerifyError::Read(format!(
+            "read ledger {}: ledger exceeds {} bytes",
+            quoted, MAX_LEDGER_SIZE
+        )));
+    }
+    let summary = validate_ledger(&data)
+        .map_err(|e| VerifyError::Validation(format!("validate ledger {}: {}", quoted, e)))?;
+    if summary.records == 0 {
+        return Err(VerifyError::Read(format!("ledger {} is empty", quoted)));
+    }
+    let archive = format!("{}.{}", display, &summary.tip[..8]);
+    let archive_quoted = crate::packet::go_quote(&archive);
+    match fs::symlink_metadata(&archive) {
+        Ok(_) => {
+            return Err(VerifyError::Read(format!(
+                "archive {} already exists",
+                archive_quoted
+            )))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(VerifyError::Read(format!(
+                "inspect archive {}: {}",
+                archive_quoted,
+                go_errno(&e)
+            )))
+        }
+    }
+    if let Err(e) = fs::rename(&ledger_path, &archive) {
+        return Err(VerifyError::Read(format!(
+            "rename ledger {}: {}",
+            quoted,
+            go_errno(&e)
+        )));
+    }
+    Ok((summary, archive))
+}
+
+#[cfg(unix)]
+fn nofollow_flag() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        0o400000
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        0x100
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+    {
+        0
+    }
+}
+
+fn lock_exclusive(file: &File) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        if unsafe { flock(file.as_raw_fd(), 2) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = file;
+    Ok(())
+}
+
+struct LedgerLock {
+    #[cfg(unix)]
+    fd: i32,
+}
+
+impl LedgerLock {
+    fn new(file: &File) -> Self {
+        #[cfg(unix)]
+        {
+            return Self {
+                fd: file.as_raw_fd(),
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            Self {}
+        }
+    }
+}
+
+impl Drop for LedgerLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            let _ = unsafe { flock(self.fd, 8) };
+        }
+    }
 }
 
 fn abs_clean(path: &str) -> PathBuf {

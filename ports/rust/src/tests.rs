@@ -545,6 +545,130 @@ fn ledger_verify_rejects_a_line_over_the_scanner_bound() {
 }
 
 #[test]
+fn ledger_rotate_archives_a_valid_ledger() {
+    let root = temp_dir("ledger-rotate-root");
+    let outside = temp_dir("ledger-rotate-outside").join("ledger.jsonl");
+    let mut store = ledger::open(outside.to_str().unwrap(), root.to_str().unwrap()).unwrap();
+    let record = store
+        .append(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            "0.1.0",
+            vec![ledger::NodeResult {
+                node_id: "build".into(),
+                status: "evidence_current".into(),
+                reason: String::new(),
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    let (summary, archive) = ledger::rotate(outside.to_str().unwrap()).unwrap();
+    assert_eq!(summary.records, 1);
+    assert_eq!(summary.tip, record.hash);
+    assert_eq!(
+        archive,
+        format!("{}.{}", outside.display(), &record.hash[..8])
+    );
+    assert!(!outside.exists(), "the live ledger name must be vacated");
+    assert!(std::path::Path::new(&archive).exists());
+    // The archive is itself a valid ledger, and the vacated name is a read
+    // failure rather than a second rotation.
+    assert!(ledger::verify(&archive).is_ok());
+    assert!(matches!(
+        ledger::rotate(outside.to_str().unwrap()),
+        Err(ledger::VerifyError::Read(_))
+    ));
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn ledger_rotate_refuses_collisions_bad_and_empty_ledgers() {
+    let root = temp_dir("ledger-rotate-bad-root");
+    let outside = temp_dir("ledger-rotate-bad-outside").join("ledger.jsonl");
+    let mut store = ledger::open(outside.to_str().unwrap(), root.to_str().unwrap()).unwrap();
+    let record = store
+        .append(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            "0.1.0",
+            vec![ledger::NodeResult {
+                node_id: "build".into(),
+                status: "evidence_current".into(),
+                reason: String::new(),
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    // An existing archive path blocks the rotation.
+    let archive = format!("{}.{}", outside.display(), &record.hash[..8]);
+    fs::write(&archive, b"").unwrap();
+    match ledger::rotate(outside.to_str().unwrap()) {
+        Err(ledger::VerifyError::Read(detail)) => {
+            assert!(detail.contains("already exists"), "{detail}")
+        }
+        _ => panic!("a colliding archive was accepted"),
+    }
+    fs::remove_file(&archive).unwrap();
+
+    // A garbage ledger is a validation failure and keeps its live name.
+    fs::write(&outside, b"not a ledger record\n").unwrap();
+    assert!(matches!(
+        ledger::rotate(outside.to_str().unwrap()),
+        Err(ledger::VerifyError::Validation(_))
+    ));
+    assert!(outside.exists());
+
+    // An empty ledger is a read failure and is not rotated.
+    fs::write(&outside, b"").unwrap();
+    match ledger::rotate(outside.to_str().unwrap()) {
+        Err(ledger::VerifyError::Read(detail)) => assert!(detail.contains("is empty"), "{detail}"),
+        _ => panic!("an empty ledger was rotated"),
+    }
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside.parent().unwrap()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn ledger_open_hardens_symlink_ancestors_but_verify_does_not() {
+    let root = temp_dir("ledger-symlink-root");
+    let base = temp_dir("ledger-symlink-base");
+    let real = base.join("real");
+    fs::create_dir_all(&real).unwrap();
+    let real_ledger = real.join("out.jsonl");
+    let mut store = ledger::open(real_ledger.to_str().unwrap(), root.to_str().unwrap()).unwrap();
+    store
+        .append(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            "0.1.0",
+            vec![ledger::NodeResult {
+                node_id: "build".into(),
+                status: "evidence_current".into(),
+                reason: String::new(),
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    let linked = base.join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    let via_link = linked.join("out.jsonl");
+    // The read path still accepts a symlinked ancestor.
+    assert!(ledger::verify(via_link.to_str().unwrap()).is_ok());
+    // The append path keeps its hardening.
+    let err = ledger::open(via_link.to_str().unwrap(), root.to_str().unwrap())
+        .err()
+        .unwrap();
+    assert!(err.contains("symlink ancestor"), "{err}");
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn cli_ledger_verify_reports_summary_and_errors() {
     let root = temp_dir("ledger-verify-root");
     let outside = temp_dir("ledger-verify-outside").join("ledger.jsonl");

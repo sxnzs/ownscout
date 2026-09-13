@@ -2,7 +2,7 @@ use crate::result::{render, usage, ResultData};
 use crate::{contract, evidence, ledger, node, packet, sha256};
 use std::fs;
 
-const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nUse \"ownscout <command> --help\" for command details.";
+const ROOT_USAGE: &str = "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet <file> [--json]\n  ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n  ownscout ledger verify --ledger <file> [--json]\n  ownscout ledger rotate --ledger <file> [--json]\n  ownscout node bind --packet <file> [--json]\n  ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nUse \"ownscout <command> --help\" for command details.";
 
 pub fn run(args: &[String]) -> (String, i32) {
     if args.is_empty() {
@@ -381,15 +381,25 @@ fn ledger_command(args: &[String]) -> (String, i32) {
         return usage_result(false, "a ledger subcommand is required", "ownscout ledger --help");
     }
     let json = args.iter().any(|a| a == "--json");
-    if args[1] != "verify" {
-        return usage_result(
+    match args[1].as_str() {
+        "verify" => ledger_verify_command(&args[2..], json),
+        "rotate" => ledger_rotate_command(&args[2..], json),
+        other => usage_result(
             json,
-            &format!("unknown ledger subcommand '{}'", args[1]),
+            &format!("unknown ledger subcommand '{}'", other),
             "ownscout ledger --help",
-        );
+        ),
     }
+}
+
+// parse_ledger_flag parses the shared "--ledger <file> [--json]" shape.
+fn parse_ledger_flag(
+    args: &[String],
+    json: bool,
+    help: &str,
+) -> Result<String, (String, i32)> {
     let mut ledger_path = None;
-    let mut i = 2;
+    let mut i = 0;
     while i < args.len() {
         if args[i] == "--json" {
             i += 1;
@@ -397,28 +407,28 @@ fn ledger_command(args: &[String]) -> (String, i32) {
         }
         if args[i] == "--ledger" {
             if i + 1 >= args.len() || args[i + 1].starts_with('-') {
-                return usage_result(
-                    json,
-                    "--ledger requires a value",
-                    "ownscout ledger verify --help",
-                );
+                return Err(usage_result(json, "--ledger requires a value", help));
             }
             ledger_path = Some(args[i + 1].clone());
             i += 2;
         } else {
-            return usage_result(
+            return Err(usage_result(
                 json,
                 &format!("unknown flag or argument '{}'", args[i]),
-                "ownscout ledger verify --help",
-            );
+                help,
+            ));
         }
     }
-    let Some(path) = ledger_path.filter(|value| !value.is_empty()) else {
-        return usage_result(
-            json,
-            "missing required --ledger value",
-            "ownscout ledger verify --help",
-        );
+    match ledger_path.filter(|value| !value.is_empty()) {
+        Some(path) => Ok(path),
+        None => Err(usage_result(json, "missing required --ledger value", help)),
+    }
+}
+
+fn ledger_verify_command(args: &[String], json: bool) -> (String, i32) {
+    let path = match parse_ledger_flag(args, json, "ownscout ledger verify --help") {
+        Ok(path) => path,
+        Err(failure) => return failure,
     };
     match ledger::verify(&path) {
         Ok(summary) => {
@@ -457,6 +467,52 @@ fn ledger_command(args: &[String]) -> (String, i32) {
                 summary: "ledger could not be read".into(),
                 details: vec![detail],
                 next_action: "Provide a readable ledger file with --ledger <file>.".into(),
+            },
+            json,
+            2,
+        )),
+    }
+}
+
+fn ledger_rotate_command(args: &[String], json: bool) -> (String, i32) {
+    let path = match parse_ledger_flag(args, json, "ownscout ledger rotate --help") {
+        Ok(path) => path,
+        Err(failure) => return failure,
+    };
+    match ledger::rotate(&path) {
+        Ok((summary, archive)) => result(render(
+            &ResultData {
+                command: "ledger rotate".into(),
+                ok: true,
+                summary: "ledger rotated".into(),
+                details: vec![
+                    format!("{} record(s), tip {}", summary.records, summary.tip),
+                    format!("archived to {}", archive),
+                ],
+                next_action: "The next node verify starts a fresh chain; audit the archive with ownscout ledger verify.".into(),
+            },
+            json,
+            0,
+        )),
+        Err(ledger::VerifyError::Validation(detail)) => result(render(
+            &ResultData {
+                command: "ledger rotate".into(),
+                ok: false,
+                summary: "ledger verification failed".into(),
+                details: vec![detail],
+                next_action: "Repair the ledger before rotating; a broken chain keeps its live name."
+                    .into(),
+            },
+            json,
+            1,
+        )),
+        Err(ledger::VerifyError::Read(detail)) => result(render(
+            &ResultData {
+                command: "ledger rotate".into(),
+                ok: false,
+                summary: "ledger could not be rotated".into(),
+                details: vec![detail],
+                next_action: "Provide a readable, non-empty ledger file with --ledger <file>.".into(),
             },
             json,
             2,
@@ -847,7 +903,7 @@ fn help(args: &[String]) -> (String, i32) {
             "version" => "Usage: ownscout version\n\nPrints the OwnScout version.".into(),
             "contract" => "Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.".into(),
             "evidence" => "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.".into(),
-            "ledger" => "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.".into(),
+            "ledger" => "Usage: ownscout ledger verify --ledger <file> [--json]\n       ownscout ledger rotate --ledger <file> [--json]\n\nAudits or archives an append-only ledger.".into(),
             "node" => "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.".into(),
             _ => ROOT_USAGE.to_string(),
         };
