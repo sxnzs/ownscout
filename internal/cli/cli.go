@@ -29,6 +29,7 @@ Usage:
   ownscout contract validate --packet <file> [--json]
   ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
   ownscout ledger verify --ledger <file> [--json]
+  ownscout ledger rotate --ledger <file> [--json]
   ownscout node bind --packet <file> [--json]
   ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]
 
@@ -146,7 +147,11 @@ func runLedger(args []string, out io.Writer) int {
 	if len(args) == 0 {
 		return usageFailureWithJSON(out, "a ledger subcommand is required", "ownscout ledger --help", false)
 	}
-	if args[0] != "verify" {
+	switch args[0] {
+	case "verify":
+	case "rotate":
+		return runLedgerRotate(args[1:], out)
+	default:
 		return usageFailureWithJSON(out, "unknown ledger subcommand "+quote(args[0]), "ownscout ledger --help", hasJSON(args))
 	}
 	flags, jsonOutput, err := parseFlags(args[1:], map[string]bool{"--ledger": true})
@@ -188,6 +193,45 @@ func runLedger(args []string, out io.Writer) int {
 		Summary:    "ledger is intact",
 		Details:    []string{fmt.Sprintf("%d record(s), tip %s", summary.Records, tip)},
 		NextAction: "The ledger chain is intact.",
+	}, 0)
+}
+
+func runLedgerRotate(args []string, out io.Writer) int {
+	flags, jsonOutput, err := parseFlags(args, map[string]bool{"--ledger": true})
+	if err != nil {
+		return usageFailureWithJSON(out, err.Error(), "ownscout ledger rotate --help", hasJSON(args))
+	}
+	ledgerPath := flags["--ledger"]
+	if ledgerPath == "" {
+		return usageFailureWithJSON(out, "missing required --ledger value", "ownscout ledger rotate --help", jsonOutput)
+	}
+
+	summary, archivePath, err := ledger.Rotate(ledgerPath)
+	if err != nil {
+		var validationErr *ledger.ValidationError
+		if errors.As(err, &validationErr) {
+			return result(out, jsonOutput, resultData{
+				Command:    "ledger rotate",
+				OK:         false,
+				Summary:    "ledger verification failed",
+				Details:    []string{err.Error()},
+				NextAction: "Repair the ledger before rotating; a broken chain keeps its live name.",
+			}, 1)
+		}
+		return result(out, jsonOutput, resultData{
+			Command:    "ledger rotate",
+			OK:         false,
+			Summary:    "ledger could not be rotated",
+			Details:    []string{err.Error()},
+			NextAction: "Provide a readable, non-empty ledger file with --ledger <file>.",
+		}, 2)
+	}
+	return result(out, jsonOutput, resultData{
+		Command:    "ledger rotate",
+		OK:         true,
+		Summary:    "ledger rotated",
+		Details:    []string{fmt.Sprintf("%d record(s), tip %s", summary.Records, summary.Tip), fmt.Sprintf("archived to %s", archivePath)},
+		NextAction: "The next node verify starts a fresh chain; audit the archive with ownscout ledger verify.",
 	}, 0)
 }
 
@@ -431,7 +475,7 @@ func writeHelp(args []string, out io.Writer) int {
 		case "evidence":
 			text = "Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository."
 		case "ledger":
-			text = "Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it."
+			text = "Usage: ownscout ledger verify --ledger <file> [--json]\n       ownscout ledger rotate --ledger <file> [--json]\n\nAudits or archives an append-only ledger."
 		case "node":
 			text = "Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence."
 		}

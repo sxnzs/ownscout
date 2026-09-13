@@ -868,6 +868,113 @@ func run() error {
 		})
 	}
 
+	// ledger rotate: audit + tip-named archive. The success case asserts the
+	// rename happened (original absent, archive present with identical bytes);
+	// the collision case pins the idempotent shape when the tip-named archive
+	// already exists. A broken chain is never rotated.
+	rotateSeed := filepath.Join(edge, "ledger-rotate.jsonl")
+	if err := os.WriteFile(rotateSeed, seed, 0o644); err != nil {
+		return err
+	}
+	tip8 := seedRecord["record_hash"].(string)[:8]
+	for _, mode := range []struct {
+		name string
+		args []string
+	}{
+		{"ledger-edge-rotate-human", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-rotate.jsonl"}},
+		{"ledger-edge-rotate-json", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-rotate.jsonl", "--json"}},
+	} {
+		command := exec.Command(bin, mode.args...)
+		command.Dir = dir
+		var out bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &out
+		exitCode := 0
+		if err := command.Run(); err != nil {
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				return fmt.Errorf("%s: %v", mode.name, err)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		archive, _ := os.ReadFile(filepath.Join(edge, "ledger-rotate.jsonl."+tip8))
+		recorded = append(recorded, map[string]any{
+			"name":     mode.name,
+			"args":     mode.args,
+			"exitCode": exitCode,
+			"stdout":   normalize(out.String(), dir, repoDir, bin),
+			"files": map[string]any{
+				"fixtures/edge/ledger-rotate.jsonl":        "",
+				"fixtures/edge/ledger-rotate.jsonl." + tip8: normalize(string(archive), dir, repoDir, bin),
+			},
+		})
+		// Restore the fixture for the next mode.
+		if err := os.WriteFile(rotateSeed, seed, 0o644); err != nil {
+			return err
+		}
+		_ = os.Remove(filepath.Join(edge, "ledger-rotate.jsonl." + tip8))
+	}
+	// Collision: the tip-named archive already exists.
+	collisionSeed := filepath.Join(edge, "ledger-rotate-collision.jsonl")
+	if err := os.WriteFile(collisionSeed, seed, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(collisionSeed+"."+tip8, seed, 0o644); err != nil {
+		return err
+	}
+	for _, mode := range []struct {
+		name string
+		args []string
+	}{
+		{"ledger-edge-rotate-collision-json", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-rotate-collision.jsonl", "--json"}},
+		{"ledger-edge-rotate-garbage-json", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-garbage.jsonl", "--json"}},
+		{"ledger-edge-rotate-missing-json", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-rotate-missing.jsonl", "--json"}},
+	} {
+		command := exec.Command(bin, mode.args...)
+		command.Dir = dir
+		var out bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &out
+		exitCode := 0
+		if err := command.Run(); err != nil {
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				return fmt.Errorf("%s: %v", mode.name, err)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		recorded = append(recorded, map[string]any{
+			"name":     mode.name,
+			"args":     mode.args,
+			"exitCode": exitCode,
+			"stdout":   normalize(out.String(), dir, repoDir, bin),
+		})
+	}
+	// An empty ledger has nothing to archive.
+	if err := os.WriteFile(filepath.Join(edge, "ledger-rotate-empty.jsonl"), nil, 0o644); err != nil {
+		return err
+	}
+	emptyArgs := []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-rotate-empty.jsonl", "--json"}
+	command := exec.Command(bin, emptyArgs...)
+	command.Dir = dir
+	var emptyOut bytes.Buffer
+	command.Stdout = &emptyOut
+	command.Stderr = &emptyOut
+	emptyCode := 0
+	if err := command.Run(); err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			return fmt.Errorf("ledger-edge-rotate-empty-json: %v", err)
+		}
+		emptyCode = exitErr.ExitCode()
+	}
+	recorded = append(recorded, map[string]any{
+		"name":     "ledger-edge-rotate-empty-json",
+		"args":     emptyArgs,
+		"exitCode": emptyCode,
+		"stdout":   normalize(emptyOut.String(), dir, repoDir, bin),
+	})
+
 	for _, mode := range []struct {
 		name  string
 		extra []string

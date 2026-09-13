@@ -2775,6 +2775,85 @@
     },
     {
       "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-rotate.jsonl"
+      ],
+      "exitCode": 0,
+      "files": {
+        "fixtures/edge/ledger-rotate.jsonl": "",
+        "fixtures/edge/ledger-rotate.jsonl.15f1081b": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "ledger-edge-rotate-human",
+      "stdout": "OK: ledger rotated\n  - 1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\n  - archived to {{DIR}}/fixtures/edge/ledger-rotate.jsonl.15f1081b\nNext action: The next node verify starts a fresh chain; audit the archive with ownscout ledger verify.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-rotate.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "files": {
+        "fixtures/edge/ledger-rotate.jsonl": "",
+        "fixtures/edge/ledger-rotate.jsonl.15f1081b": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"envelope_sha256\":\"2c4f1e238788baeeb21f070e98a4bae098218439c1bdbd5f5df4e8f74df710d3\",\"packet_binding_sha256\":\"63d0897ae0c01ee58180a5240dfeea403d99a9d7f6d42e079af6330e8e7267ca\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"build\",\"status\":\"evidence_current\"}]}\n"
+      },
+      "name": "ledger-edge-rotate-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":true,\"summary\":\"ledger rotated\",\"details\":[\"1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\",\"archived to {{DIR}}/fixtures/edge/ledger-rotate.jsonl.15f1081b\"],\"next_action\":\"The next node verify starts a fresh chain; audit the archive with ownscout ledger verify.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-rotate-collision.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-rotate-collision-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":false,\"summary\":\"ledger could not be rotated\",\"details\":[\"archive \\\"{{DIR}}/fixtures/edge/ledger-rotate-collision.jsonl.15f1081b\\\" already exists\"],\"next_action\":\"Provide a readable, non-empty ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-garbage.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-rotate-garbage-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-garbage.jsonl\\\": line 1: malformed JSON: invalid character 'o' in literal null (expecting 'u')\"],\"next_action\":\"Repair the ledger before rotating; a broken chain keeps its live name.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-rotate-missing.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-rotate-missing-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":false,\"summary\":\"ledger could not be rotated\",\"details\":[\"read ledger \\\"{{DIR}}/fixtures/edge/ledger-rotate-missing.jsonl\\\": lstat {{DIR}}/fixtures/edge/ledger-rotate-missing.jsonl: no such file or directory\"],\"next_action\":\"Provide a readable, non-empty ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-rotate-empty.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-rotate-empty-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":false,\"summary\":\"ledger could not be rotated\",\"details\":[\"ledger \\\"{{DIR}}/fixtures/edge/ledger-rotate-empty.jsonl\\\" is empty\"],\"next_action\":\"Provide a readable, non-empty ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",

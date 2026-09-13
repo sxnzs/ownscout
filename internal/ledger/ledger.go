@@ -314,6 +314,69 @@ func Verify(path string) (Summary, error) {
 	return summary, nil
 }
 
+// Rotate audits a ledger under the same exclusive lock Open takes, then
+// renames it to "<path>.<tip8>" — the archive is named by its chain tip, so
+// an existing archive means this chain was already rotated. The original
+// path is left absent so the next append starts a fresh chain. A ledger that
+// fails validation is never rotated: the broken chain keeps its live name so
+// the operator sees it. An empty ledger is not rotated either — there is
+// nothing to archive.
+func Rotate(path string) (Summary, string, error) {
+	ledgerPath, err := filepath.Abs(path)
+	if err != nil {
+		return Summary{}, "", fmt.Errorf("resolve ledger path: %w", err)
+	}
+	ledgerPath = filepath.Clean(ledgerPath)
+	if err := rejectSymlinkAncestors(ledgerPath); err != nil {
+		return Summary{}, "", err
+	}
+
+	info, err := os.Lstat(ledgerPath)
+	if err != nil {
+		return Summary{}, "", fmt.Errorf("read ledger %q: %w", ledgerPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return Summary{}, "", fmt.Errorf("read ledger %q: not a regular file", ledgerPath)
+	}
+
+	file, err := os.OpenFile(ledgerPath, os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return Summary{}, "", fmt.Errorf("open ledger %q: %w", ledgerPath, err)
+	}
+	defer func() { _ = unlockFile(file); _ = file.Close() }()
+
+	if err := lockFile(file); err != nil {
+		return Summary{}, "", fmt.Errorf("lock ledger %q: %w", ledgerPath, err)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, int64(maxLedgerSize)+1))
+	if err != nil {
+		return Summary{}, "", fmt.Errorf("read ledger %q: %w", ledgerPath, err)
+	}
+	if len(data) > maxLedgerSize {
+		return Summary{}, "", fmt.Errorf("read ledger %q: %w", ledgerPath, &FullError{Limit: maxLedgerSize})
+	}
+
+	last, count, err := validateLedger(data)
+	if err != nil {
+		return Summary{}, "", &ValidationError{Err: fmt.Errorf("validate ledger %q: %w", ledgerPath, err)}
+	}
+	if count == 0 {
+		return Summary{}, "", fmt.Errorf("ledger %q is empty", ledgerPath)
+	}
+
+	archivePath := ledgerPath + "." + last.RecordHash[:8]
+	if _, err := os.Lstat(archivePath); err == nil {
+		return Summary{}, "", fmt.Errorf("archive %q already exists", archivePath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Summary{}, "", fmt.Errorf("inspect archive %q: %w", archivePath, err)
+	}
+	if err := os.Rename(ledgerPath, archivePath); err != nil {
+		return Summary{}, "", fmt.Errorf("rename ledger %q: %w", ledgerPath, err)
+	}
+	return Summary{Records: count, Tip: last.RecordHash}, archivePath, nil
+}
+
 func resolveRepoRoot(path string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
