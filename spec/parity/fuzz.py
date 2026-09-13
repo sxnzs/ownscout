@@ -28,6 +28,22 @@ ENVELOPE_CASES = [
     ["node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
      "--envelope", "fixtures/mutated.json", "--ledger", "ledger.jsonl", "--json"],
 ]
+# Ledger coverage. The envelope case above always starts from a fresh ledger -
+# the loop removes it before every run - so nothing ever validated an EXISTING
+# one. That is how a port which silently accepted a forged ledger passed every
+# seed; the gap was in the fuzzer, not only in the port. These cases seed a
+# mutated ledger and then verify against it.
+LEDGER_CASES = [
+    ["ledger", "verify", "--ledger", "fixtures/mutated.jsonl"],
+    ["ledger", "verify", "--ledger", "fixtures/mutated.jsonl", "--json"],
+    ["node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+     "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/mutated.jsonl", "--json"],
+]
+LEDGER_SEED = os.path.join(FIXTURES, "edge", "ledger-seed.jsonl")
+LEDGER_TARGET = "fixtures/mutated.jsonl"
+# Every run of the ledger phase is independent, so it is sampled rather than run
+# every iteration: it costs three extra cases in two workdirs.
+LEDGER_EVERY = 4
 
 
 def flip_byte(data, rng):
@@ -149,6 +165,22 @@ def run(binary, args, workdir):
     return proc.returncode, (proc.stdout + proc.stderr).decode("utf-8", "replace")
 
 
+def run_isolated(binary, case, ledger_data):
+    """Run one case in a fresh fixture copy, with the ledger seeded to ledger_data.
+
+    The ledger phase cannot share a workdir between the reference and the
+    candidate: a run that accepts the ledger appends to it, which would change
+    the input the second binary sees and manufacture a divergence.
+    """
+    with tempfile.TemporaryDirectory() as workdir:
+        shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"))
+        with open(os.path.join(workdir, LEDGER_TARGET), "wb") as handle:
+            handle.write(ledger_data)
+        repo = os.path.join(workdir, "fixtures", "repo")
+        code, text = run(binary, case, workdir)
+        return code, normalize(text, workdir, repo, binary)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", required=True)
@@ -166,6 +198,9 @@ def main():
             return 2
 
     rng = random.Random(args.seed)
+    # The ledger phase draws from its own stream, so adding it left every
+    # previously documented seed result reproducible.
+    ledger_rng = random.Random(args.seed * 7919 + 13)
     print("fuzz: seed={} iterations={}".format(args.seed, args.iterations))
     divergences = 0
     for iteration in range(args.iterations):
@@ -195,6 +230,26 @@ def main():
                         print("  exit:     {} != {}".format(code, expected[0]))
                         print("  " + first_difference(expected[1], text))
                         print("  input:    {!r}".format(data[:120]))
+                if divergences >= 10:
+                    print("fuzz: stopping after 10 divergences")
+                    print("fuzz: DIVERGENCES FOUND ({} cases)".format(divergences))
+                    return 1
+        if iteration % LEDGER_EVERY == 0:
+            ledger_data = open(LEDGER_SEED, "rb").read()
+            for _ in range(ledger_rng.randrange(1, 4)):
+                ledger_data = mutate(ledger_data, ledger_rng)
+            for case in LEDGER_CASES:
+                expected = None
+                for binary in (reference, candidate):
+                    code, text = run_isolated(binary, case, ledger_data)
+                    if binary is reference:
+                        expected = (code, text)
+                    elif (code, text) != expected:
+                        divergences += 1
+                        print("DIVERGENCE iteration={} case={}".format(iteration, " ".join(case)))
+                        print("  exit:     {} != {}".format(code, expected[0]))
+                        print("  " + first_difference(expected[1], text))
+                        print("  input:    {!r}".format(ledger_data[:120]))
                 if divergences >= 10:
                     print("fuzz: stopping after 10 divergences")
                     print("fuzz: DIVERGENCES FOUND ({} cases)".format(divergences))
