@@ -1249,6 +1249,160 @@
     },
     {
       "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-moved-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"drift.txt\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-moved-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"drift.txt\\\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-gone.json",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-gone-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"drift.txt\"): content hash mismatch: expected sha256:abababababababababababababababababababababababababababababababab, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content not found elsewhere in this file\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-gone.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-gone-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"drift.txt\\\"): content hash mismatch: expected sha256:abababababababababababababababababababababababababababababababab, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content not found elsewhere in this file\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-shrink.json",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-shrink-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"shrink.txt\"): invalid line range 9000-9001 for 3 line(s); content relocates to lines 2-3 (shift -8998; nearest matching window)\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-shrink.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-shrink-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"shrink.txt\\\"): invalid line range 9000-9001 for 3 line(s); content relocates to lines 2-3 (shift -8998; nearest matching window)\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-budget.json",
+        "--relocate"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-budget-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"oversize.txt\"): content hash mismatch: expected sha256:abababababababababababababababababababababababababababababababab, got 46ca5b67a024ae14da6c2c11077aefc26aea4a9de37d7c0d1d9f2fc5e3209f1a; relocation search stopped after its byte budget\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-budget.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-budget-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":false,\"summary\":\"evidence verification failed (1 issue(s))\",\"details\":[\"evidence \\\"evidence-1\\\" (\\\"oversize.txt\\\"): content hash mismatch: expected sha256:abababababababababababababababababababababababababababababababab, got 46ca5b67a024ae14da6c2c11077aefc26aea4a9de37d7c0d1d9f2fc5e3209f1a; relocation search stopped after its byte budget\"],\"next_action\":\"Refresh or correct the listed evidence, then verify again.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json"
+      ],
+      "exitCode": 1,
+      "name": "evidence-edge-relocate-off-human",
+      "stdout": "ERROR: evidence verification failed (1 issue(s))\n  - evidence \"evidence-1\" (\"drift.txt\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8\nNext action: Refresh or correct the listed evidence, then verify again.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--relocate"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-relocate-unknown-flag-human",
+      "stdout": "error: unknown flag or argument '--relocate'\nNext action: run 'ownscout contract validate --help'.\n"
+    },
+    {
+      "args": [
+        "contract",
+        "validate",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--relocate",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "contract-edge-relocate-unknown-flag-json",
+      "stdout": "{\"command\":\"usage\",\"ok\":false,\"summary\":\"unknown flag or argument '--relocate'\",\"details\":[\"usage: ownscout contract validate --help\"],\"next_action\":\"Run 'ownscout contract validate --help'.\"}\n"
+    },
+    {
+      "args": [
         "contract",
         "validate",
         "--packet",

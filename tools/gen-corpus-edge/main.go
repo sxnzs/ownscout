@@ -317,6 +317,60 @@ func run() error {
 			spec{"evidence-edge-shape-"+shape.name+"-json", append(append([]string{}, args...), "--json")},
 		)
 	}
+	// Anchor re-resolution (evidence verify --relocate). drift.txt records a
+	// fingerprint that belongs three lines below the cited span, so the failure
+	// can name where the content went; shrink.txt cites a range past the end of
+	// a file that lost lines; oversize.txt is far too large to cover within the
+	// relocation byte budget, so the search has to admit that it stopped rather
+	// than claim the content is absent.
+	driftLines := []string{"one", "two", "three", "four", "five", "six"}
+	if err := os.WriteFile(filepath.Join(repoDir, "drift.txt"), []byte(strings.Join(driftLines, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+	shrinkLines := []string{"kept", "alpha", "beta"}
+	if err := os.WriteFile(filepath.Join(repoDir, "shrink.txt"), []byte(strings.Join(shrinkLines, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+	relocations := []struct {
+		name      string
+		path      string
+		lines     []string // recorded fingerprint; nil records an absent hash
+		lineStart int
+		lineEnd   int
+	}{
+		{"moved", "drift.txt", driftLines[3:5], 1, 2},
+		{"gone", "drift.txt", nil, 1, 2},
+		{"shrink", "shrink.txt", shrinkLines[1:3], 9000, 9001},
+		{"budget", "oversize.txt", nil, 1, 20},
+	}
+	for _, relocation := range relocations {
+		payload := deepCopy(packetBase)
+		item := payload["evidence"].([]any)[0].(map[string]any)
+		item["path"] = relocation.path
+		item["content_hash"] = "sha256:" + strings.Repeat("ab", 32)
+		item["line_start"] = relocation.lineStart
+		item["line_end"] = relocation.lineEnd
+		if relocation.lines != nil {
+			item["content_hash"] = "sha256:" + rawEvidenceHash(relocation.lines)
+		}
+		file := "packet-evidence-relocate-" + relocation.name + ".json"
+		if err := writeJSON(filepath.Join(edge, file), payload); err != nil {
+			return err
+		}
+		base := []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/" + file}
+		cases = append(cases,
+			spec{"evidence-edge-relocate-" + relocation.name + "-human", append(append([]string{}, base...), "--relocate")},
+			spec{"evidence-edge-relocate-" + relocation.name + "-json", append(append([]string{}, base...), "--relocate", "--json")},
+		)
+	}
+	cases = append(cases,
+		// The same packet without the flag, so the flag is provably the only
+		// difference between the two renderings.
+		spec{"evidence-edge-relocate-off-human", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/edge/packet-evidence-relocate-moved.json"}},
+		// --relocate belongs to evidence verify alone.
+		spec{"contract-edge-relocate-unknown-flag-human", []string{"contract", "validate", "--packet", "fixtures/packet-valid.json", "--relocate"}},
+		spec{"contract-edge-relocate-unknown-flag-json", []string{"contract", "validate", "--packet", "fixtures/packet-valid.json", "--relocate", "--json"}},
+	)
 	cases = append(cases,
 		spec{"contract-edge-nonutf8-human", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json"}},
 		spec{"contract-edge-nonutf8-json", []string{"contract", "validate", "--packet", "fixtures/edge/packet-nonutf8.json", "--json"}},

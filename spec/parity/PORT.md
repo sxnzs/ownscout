@@ -59,15 +59,21 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (103 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (114 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
-ledger), an in-repository ledger rejection, and the raw-byte evidence shapes
+ledger), an in-repository ledger rejection, the raw-byte evidence shapes
 (`fixtures/edge/packet-evidence-shape-*.json` against
 `fixtures/repo/binary.txt`, `blank.txt` and `oversize.txt`): hashing reads raw
 file bytes, CRLF pairs are one terminator, a single empty selected line hashes
 the empty string, evidence files have no size limit, and range errors report
-the real line count. Run it with the same harness:
+the real line count, and anchor re-resolution (`evidence verify --relocate`,
+`fixtures/edge/packet-evidence-relocate-*.json`): a moved span names its new
+lines and signed shift, absent content is reported only once every fitting
+window has been probed, a file too large to cover reports that the search
+stopped on its byte budget, the same packet without the flag is byte-identical
+to the pre-relocation wording, and `--relocate` is rejected by every other
+subcommand. Run it with the same harness:
 
 ```
 python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <binary>
@@ -79,10 +85,10 @@ The corpus was mutation-tested against three deliberately broken reference build
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 95/103 |
-| `next_action` renamed to `nextAction` | 20/28 | 56/103 |
-| final newline always appended to the hashed evidence range | 28/28 | 101/103 |
-| unmutated reference | 28/28 | 103/103 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 106/114 |
+| `next_action` renamed to `nextAction` | 20/28 | 62/114 |
+| final newline always appended to the hashed evidence range | 28/28 | 112/114 |
+| unmutated reference | 28/28 | 114/114 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the
@@ -102,6 +108,14 @@ the earlier 93-case corpus.
   re-hash the current working-tree file, normalize line endings, compare the
   expected content hash. The packet is input only; `verifier_status` is never
   trusted or rewritten.
+- **Anchor re-resolution** (`internal/evidence/relocate.go`): with `--relocate`,
+  a failed span is searched for a window of the same line count whose
+  fingerprint matches, probing nearest-first from the cited start (lower line
+  number first on a tie), with the origin clamped into the range of windows that
+  fit and an 8 MiB cap on the total window bytes hashed. It is diagnostic only:
+  status, counters, exit code and ledger bytes are unchanged, and a moved span
+  stays `failed`. The three clauses - relocates, not found elsewhere, stopped on
+  the byte budget - are part of the oracle.
 - **node-envelope-v1** (`internal/node/`): the same strict-parse rules, a
   canonical packet binding digest, graph validation (duplicate ids and
   references, missing/self dependencies, cycles, size limits), deterministic

@@ -6,7 +6,7 @@
       ],
       "exitCode": 0,
       "name": "help-root",
-      "stdout": "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n"
+      "stdout": "OwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--relocate] [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n"
     },
     {
       "args": [
@@ -26,7 +26,7 @@
       ],
       "exitCode": 0,
       "name": "help-evidence",
-      "stdout": "Usage: ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n\nValidates the packet, then checks each evidence span locally.\n\nNext action: provide both paths and rerun.\n"
+      "stdout": "Usage: ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.\n"
     },
     {
       "args": [
@@ -58,7 +58,7 @@
       "args": [],
       "exitCode": 2,
       "name": "no-command",
-      "stdout": "error: a command is required\n\nOwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n\nNext action: run 'ownscout --help'.\n"
+      "stdout": "error: a command is required\n\nOwnScout — local repository evidence checks\n\nUsage:\n  ownscout doctor\n  ownscout version\n  ownscout contract validate --packet \u003cfile\u003e [--json]\n  ownscout evidence verify --repo \u003cdir\u003e --packet \u003cfile\u003e [--relocate] [--json]\n  ownscout node verify --repo \u003cdir\u003e --packet \u003cfile\u003e --envelope \u003cfile\u003e --ledger \u003cfile\u003e [--json]\n\nUse \"ownscout \u003ccommand\u003e --help\" for command details.\n\nNext action: run 'ownscout --help'.\n"
     },
     {
       "args": [
