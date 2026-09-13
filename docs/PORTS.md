@@ -44,8 +44,12 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 - Oracle mutation test: four deliberately broken reference builds fail the
   corpora (base 26/28, 20/28, 28/28 and 28/28; edge 112/120, 64/120, 118/120 and
   118/120), so a pass is meaningful.
-- Fuzzing: no divergence in 200 iterations (seed 1) plus 300 iterations
-  (seed 7) per port, and seed 11 found the null-handling defect recorded below.
+- Fuzzing: no divergence in 300 iterations (seed 7) and 200 (seed 1) per port.
+  Seed 11 found the null-handling defect recorded below. Seed 13 surfaces two
+  further divergences that neither corpus covers - unknown-field detection not
+  being in document order, and field names escaped the host language's way
+  rather than Go's `%q`. Those two are **pre-existing and still open**, recorded
+  in each port's `DIVERGENCES.md` rather than left silent.
 
 ## Bugs the fuzzer caught
 
