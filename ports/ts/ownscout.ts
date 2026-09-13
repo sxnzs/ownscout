@@ -13,6 +13,7 @@ Usage:
   ownscout contract validate --packet <file> [--json]
   ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]
   ownscout ledger verify --ledger <file> [--json]
+  ownscout ledger rotate --ledger <file> [--json]
   ownscout node bind --packet <file> [--json]
   ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]
 
@@ -715,6 +716,30 @@ function safeLedgerPath(ledger:string,repo:string):string {
   if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw new Error(`ledger path "${p}" is a symlink`);
   return p;
 }
+// rejectSymlinkAncestors is ledger.Open's hardening: every component of the
+// ledger path must be a real directory, except macOS's /var symlink. The read
+// path (ledger.Verify and ledger.Rotate's read) does not harden, so only the
+// append path given to node verify rejects a symlinked ancestor.
+function permittedSystemSymlink(p:string):boolean{
+  if(path.resolve(p)!=="/var") return false;
+  try{return fs.realpathSync(p)==="/private/var";}catch{return false;}
+}
+function rejectSymlinkAncestors(pth:string):void{
+  const absolute=path.resolve(pth);
+  const root=path.parse(absolute).root;
+  let current=root;
+  for(const part of absolute.slice(root.length).split(path.sep)){
+    if(part===""||part===".") continue;
+    current=path.join(current,part);
+    let st:fs.Stats;
+    try{st=fs.lstatSync(current);}
+    catch(e:any){ if(e&&e.code==="ENOENT") continue; throw new Error(`inspect ledger path ancestor "${current}": ${e&&e.message||e}`); }
+    if(st.isSymbolicLink()){
+      if(permittedSystemSymlink(current)) continue;
+      throw new Error(`ledger path "${absolute}" has symlink ancestor "${current}"`);
+    }
+  }
+}
 // hashRecord hashes exactly what Go's json.Marshal emits for a ledger Record:
 // struct field order, record_hash blanked, and the omitempty reason omitted.
 function ledgerRecordCanonical(r:any):any{
@@ -723,7 +748,9 @@ function ledgerRecordCanonical(r:any):any{
 }
 function hashRecord(r:any):string{return sha256(goJson(ledgerRecordCanonical(r)));}
 function ledgerOpen(ledger:string,repo:string):{path:string;list:any[]} {
-  const p=safeLedgerPath(ledger,repo); if(!fs.existsSync(path.dirname(p))) throw new Error(`open ledger parent "${path.dirname(p)}": no such file or directory`);
+  const p=safeLedgerPath(ledger,repo);
+  rejectSymlinkAncestors(p);
+  if(!fs.existsSync(path.dirname(p))) throw new Error(`open ledger parent "${path.dirname(p)}": no such file or directory`);
   if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, "a", 0o600));
   const data=fs.readFileSync(p); if(data.length>MAX_LEDGER)throw new Error("ledger exceeds 1048576 bytes");
   return {path:p,list:validateLedger(data).list};
@@ -1132,6 +1159,39 @@ function ledgerVerify(pth:string):{list:any[];tip:string}{
     throw e;
   }
 }
+// ledgerRotate validates the ledger and renames it to "<path>.<tip8>". It
+// hardens symlink ancestors like Open, but reads and renames on the live name.
+function ledgerRotate(pth:string):{records:number;tip:string;archive:string}{
+  const ledgerPath=path.resolve(pth);
+  rejectSymlinkAncestors(ledgerPath);
+  let st:fs.Stats;
+  try{st=fs.lstatSync(ledgerPath);}
+  catch(e:any){
+    const reason=e&&e.code==="ENOENT"?"no such file or directory":e&&e.code==="EACCES"?"permission denied":String(e&&e.message||e);
+    throw new Error(`read ledger "${ledgerPath}": lstat ${ledgerPath}: ${reason}`);
+  }
+  if(!st.isFile()) throw new Error(`read ledger "${ledgerPath}": not a regular file`);
+  let data:Buffer;
+  try{data=fs.readFileSync(ledgerPath);}catch(e:any){
+    const reason=e&&e.code==="ENOENT"?"no such file or directory":String(e&&e.message||e);
+    throw new Error(`read ledger "${ledgerPath}": ${reason}`);
+  }
+  if(data.length>MAX_LEDGER) throw new Error(`read ledger "${ledgerPath}": ledger exceeds ${MAX_LEDGER} bytes`);
+  let result:{list:any[];tip:string};
+  try{result=validateLedger(data);}
+  catch(e:any){
+    if(e instanceof LedgerValidationError) throw new LedgerValidationError(`validate ledger "${ledgerPath}": ${e.message}`);
+    throw e;
+  }
+  if(result.list.length===0) throw new Error(`ledger "${ledgerPath}" is empty`);
+  const archivePath=`${ledgerPath}.${result.tip.slice(0,8)}`;
+  let exists=false;
+  try{fs.lstatSync(archivePath);exists=true;}
+  catch(e:any){ if(!(e&&e.code==="ENOENT")) throw new Error(`inspect archive "${archivePath}": ${e&&e.message||e}`); }
+  if(exists) throw new Error(`archive "${archivePath}" already exists`);
+  try{fs.renameSync(ledgerPath,archivePath);}catch(e:any){throw new Error(`rename ledger "${ledgerPath}": ${e&&e.message||e}`);}
+  return {records:result.list.length,tip:result.tip,archive:archivePath};
+}
 // readBounded mirrors cli.readBounded's messages for a named input kind.
 function readBounded(pth:string,kind="packet"):Buffer{
   let data:Buffer;
@@ -1149,6 +1209,7 @@ function evidenceIssues(r:any):string[]{
 }
 function ledgerCmd(a:string[],out:any):number{
   if(!a.length)return failure(out,"a ledger subcommand is required","ownscout ledger --help");
+  if(a[0]==="rotate")return ledgerRotateCmd(a.slice(1),out);
   if(a[0]!=="verify")return failure(out,`unknown ledger subcommand '${a[0]}'`,"ownscout ledger --help",a.includes("--json"));
   const q=parseFlags(a.slice(1),new Set(["--ledger"]));if(q.err)return failure(out,q.err,"ownscout ledger verify --help",q.j);
   if(!q.f["--ledger"])return failure(out,"missing required --ledger value","ownscout ledger verify --help",q.j);
@@ -1160,6 +1221,17 @@ function ledgerCmd(a:string[],out:any):number{
   }
   const tip=s.tip||"none";
   return emit(out,q.j,{command:"ledger verify",ok:true,summary:"ledger is intact",details:[`${s.list.length} record(s), tip ${tip}`],next_action:"The ledger chain is intact."},0);
+}
+function ledgerRotateCmd(a:string[],out:any):number{
+  const q=parseFlags(a,new Set(["--ledger"]));if(q.err)return failure(out,q.err,"ownscout ledger rotate --help",q.j);
+  if(!q.f["--ledger"])return failure(out,"missing required --ledger value","ownscout ledger rotate --help",q.j);
+  let r:any;
+  try{r=ledgerRotate(q.f["--ledger"]);}
+  catch(e:any){
+    if(e instanceof LedgerValidationError)return emit(out,q.j,{command:"ledger rotate",ok:false,summary:"ledger verification failed",details:[e.message],next_action:"Repair the ledger before rotating; a broken chain keeps its live name."},1);
+    return emit(out,q.j,{command:"ledger rotate",ok:false,summary:"ledger could not be rotated",details:[e.message],next_action:"Provide a readable, non-empty ledger file with --ledger <file>."},2);
+  }
+  return emit(out,q.j,{command:"ledger rotate",ok:true,summary:"ledger rotated",details:[`${r.records} record(s), tip ${r.tip}`,"archived to "+r.archive],next_action:"The next node verify starts a fresh chain; audit the archive with ownscout ledger verify."},0);
 }
 function nodeBindCmd(a:string[],out:any):number{
   const q=parseFlags(a,new Set(["--packet"]));
@@ -1187,7 +1259,7 @@ function help(a:string[],out:any){
   else if(a[0]==="version")t="Usage: ownscout version\n\nPrints the OwnScout version.";
   else if(a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nValidates packet structure and outcome rules.";
   else if(a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nVerifies packet evidence spans against a local repository.";
-  else if(a[0]==="ledger")t="Usage: ownscout ledger verify --ledger <file> [--json]\n\nAudits an append-only ledger without opening or modifying it.";
+  else if(a[0]==="ledger")t="Usage: ownscout ledger verify --ledger <file> [--json]\n       ownscout ledger rotate --ledger <file> [--json]\n\nAudits or archives an append-only ledger.";
   else if(a[0]==="node")t="Usage: ownscout node bind --packet <file> [--json]\n       ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]\n\nBinds packets or verifies a node-envelope-v1 graph against fresh repository evidence.";
   if(a[1]==="validate"&&a[0]==="contract")t="Usage: ownscout contract validate --packet <file> [--json]\n\nReads and validates one JSON packet without printing its contents.\n\nNext action: provide --packet with a readable packet file.";
   if(a[1]==="verify"&&a[0]==="evidence")t="Usage: ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]\n\nValidates the packet, then checks each evidence span locally. With --relocate, a failed span is also searched for the recorded content fingerprint and the failure names where that content now lives.\n\nNext action: provide both paths and rerun.";

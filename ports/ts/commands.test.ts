@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -103,11 +103,92 @@ test("node verify --relocate appends evidence details without touching the ledge
 test("root and node help advertise the new commands", () => {
   const rootHelp = run("--help");
   assert.match(rootHelp.stdout, /ownscout ledger verify --ledger <file> \[--json\]/);
+  assert.match(rootHelp.stdout, /ownscout ledger rotate --ledger <file> \[--json\]/);
   assert.match(rootHelp.stdout, /ownscout node bind --packet <file> \[--json\]/);
   const nodeHelp = run("node", "--help");
   assert.match(nodeHelp.stdout, /Usage: ownscout node bind --packet <file> \[--json\]\n       ownscout node verify/);
   const bindHelp = run("node", "bind", "--help");
   assert.match(bindHelp.stdout, /^Usage: ownscout node bind --packet <file> \[--json\]\n\nComputes the canonical packet binding for a strictly decoded packet\./);
   const ledgerHelp = run("ledger", "--help");
-  assert.match(ledgerHelp.stdout, /^Usage: ownscout ledger verify --ledger <file> \[--json\]\n\nAudits an append-only ledger without opening or modifying it\./);
+  assert.match(ledgerHelp.stdout, /^Usage: ownscout ledger verify --ledger <file> \[--json\]\n       ownscout ledger rotate --ledger <file> \[--json\]\n\nAudits or archives an append-only ledger\./);
+  // There is no rotate-specific help text in the reference, so it falls back
+  // to the ledger subcommand help.
+  assert.equal(run("ledger", "rotate", "--help").stdout, ledgerHelp.stdout);
+});
+
+test("ledger rotate archives the chain under its tip", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ownscout-rotate-"));
+  try {
+    const ledger = path.join(dir, "ledger.jsonl");
+    writeFileSync(ledger, readFileSync(fixture("edge/ledger-seed.jsonl")));
+    const result = run("ledger", "rotate", "--ledger", ledger, "--json");
+    assert.equal(result.status, 0, result.stdout);
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.summary, "ledger rotated");
+    assert.equal(value.details[0], "1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6");
+    assert.equal(value.details[1], `archived to ${ledger}.15f1081b`);
+    assert.equal(existsSync(ledger), false);
+    assert.equal(existsSync(`${ledger}.15f1081b`), true);
+    // The archive is itself a valid ledger.
+    assert.equal(run("ledger", "verify", "--ledger", `${ledger}.15f1081b`).status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ledger rotate reports collisions, garbage, missing and empty ledgers", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ownscout-rotate-"));
+  try {
+    const ledger = path.join(dir, "ledger.jsonl");
+    writeFileSync(ledger, readFileSync(fixture("edge/ledger-seed.jsonl")));
+    writeFileSync(`${ledger}.15f1081b`, "already here");
+    const collision = run("ledger", "rotate", "--ledger", ledger, "--json");
+    assert.equal(collision.status, 2);
+    assert.equal(JSON.parse(collision.stdout).summary, "ledger could not be rotated");
+    assert.equal(JSON.parse(collision.stdout).details[0], `archive "${ledger}.15f1081b" already exists`);
+    assert.equal(existsSync(ledger), true);
+
+    const garbage = run("ledger", "rotate", "--ledger", fixture("edge/ledger-garbage.jsonl"), "--json");
+    assert.equal(garbage.status, 1);
+    assert.equal(JSON.parse(garbage.stdout).summary, "ledger verification failed");
+
+    const missing = run("ledger", "rotate", "--ledger", path.join(dir, "absent.jsonl"), "--json");
+    assert.equal(missing.status, 2);
+    assert.match(JSON.parse(missing.stdout).details[0], /lstat .*absent\.jsonl: no such file or directory/);
+
+    const empty = path.join(dir, "empty.jsonl");
+    writeFileSync(empty, "");
+    const emptyResult = run("ledger", "rotate", "--ledger", empty, "--json");
+    assert.equal(emptyResult.status, 2);
+    assert.equal(JSON.parse(emptyResult.stdout).details[0], `ledger "${empty}" is empty`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Open hardens against symlinked ancestors; Verify does not. The same ledger
+// path is accepted by ledger verify and rejected by node verify.
+test("append rejects a symlinked ledger ancestor while ledger verify accepts it", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ownscout-symlink-"));
+  try {
+    const real = path.join(dir, "real");
+    const linked = path.join(dir, "linked");
+    mkdirSync(real);
+    const ledger = path.join(real, "out.jsonl");
+    writeFileSync(ledger, readFileSync(fixture("edge/ledger-seed.jsonl")));
+    symlinkSync(real, linked, "dir");
+    const viaLink = path.join(linked, "out.jsonl");
+    assert.equal(run("ledger", "verify", "--ledger", viaLink).status, 0);
+    const node = run(
+      "node", "verify",
+      "--repo", fixture("repo"),
+      "--packet", fixture("packet-valid.json"),
+      "--envelope", fixture("envelope-valid.json"),
+      "--ledger", viaLink,
+    );
+    assert.equal(node.status, 2);
+    assert.match(node.stdout, /ledger could not be opened/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
