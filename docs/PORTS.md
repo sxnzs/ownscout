@@ -1,7 +1,7 @@
 # OwnScout language ports
 
 Three independent, standard-library-only ports of the Go reference in `internal/`,
-all verified byte-for-byte against the same golden corpus.
+all verified byte-for-byte against the same reference corpus.
 
 ## Status (2026-09-13)
 
@@ -43,7 +43,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   outcomes: moved, absent, shrunken file, and budget-stopped, and the
   unknown-field surface: Go `%q` quoting of a field name across `\x`, `\u` and
   `\U` widths, and which of two decode errors in one nested object is reported).
-- Golden corpus mutation test: four deliberately broken reference builds fail the
+- Reference corpus mutation test: four deliberately broken reference builds fail the
   corpora (base 26/28, 20/28, 28/28 and 28/28; edge 134/150, 79/150, 148/150 and
   148/150), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from

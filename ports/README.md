@@ -3,7 +3,7 @@
 Three independent, standard-library-only ports of the Go reference in
 `internal/`: TypeScript (`ports/ts`), Rust (`ports/rust`) and Zig
 (`ports/zig`). All three reproduce the reference CLI's stdout, exit codes and
-ledger bytes exactly, graded against the golden corpus in `spec/parity/`.
+ledger bytes exactly, graded against the reference corpus in `spec/parity/`.
 
 The contract every port must satisfy is `spec/parity/PORT.md`; the recorded
 status table and verification evidence are in `docs/PORTS.md`.
@@ -70,6 +70,6 @@ make fuzz                     # differential fuzzing vs a freshly built referenc
 cases), runs that port's own test suite, and then fails if anything outside
 `ports/` was modified. Commit unrelated changes before running it.
 
-The golden corpus itself is mutation-tested: three deliberately broken reference builds
+The reference corpus itself is mutation-tested: three deliberately broken reference builds
 fail the corpora, so a passing harness is meaningful rather than vacuous. See
 `docs/PORTS.md` for those numbers.

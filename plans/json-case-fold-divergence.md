@@ -1,4 +1,4 @@
-# Case-folded JSON field names: the reference's two-decoder oracle
+# Case-folded JSON field names: the recorded two-decoder divergence
 
 Independently verified from the reference binary (`spec/parity/reference-ownscout`,
 commit `ede2d25`). This pins the exact contract the ports must reproduce for the

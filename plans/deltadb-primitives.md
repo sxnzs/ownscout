@@ -174,4 +174,4 @@ The absent-content case is where the byte budget earns its keep: it stops at
   `\n`).
 - The edge corpus grew by thirteen cases covering moved / gone / shrunken-file /
   budget-stop / flag-off / flag-rejected / trailing-CR, so every branch and every
-  message variant is a golden case the three ports must replay byte-for-byte.
+  message variant is a recorded case the three ports must replay byte-for-byte.

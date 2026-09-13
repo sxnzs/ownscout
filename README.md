@@ -180,7 +180,7 @@ standard-library-only reimplementations reproduce its stdout, exit codes and
 ledger bytes exactly.
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="Go reference records the golden corpus; TypeScript, Rust and Zig replay it" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Go reference records the reference corpus; TypeScript, Rust and Zig replay it" width="100%">
 </p>
 
 | Port | Binary | Build | Tests | Dependencies |
@@ -210,7 +210,7 @@ parity is established.
   <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 150 edge cases" width="100%">
 </p>
 
-- **Golden corpus.** The Go reference records 28 base cases and 150 hardening
+- **Reference corpus.** The Go reference records 28 base cases and 150 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
   ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
@@ -253,7 +253,7 @@ ports/
   ts/  rust/  zig/   independent reimplementations
 plans/               design notes, including the DeltaDB primitive study
 spec/
-  parity/            the golden corpora, replay harness, verifier, fuzzer
+  parity/            the reference corpora, replay harness, verifier, fuzzer
 specs/               packet-v1 and node-envelope-v1 documents
 docs/
   assets/            the visuals used in this README
