@@ -189,6 +189,14 @@ func run() error {
 		{"wrong-packet-id", func(env map[string]any) { env["packet_id"] = "packet-999" }},
 		{"nodes-not-array", func(env map[string]any) { env["nodes"] = "nope" }},
 		{"null-node-id", func(env map[string]any) { env["nodes"].([]any)[0].(map[string]any)["node_id"] = nil }},
+		// Identifiers are validated: 1-128 bytes, alphanumeric with "._-:"
+		// allowed after the first character.
+		{"identifier-bad-char", func(env map[string]any) { env["envelope_id"] = "env%lope-1" }},
+		{"identifier-leading", func(env map[string]any) { env["envelope_id"] = "-env-1" }},
+		{"identifier-too-long", func(env map[string]any) { env["envelope_id"] = strings.Repeat("e", 129) }},
+		{"identifier-node-id", func(env map[string]any) {
+			env["nodes"].([]any)[0].(map[string]any)["node_id"] = "no%de"
+		}},
 		{"unknown-field", func(env map[string]any) { env["extra"] = true }},
 		{"duplicate-key", func(env map[string]any) {}},
 		{"trailing-json", func(env map[string]any) {}},

@@ -881,6 +881,146 @@
         "--packet",
         "fixtures/packet-valid.json",
         "--envelope",
+        "fixtures/edge/envelope-identifier-bad-char.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-bad-char-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-bad-char.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-bad-char-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-leading.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-leading-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-leading.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-leading-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-too-long.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-too-long-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-too-long.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-too-long-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-node-id.json",
+        "--ledger",
+        "ledger.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-node-id-human",
+      "stdout": "ERROR: envelope validation failed\n  - node-envelope-v1 validation failed\nNext action: Fix the envelope binding or graph, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/edge/envelope-identifier-node-id.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-identifier-node-id-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"envelope validation failed\",\"details\":[\"node-envelope-v1 validation failed\"],\"next_action\":\"Fix the envelope binding or graph, then run node verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
         "fixtures/edge/envelope-unknown-field.json",
         "--ledger",
         "ledger.jsonl"
