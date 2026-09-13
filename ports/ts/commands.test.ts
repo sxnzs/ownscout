@@ -111,9 +111,12 @@ test("root and node help advertise the new commands", () => {
   assert.match(bindHelp.stdout, /^Usage: ownscout node bind --packet <file> \[--json\]\n\nComputes the canonical packet binding for a strictly decoded packet\./);
   const ledgerHelp = run("ledger", "--help");
   assert.match(ledgerHelp.stdout, /^Usage: ownscout ledger verify --ledger <file> \[--json\]\n       ownscout ledger rotate --ledger <file> \[--json\]\n\nAudits or archives an append-only ledger\./);
-  // There is no rotate-specific help text in the reference, so it falls back
-  // to the ledger subcommand help.
-  assert.equal(run("ledger", "rotate", "--help").stdout, ledgerHelp.stdout);
+  // The reference gained a rotate-specific help text in ce31e37, so rotate
+  // --help prints its own usage rather than the combined ledger help.
+  assert.match(
+    run("ledger", "rotate", "--help").stdout,
+    /^Usage: ownscout ledger rotate --ledger <file> \[--json\]\n\nAudits the chain, then renames the ledger to <file>\.<tip8>/
+  );
 });
 
 test("ledger rotate archives the chain under its tip", () => {
