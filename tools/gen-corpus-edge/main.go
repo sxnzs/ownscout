@@ -761,6 +761,49 @@ func run() error {
 			})
 		}
 	}
+	// A ledger past the size cap: node verify must name the rotation path
+	// rather than a bare open failure, and ledger verify reports the bound
+	// without reading past it. The repeated seed line need not validate — the
+	// size check fires first on both paths.
+	var fullBuilder strings.Builder
+	for fullBuilder.Len() <= 1<<20 {
+		fullBuilder.WriteString(seedLine + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(edge, "ledger-full.jsonl"), []byte(fullBuilder.String()), 0o644); err != nil {
+		return err
+	}
+	fullNodeArgs := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+		"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-full.jsonl"}
+	for _, mode := range []struct {
+		name string
+		args []string
+	}{
+		{"node-edge-ledger-full-human", fullNodeArgs},
+		{"node-edge-ledger-full-json", append(append([]string{}, fullNodeArgs...), "--json")},
+		{"ledger-edge-verify-full-human", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-full.jsonl"}},
+		{"ledger-edge-verify-full-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-full.jsonl", "--json"}},
+	} {
+		command := exec.Command(bin, mode.args...)
+		command.Dir = dir
+		var out bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &out
+		exitCode := 0
+		if err := command.Run(); err != nil {
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				return fmt.Errorf("%s: %v", mode.name, err)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		recorded = append(recorded, map[string]any{
+			"name":     mode.name,
+			"args":     mode.args,
+			"exitCode": exitCode,
+			"stdout":   normalize(out.String(), dir, repoDir, bin),
+		})
+	}
+
 	for _, mode := range []struct {
 		name  string
 		extra []string

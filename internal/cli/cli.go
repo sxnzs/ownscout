@@ -234,6 +234,10 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 
 	store, err := ledger.Open(ledgerPath, repoPath)
 	if err != nil {
+		var full *ledger.FullError
+		if errors.As(err, &full) {
+			return nodeError("ledger is full", full.Error(), "Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."), 2
+		}
 		return nodeError("ledger could not be opened", "ledger open failed", "Provide a writable ledger path outside the repository and try again."), 2
 	}
 	defer func() {
@@ -261,6 +265,10 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 	envelopeSum := sha256.Sum256(envelopeBytes)
 	envelopeHash := hex.EncodeToString(envelopeSum[:])
 	if _, err := store.Append(envelopeHash, binding, version, ledgerResults); err != nil {
+		var full *ledger.FullError
+		if errors.As(err, &full) {
+			return nodeError("ledger is full", full.Error(), "Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."), 2
+		}
 		return nodeError("ledger append failed", "node results could not be appended", "Check the ledger and try again; no result was consumed."), 2
 	}
 

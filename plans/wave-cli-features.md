@@ -1,10 +1,19 @@
 # Wave plan: CLI feature batch via sub-agents
 
+> **Complete 2026-09-13.** Waves 1 and 2 both landed. Two constraints below are
+> now historical, kept for the record:
+>
+> - The "two packet decoders" asymmetry was **unified** in `51b140e`: every
+>   command now decodes through `internal/nodepacket.DecodeValid` (strict).
+>   The former lenient `encoding/json` path is retired; the corpus and ports
+>   were regenerated and re-verified against the single strict boundary.
+> - The "`ports/` is an external workstream" exclusion is no longer in force.
+
 Executed 2026-09-13 by a pi-deck crew (`runCrew`, model `openai-codex/gpt-5.6-luna`),
 orchestrated from a live pi session. Disjoint write scopes; generated corpora are
 single-writer (orchestrator).
 
-## Constraints in force
+## Constraints in force at the time
 
 - `ports/` is an active external workstream (case-fold implementation in flight);
   nothing in this wave may touch it.
@@ -40,8 +49,11 @@ Three crew tasks, one per port, disjoint scopes (`ports/ts`, `ports/rust`,
 
 ## Deferred (recorded, not dropped)
 
-- **Decoder unification** (`loadPacket` → `nodepacket.Decode`): currently
-  contradicts the pinned two-decoder contract. Requires a spec decision: keep
-  the documented asymmetry, or version the contract. Not a code question.
-- **Ledger 1 MiB rotation policy**: a product decision (cap, archive, or
-  documented rotation), deferred with it.
+- ~~**Decoder unification** (`loadPacket` → `nodepacket.Decode`)~~ — **done**
+  in `51b140e`. All commands share the single strict boundary; the corpus and
+  the three ports were updated and verified green (`28/28` + `190/190`).
+- ~~**Ledger 1 MiB rotation policy**~~ — **done**. The cap stays at 1 MiB and a
+  full ledger is a rotation point: `mv` it aside and the next append starts a
+  fresh chain. `ledger verify` audits each file independently; `node verify`
+  surfaces it as `ledger is full` via `ledger.FullError`. Documented in
+  `AGENTS.md`; corpus case `ledger-full.jsonl` pins the boundary.

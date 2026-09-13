@@ -2668,6 +2668,64 @@
         "--envelope",
         "fixtures/envelope-valid.json",
         "--ledger",
+        "fixtures/edge/ledger-full.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-full-human",
+      "stdout": "ERROR: ledger is full\n  - ledger exceeds 1048576 bytes\nNext action: Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-full.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-full-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger is full\",\"details\":[\"ledger exceeds 1048576 bytes\"],\"next_action\":\"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-full.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-verify-full-human",
+      "stdout": "ERROR: ledger could not be read\n  - read ledger \"{{DIR}}/fixtures/edge/ledger-full.jsonl\": ledger exceeds 1048576 bytes\nNext action: Provide a readable ledger file with --ledger \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-full.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-verify-full-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger could not be read\",\"details\":[\"read ledger \\\"{{DIR}}/fixtures/edge/ledger-full.jsonl\\\": ledger exceeds 1048576 bytes\"],\"next_action\":\"Provide a readable ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
         "fixtures/edge/ledger-seed.jsonl"
       ],
       "exitCode": 0,

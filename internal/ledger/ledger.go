@@ -26,6 +26,17 @@ const (
 	zeroHash       = "0000000000000000000000000000000000000000000000000000000000000000"
 )
 
+// FullError reports that a ledger reached the size cap. Every file is an
+// independent hash chain, so the cap is a rotation point rather than a
+// failure: archive the full file aside and the next append starts a fresh
+// chain. The message text is contract-pinned; errors.As is the way to
+// recognise it.
+type FullError struct {
+	Limit int64
+}
+
+func (e *FullError) Error() string { return fmt.Sprintf("ledger exceeds %d bytes", e.Limit) }
+
 type NodeResult struct {
 	NodeID string `json:"node_id"`
 	Status string `json:"status"`
@@ -119,7 +130,7 @@ func Open(path, repoRoot string) (*Store, error) {
 		return nil, fmt.Errorf("stat ledger %q: %w", ledgerPath, err)
 	}
 	if info.Size() > maxLedgerSize {
-		return nil, fmt.Errorf("ledger exceeds %d bytes", maxLedgerSize)
+		return nil, &FullError{Limit: maxLedgerSize}
 	}
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -130,7 +141,7 @@ func Open(path, repoRoot string) (*Store, error) {
 		return nil, fmt.Errorf("read ledger %q: %w", ledgerPath, err)
 	}
 	if len(data) > maxLedgerSize {
-		return nil, fmt.Errorf("ledger exceeds %d bytes", maxLedgerSize)
+		return nil, &FullError{Limit: maxLedgerSize}
 	}
 
 	last, count, err := validateLedger(data)
@@ -210,7 +221,7 @@ func (s *Store) Append(envelopeSHA256, packetBindingSHA256, ownscoutVersion stri
 		return Record{}, fmt.Errorf("stat ledger before append: %w", err)
 	}
 	if info.Size() < 0 || info.Size() > maxLedgerSize || int64(len(encoded)) > maxLedgerSize-info.Size() {
-		return Record{}, fmt.Errorf("ledger exceeds %d bytes", maxLedgerSize)
+		return Record{}, &FullError{Limit: maxLedgerSize}
 	}
 
 	if err := writeAll(s.file, encoded); err != nil {
@@ -289,7 +300,7 @@ func Verify(path string) (Summary, error) {
 		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, closeErr)
 	}
 	if len(data) > maxLedgerSize {
-		return Summary{}, fmt.Errorf("read ledger %q: ledger exceeds %d bytes", ledgerPath, maxLedgerSize)
+		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, &FullError{Limit: maxLedgerSize})
 	}
 
 	last, count, err := validateLedger(data)
