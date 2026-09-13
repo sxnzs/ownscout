@@ -62,7 +62,7 @@
   <rect x="872" y="196" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
   <path d="M893 214 h9 l5 5 v13 h-14 z" fill="none" stroke="#f2f2f2" stroke-width="1.1"/><path d="M902 214 v5 h5" fill="none" stroke="#f2f2f2" stroke-width="1.1"/>
   <text x="926" y="222" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">CORPUS.JSON</text>
-  <text x="926" y="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">28 base + 103 edge</text>
+  <text x="926" y="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">28 base + 120 edge</text>
   <path d="M696 310 C 790 310 810 333 872 333" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
   <rect x="872" y="306" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
   <path d="M892 333 l5 6 l11 -13" fill="none" stroke="#7ee787" stroke-width="1.6"/>

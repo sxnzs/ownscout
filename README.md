@@ -8,8 +8,8 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 103/103" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20103%2F103-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="203 tests passing" src="https://img.shields.io/badge/tests-203%20passing-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 28/28 + 120/120" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20120%2F120-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="232 tests passing" src="https://img.shields.io/badge/tests-232%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
@@ -80,6 +80,9 @@ ownscout contract validate --packet packet.json
 # Verify that cited files still hash to the recorded values.
 ownscout evidence verify --repo /path/to/repo --packet packet.json
 
+# Same check, but a failure also reports where the content went.
+ownscout evidence verify --repo /path/to/repo --packet packet.json --relocate
+
 # Check a dependency graph and append the ordered results to a ledger.
 ownscout node verify --repo /path/to/repo --packet packet.json \
   --envelope envelope.json --ledger /path/to/ownscout-ledger.jsonl
@@ -87,6 +90,23 @@ ownscout node verify --repo /path/to/repo --packet packet.json \
 
 Add `--json` to any validation command for a single machine-readable line.
 Use it in scripts and agents; omit it when a person is diagnosing a failure.
+
+### When the evidence moved
+
+A line range is a fragile way to cite code: insert a few lines above it and a
+packet that was true five minutes ago now fails. `--relocate` searches the file
+for a window of the same line count whose content hash matches the recorded one,
+and names where it now lives:
+
+```
+- evidence "evidence-1" ("src/lib.rs"): content hash mismatch: expected a1b2…, got 9f8e…; content relocates to lines 140-150 (shift +40; nearest matching window)
+```
+
+It distinguishes three honest outcomes - the content moved, the content is not
+in this file, or the search stopped at its budget - and it **never changes the
+verdict**. A moved span still fails and the command still exits `1`, because
+content that is no longer at the cited location is not current evidence. With
+`--relocate` the failure simply tells you where to look.
 
 ### The safe workflow
 
@@ -165,9 +185,9 @@ ledger bytes exactly.
 
 | Port | Binary | Build | Tests | Dependencies |
 |---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | none — Node 24 runs the source | 106 | none |
-| Rust | `ports/rust/target/release/ownscout` | `cargo build --release` | 17 | none |
-| Zig | `ports/zig/zig-out/bin/ownscout` | `zig build` | 16 | none |
+| TypeScript | `ports/ts/bin/ownscout` | none — Node 24 runs the source | 120 | none |
+| Rust | `ports/rust/target/release/ownscout` | `cargo build --release` | 22 | none |
+| Zig | `ports/zig/zig-out/bin/ownscout` | `zig build` | 21 | none |
 
 Build the compiled ports and run everything:
 
@@ -187,18 +207,21 @@ A port is only interesting if a passing grade means something. Here is how
 parity is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 103 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Parity matrix: every port passes 28 base and 120 edge cases" width="100%">
 </p>
 
-- **Recorded oracle.** The Go reference records 28 base cases and 103 hardening
+- **Recorded oracle.** The Go reference records 28 base cases and 120 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
-  ledger rejection, JSON HTML-escaping, the null/empty field shapes, and the
+  ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
-  empty selected line, and evidence files beyond 1 MiB). Every port replays
-  them byte-for-byte.
-- **Mutation-tested oracle.** Three deliberately broken reference builds fail
-  the corpora (26/28, 20/28 and 28/28 base; 95/103, 56/103 and 101/103 edge),
-  so a pass is evidence, not a formality.
+  empty selected line, and evidence files beyond 1 MiB, and the anchor
+  re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
+  Every port replays them byte-for-byte.
+- **Mutation-tested oracle.** Four deliberately broken reference builds fail
+  the corpora (base 26/28, 20/28, 28/28 and 28/28; edge 112/120, 64/120, 118/120
+  and 118/120), so a pass is evidence, not a formality. The newest mutant strips
+  the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
+  see, which is why the edge corpus exists.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
   compares the reference against a candidate. It is what caught a real shared
   defect in all three ports: an explicit JSON `null` for `evidence` or
@@ -222,12 +245,13 @@ cmd/ownscout/        CLI entry point
 internal/
   cli/               command surface, rendering, exit codes
   contract/          packet-v1 validation and violation ordering
-  evidence/          path-safe re-hashing of cited content
+  evidence/          path-safe re-hashing of cited content, anchor re-resolution
   node/              node-envelope graph validation and evaluation
   nodepacket/        strict packet-v1 decoding
   ledger/            append-only SHA-256 hash-chained ledger
 ports/
   ts/  rust/  zig/   independent reimplementations
+plans/               design notes, including the DeltaDB primitive study
 spec/
   parity/            the oracle: corpora, harness, verifier, fuzzer
 specs/               packet-v1 and node-envelope-v1 documents

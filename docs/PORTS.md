@@ -7,14 +7,15 @@ all verified byte-for-byte against the same recorded oracle.
 
 | Port | Binary | Base corpus | Edge corpus | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 103/103 | 106 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 103/103 | 16 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 28/28 | 103/103 | 17 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 28/28 | 120/120 | 120 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 28/28 | 120/120 | 21 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 28/28 | 120/120 | 22 | none (empty `[dependencies]`) |
 
-The Go reference's observable behaviour is unchanged: 64 tests,
+The Go reference's observable behaviour is unchanged: 69 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
-verification was reworked to hash cited ranges in place (no intermediate
-copies) with a differential oracle kept in the test package.
+verification hashes cited ranges in place (no intermediate copies), with a
+differential oracle kept in the test package, and `evidence verify --relocate`
+re-resolves a failed span against its recorded content fingerprint.
 
 ## How to verify
 
@@ -34,14 +35,15 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge corpus: 103 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge corpus: 120 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
-  field shapes, and the raw-byte evidence shapes: invalid UTF-8 and CRLF in
+  field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
-  range errors that must report the real line count).
-- Oracle mutation test: three deliberately broken reference builds fail the
-  corpora (26/28, 20/28 and 28/28 base; 95/103, 56/103 and 101/103 edge), so a
-  pass is meaningful.
+  range errors that must report the real line count, and the anchor
+  re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
+- Oracle mutation test: four deliberately broken reference builds fail the
+  corpora (base 26/28, 20/28, 28/28 and 28/28; edge 112/120, 64/120, 118/120 and
+  118/120), so a pass is meaningful.
 - Fuzzing: no divergence in 200 iterations (seed 1) plus 300 iterations
   (seed 7) per port, and seed 11 found the null-handling defect recorded below.
 
@@ -70,6 +72,19 @@ key-presence for structs and treated null slices as present, even reporting
 Fixed in all three, and the shapes are now frozen into the edge corpus
 (`internal/contract/testdata/invalid-null-*.json` and
 `invalid-empty-*.json`), so the static gate catches them without the fuzzer.
+
+### Node and contract usage errors (the relocation round)
+
+Adding the `contract-edge-relocate-unknown-flag-json` case exposed a Rust defect
+both earlier corpora had missed: contract and evidence usage errors were
+rendered as human text even under `--json`. With that fixed, a direct
+candidate-vs-reference comparison found two more Rust-only divergences that no
+case covered - `node verify` printed human text under `--json`, and it reported
+`--ledger` as the first missing path where the reference reports `--repo`
+first. All three are fixed in Rust and frozen into the edge corpus
+(`node-edge-missing-flags-human`, `node-edge-missing-flags-json`,
+`node-edge-missing-flags-partial-json`, `node-edge-unknown-flag-json`), which
+also proved that TypeScript and Zig already matched.
 
 ## Port design
 
