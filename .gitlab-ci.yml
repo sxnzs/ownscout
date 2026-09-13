@@ -19,6 +19,7 @@ default:
 
 variables:
   ZIG_VERSION: "0.16.0"
+  GO_VERSION: "1.26.0"
 
 reference:
   stage: reference
@@ -56,11 +57,17 @@ fuzz:
   image: node:24-bookworm
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential golang-go
+    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential
+    # Go from the official tarball: bookworm's golang-go is 1.19 and the module
+    # requires 1.26, so apt would silently build the wrong toolchain.
+    - curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+    - tar -C /usr/local -xzf /tmp/go.tar.gz
+    - ln -sf /usr/local/go/bin/go /usr/local/bin/go
     - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
     - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
     - tar -C /opt -xf /tmp/zig.tar.xz
     - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
   script:
     - . "$HOME/.cargo/env"
+    - go version && node --version && cargo --version && zig version
     - make fuzz-sweep
