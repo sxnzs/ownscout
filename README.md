@@ -148,6 +148,10 @@ OwnScout is designed to be boring in exactly the ways that matter:
 - **No dependencies.** Go standard library only; the ports have empty dependency
   manifests.
 
+<p align="center">
+  <img src="docs/assets/trust-boundary.svg" alt="Trust boundary: the repository is read and re-hashed, the process then exits, and the single append-only ledger write lands outside the repository" width="100%">
+</p>
+
 ## Language ports
 
 This repository is also a study in **behavioural parity across languages**. The

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-label="OwnScout trust boundary: the repository is only ever read, the process runs and exits, and the single ledger write lands outside the repository">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="560" fill="#0b0b0b"/>
+  <rect width="1200" height="560" fill="url(#grid)"/>
+  <rect x="0.5" y="0.5" width="1199" height="559" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
+
+  <g stroke="#ffffff" stroke-opacity="0.3" stroke-width="1" fill="none">
+    <path d="M18 18h18M18 18v18"/><path d="M1182 18h-18M1182 18v18"/>
+    <path d="M18 542h18M18 542v-18"/><path d="M1182 542h-18M1182 542v-18"/>
+  </g>
+
+  <text x="56" y="66" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#f2f2f2" letter-spacing="5.2">TRUST BOUNDARY</text>
+  <text x="56" y="94" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#8f8f8f" letter-spacing="1.5">one process, one write, and that write lands outside the repository</text>
+  <line x1="56" y1="112" x2="1144" y2="112" stroke="#ffffff" stroke-opacity="0.12"/>
+
+  <line x1="802" y1="140" x2="802" y2="430" stroke="#ffffff" stroke-opacity="0.2" stroke-dasharray="4 5"/>
+  <text x="802" y="132" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9.5" fill="#6f6f6f" letter-spacing="2">WRITE BOUNDARY</text>
+
+  <rect x="56" y="170" width="280" height="196" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <text x="78" y="204" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#f2f2f2" letter-spacing="2.6">REPOSITORY</text>
+  <line x1="78" y1="218" x2="314" y2="218" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="78" y="254" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">packet.json</text>
+  <text x="78" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">envelope.json</text>
+  <text x="78" y="306" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">repo files + hashes</text>
+  <line x1="78" y1="318" x2="314" y2="318" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="78" y="342" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#7ee787" letter-spacing="1.8">READ AND RE-HASHED</text>
+  <rect x="460" y="170" width="280" height="196" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <text x="482" y="204" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#f2f2f2" letter-spacing="2.6">OWNSCOUT</text>
+  <line x1="482" y1="218" x2="718" y2="218" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="482" y="254" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">contract validate</text>
+  <text x="482" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">evidence verify</text>
+  <text x="482" y="306" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">node verify</text>
+  <line x1="482" y1="318" x2="718" y2="318" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="482" y="342" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#7ee787" letter-spacing="1.8">RUNS, THEN EXITS</text>
+  <rect x="864" y="170" width="280" height="196" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <text x="886" y="204" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#f2f2f2" letter-spacing="2.6">LEDGER</text>
+  <line x1="886" y1="218" x2="1122" y2="218" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="886" y="254" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">append-only</text>
+  <text x="886" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">SHA-256 hash-chained</text>
+  <text x="886" y="306" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#a8a8a8" letter-spacing="1.2">no timestamps</text>
+  <line x1="886" y1="318" x2="1122" y2="318" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="886" y="342" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#7ee787" letter-spacing="1.8">REPRODUCIBLE BYTES</text>
+
+  <line x1="340" y1="268" x2="447" y2="268" stroke="#e8e8e8" stroke-opacity="0.5" stroke-width="1"/>
+  <path d="M447 264 l9 4 l-9 4 z" fill="#e8e8e8" fill-opacity="0.7"/>
+  <text x="398" y="256" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9.5" fill="#8f8f8f" letter-spacing="1.2">READ</text>
+  <line x1="744" y1="268" x2="851" y2="268" stroke="#e8e8e8" stroke-opacity="0.5" stroke-width="1"/>
+  <path d="M851 264 l9 4 l-9 4 z" fill="#e8e8e8" fill-opacity="0.7"/>
+  <text x="802" y="256" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9.5" fill="#8f8f8f" letter-spacing="1.2">APPEND</text>
+
+  <rect x="56" y="460" width="1088" height="76" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <text x="80" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6f6f6f" letter-spacing="1.8">DELIBERATELY ABSENT</text>
+  <line x1="255" y1="478" x2="255" y2="518" stroke="#ffffff" stroke-opacity="0.12"/>
+  <g><path d="M272 492 l10 10 M282 492 l-10 10" stroke="#e8e8e8" stroke-opacity="0.45" stroke-width="1.2" fill="none"/>
+  <text x="290" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#8a8a8a" letter-spacing="1.6">NETWORK</text></g>
+  <g><path d="M500 492 l10 10 M510 492 l-10 10" stroke="#e8e8e8" stroke-opacity="0.45" stroke-width="1.2" fill="none"/>
+  <text x="518" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#8a8a8a" letter-spacing="1.6">DAEMON</text></g>
+  <g><path d="M719 492 l10 10 M729 492 l-10 10" stroke="#e8e8e8" stroke-opacity="0.45" stroke-width="1.2" fill="none"/>
+  <text x="737" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#8a8a8a" letter-spacing="1.6">REPOSITORY WRITE</text></g>
+  <g><path d="M1023 492 l10 10 M1033 492 l-10 10" stroke="#e8e8e8" stroke-opacity="0.45" stroke-width="1.2" fill="none"/>
+  <text x="1041" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#8a8a8a" letter-spacing="1.6">DEPENDENCIES</text></g>
+</svg>
