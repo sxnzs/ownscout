@@ -43,7 +43,7 @@ def main():
     failures = []
     for case in corpus["cases"]:
         with tempfile.TemporaryDirectory() as workdir:
-            shutil.copytree(source_fixtures, os.path.join(workdir, "fixtures"))
+            shutil.copytree(source_fixtures, os.path.join(workdir, "fixtures"), symlinks=True)
             repo = os.path.join(workdir, "fixtures", "repo")
             try:
                 proc = subprocess.run(

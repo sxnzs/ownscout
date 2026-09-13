@@ -192,7 +192,7 @@ def run_isolated(binary, case, ledger_data):
     the input the second binary sees and manufacture a divergence.
     """
     with tempfile.TemporaryDirectory() as workdir:
-        shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"))
+        shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"), symlinks=True)
         with open(os.path.join(workdir, LEDGER_TARGET), "wb") as handle:
             handle.write(ledger_data)
         repo = os.path.join(workdir, "fixtures", "repo")
@@ -236,7 +236,7 @@ def main():
         for _ in range(rng.randrange(1, 4)):
             data = mutate(data, rng)
         with tempfile.TemporaryDirectory() as workdir:
-            shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"))
+            shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"), symlinks=True)
             with open(os.path.join(workdir, "fixtures", "mutated.json"), "wb") as handle:
                 handle.write(data)
             repo = os.path.join(workdir, "fixtures", "repo")

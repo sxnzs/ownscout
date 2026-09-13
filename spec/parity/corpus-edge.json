@@ -2854,6 +2854,64 @@
     },
     {
       "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-symlink-ancestor-human",
+      "stdout": "OK: ledger is intact\n  - 1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\nNext action: The ledger chain is intact.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "ledger-edge-verify-symlink-ancestor-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":true,\"summary\":\"ledger is intact\",\"details\":[\"1 record(s), tip 15f1081bbfe69a07da19cc3ae59930638980bb944be90ac1e2db2726cad63ed6\"],\"next_action\":\"The ledger chain is intact.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-symlink-ancestor-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-symlink-ancestor-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",
