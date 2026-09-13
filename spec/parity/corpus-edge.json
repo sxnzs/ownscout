@@ -2070,6 +2070,18 @@
     },
     {
       "args": [
+        "node",
+        "bind",
+        "--packet",
+        "fixtures/edge/packet-edge-unknown-specials.json",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-bind-unknown-field-json",
+      "stdout": "{\"command\":\"node bind\",\"ok\":false,\"summary\":\"packet could not be decoded\",\"details\":[\"strict packet decoding failed\"],\"next_action\":\"Provide one valid packet-v1 JSON object with --packet \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "ledger",
         "verify",
         "--ledger",
@@ -2124,7 +2136,19 @@
       ],
       "exitCode": 2,
       "name": "ledger-edge-verify-absent-json",
-      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger could not be read\",\"details\":[\"read ledger \\\"{{DIR}}/fixtures/edge/ledger-absent.jsonl\\\": open {{DIR}}/fixtures/edge/ledger-absent.jsonl: no such file or directory\"],\"next_action\":\"Provide a readable ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger could not be read\",\"details\":[\"read ledger \\\"{{DIR}}/fixtures/edge/ledger-absent.jsonl\\\": lstat {{DIR}}/fixtures/edge/ledger-absent.jsonl: no such file or directory\"],\"next_action\":\"Provide a readable ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/repo",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-verify-dir-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger could not be read\",\"details\":[\"read ledger \\\"{{REPO}}\\\": not a regular file\"],\"next_action\":\"Provide a readable ledger file with --ledger \\u003cfile\\u003e.\"}\n"
     },
     {
       "args": [
@@ -2162,6 +2186,27 @@
       },
       "name": "node-edge-relocate-off-human",
       "stdout": "ERROR: node evaluation failed\n  - node \"a\": failed (evidence \"evidence-1\" is missing or not verified)\n  - node \"b\": blocked (dependency \"a\" is not evidence_current)\nNext action: Refresh or correct the failed evidence, then run node verification again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/edge/packet-evidence-relocate-moved.json",
+        "--envelope",
+        "fixtures/edge/envelope-relocate-moved.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "files": {
+        "ledger.jsonl": "{\"schema_version\":\"ownscout-ledger-v1\",\"seq\":1,\"prev_record_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"record_hash\":\"445d5a11a25eab1f654e136c50eafd57a7d9490dbb484b46e00b05183c08f673\",\"envelope_sha256\":\"9376603c862eb70ac32506fec27373518ad32a67cb9c9d11ea6b57902faaf7ba\",\"packet_binding_sha256\":\"d6964313a1c45d8676a34210de7d7a2ad27ffeb64433117883cf67bb193be3e2\",\"ownscout_version\":\"0.1.0\",\"node_results\":[{\"node_id\":\"a\",\"status\":\"failed\",\"reason\":\"evidence \\\"evidence-1\\\" is missing or not verified\"},{\"node_id\":\"b\",\"status\":\"blocked\",\"reason\":\"dependency \\\"a\\\" is not evidence_current\"}]}\n"
+      },
+      "name": "node-edge-relocate-off-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"node evaluation failed\",\"details\":[\"node \\\"a\\\": failed (evidence \\\"evidence-1\\\" is missing or not verified)\",\"node \\\"b\\\": blocked (dependency \\\"a\\\" is not evidence_current)\"],\"next_action\":\"Refresh or correct the failed evidence, then run node verification again.\"}\n"
     },
     {
       "args": [

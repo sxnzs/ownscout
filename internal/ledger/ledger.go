@@ -266,6 +266,16 @@ func Verify(path string) (Summary, error) {
 	}
 	ledgerPath = filepath.Clean(ledgerPath)
 
+	// Reject non-regular files before opening: a blocking os.Open on a FIFO
+	// or device would hang the audit, and a symlink is never a ledger path.
+	info, err := os.Lstat(ledgerPath)
+	if err != nil {
+		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return Summary{}, fmt.Errorf("read ledger %q: not a regular file", ledgerPath)
+	}
+
 	file, err := os.Open(ledgerPath)
 	if err != nil {
 		return Summary{}, fmt.Errorf("read ledger %q: %w", ledgerPath, err)

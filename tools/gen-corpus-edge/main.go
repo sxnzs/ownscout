@@ -564,6 +564,8 @@ func run() error {
 		spec{"node-edge-bind-contract-fail-human", []string{"node", "bind", "--packet", "fixtures/edge/contract-invalid-schema.json"}},
 		spec{"node-edge-bind-decode-fail-json", []string{"node", "bind", "--packet", "fixtures/edge/packet-edge-node-duplicate-key.json", "--json"}},
 		spec{"node-edge-bind-missing-flag-human", []string{"node", "bind"}},
+		// bind's decode errors must stay generic — no packet values leak.
+		spec{"node-edge-bind-unknown-field-json", []string{"node", "bind", "--packet", "fixtures/edge/packet-edge-unknown-specials.json", "--json"}},
 	)
 	// ledger verify audits the hash chain read-only: no lock, no repository,
 	// no file creation. Cases cover a valid seed ledger, a corrupt one (exit
@@ -574,6 +576,7 @@ func run() error {
 		spec{"ledger-edge-verify-garbage-human", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-garbage.jsonl"}},
 		spec{"ledger-edge-verify-garbage-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-garbage.jsonl", "--json"}},
 		spec{"ledger-edge-verify-absent-json", []string{"ledger", "verify", "--ledger", "fixtures/edge/ledger-absent.jsonl", "--json"}},
+		spec{"ledger-edge-verify-dir-json", []string{"ledger", "verify", "--ledger", "fixtures/repo", "--json"}},
 		spec{"ledger-edge-no-subcommand", []string{"ledger"}},
 		spec{"ledger-edge-unknown-subcommand", []string{"ledger", "bogus"}},
 	)
@@ -594,6 +597,7 @@ func run() error {
 		"--envelope", "fixtures/edge/envelope-relocate-moved.json", "--ledger", "ledger.jsonl"}
 	cases = append(cases,
 		spec{"node-edge-relocate-off-human", relocateNode},
+		spec{"node-edge-relocate-off-json", append(append([]string{}, relocateNode...), "--json")},
 		spec{"node-edge-relocate-on-human", append(append([]string{}, relocateNode...), "--relocate")},
 		spec{"node-edge-relocate-on-json", append(append([]string{}, relocateNode...), "--relocate", "--json")},
 	)
