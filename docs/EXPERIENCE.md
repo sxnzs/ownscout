@@ -5,11 +5,12 @@ and accessibility tools.
 
 ## Packet boundary
 
-OwnScout accepts packet-v1 JSON only. Decoding is strict: unknown fields are
-rejected; no compatibility normalization is performed; and hashes are never
-silently repaired. Fields explicitly modeled by the packet contract, including
-its documented compatibility spellings, are accepted. A packet must be fixed
-at its source rather than reinterpreted by the CLI.
+OwnScout accepts packet-v1 JSON only, and every command decodes it through one
+shared strict decoder: unknown fields are rejected, duplicate keys are rejected,
+field names are exact case, an explicit `null` is rejected, trailing JSON is
+rejected, input must be valid UTF-8, and there is a 1 MiB limit. No compatibility
+normalization is performed and hashes are never silently repaired. A packet must
+be fixed at its source rather than reinterpreted by the CLI.
 
 ## Safe workflow
 
@@ -46,8 +47,11 @@ is plain text and includes the next action.
   - `ownscout doctor`
   - `ownscout version`
   - `ownscout contract validate --packet <file> [--json]`
-  - `ownscout evidence verify --repo <dir> --packet <file> [--json]`
-  - `ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]`
+  - `ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]`
+  - `ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]`
+  - `ownscout node bind --packet <file> [--json]`
+  - `ownscout ledger verify --ledger <file> [--json]`
+  - `ownscout ledger rotate --ledger <file> [--json]`
 - JSON mode is one line with stable fields:
   `command`, `ok`, `summary`, `details`, `next_action`.
 - Exit codes are suitable for shell automation and do not depend on output mode.
@@ -119,3 +123,24 @@ status details preserve order. The command never prints packet or envelope
 contents, never trusts producer verifier statuses, and never mutates the
 repository. Invalid input stops before ledger creation; once the ledger opens,
 it is closed even when evidence or graph evaluation fails.
+
+## Ledger guidance
+
+The ledger is the audit trail, never an authorization. Three commands treat it
+differently, and the difference is deliberate:
+
+- `node verify` appends one record per run, including failed and blocked results.
+- `ledger verify` only reads. It takes no lock, appends nothing, and audits each
+  file independently, so a rotated archive and the live ledger can both be
+  checked.
+- `ledger rotate` archives a validated ledger as `<ledger>.<first 8 of the chain
+  tip>` and leaves the live path free for the next chain. It refuses to overwrite
+  an existing archive, and refuses to rotate a ledger whose chain does not
+  validate, so a broken chain keeps its live name.
+
+The ledger is capped at 1 MiB, which keeps opening it a bounded whole-file
+validation. A full ledger is a rotation point rather than an error: `node verify`
+reports `ledger is full` and names the way out, and the chain restarts cleanly
+after a rotation. Only the append path hardens the ledger's path - it refuses a
+symlinked ancestor - while the read-only paths follow one, so `ledger verify` and
+`node verify` can legitimately disagree about the same path.

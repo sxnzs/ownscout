@@ -177,9 +177,10 @@ the cheapest way to find the next gap, because a path no case reaches is a path 
 port can skip and still pass - which is how both the append-time ledger cap and
 the symlinked-ancestor check stayed invisible while every port was green.
 
-Current reading: `cmd` 100%, `cli` 89.2%, `contract` 89.3%, `evidence` 87.1%,
+Current reading: `cmd` 100%, `cli` 92.0%, `contract` 89.3%, `evidence` 87.1%,
 `ledger` 72.1%, `node` 83.8%, `nodepacket` 83.5%, with three functions never
-executed. `ledger` is the low one, and it is also where every gap of this shape
+executed: the retired `evidence.VerifyPacket` wrapper, `ValidationError.Unwrap`,
+and `ledger.isPathPrefix`. `ledger` is the low one, and it is also where every gap of this shape
 has been found, so it is the first place to look next.
 
 ## Port design

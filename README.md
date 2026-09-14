@@ -47,9 +47,10 @@ producer's own claims.
 | `ownscout doctor` | Is this installation healthy and what version is it? |
 | `ownscout contract validate --packet p.json` | Is this packet well-formed and internally consistent? |
 | `ownscout evidence verify --repo R --packet p.json` | Is the cited content still byte-identical in `R`? |
-| `ownscout node verify --repo R --packet p.json --envelope e.json --ledger L` | Does the whole dependency graph check out, and what is the audit trail? |
+| `ownscout node verify --repo R --packet p.json --envelope e.json --ledger L [--relocate]` | Does the whole dependency graph check out, and what is the audit trail? |
 | `ownscout node bind --packet p.json` | What is this packet's canonical binding digest, for `packet_binding_sha256`? |
 | `ownscout ledger verify --ledger L` | Is the ledger's hash chain intact, read-only? |
+| `ownscout ledger rotate --ledger L` | Archive a validated ledger at its rotation point, named by its chain tip. |
 
 Packet decoding is deliberately strict on every command — one shared decoder,
 not a lenient front door and a strict back door: unknown fields are rejected,
@@ -97,15 +98,20 @@ ownscout node verify --repo /path/to/repo --packet packet.json \
 
 # Audit a ledger's hash chain without locking or appending.
 ownscout ledger verify --ledger /path/to/ownscout-ledger.jsonl
+
+# Archive a validated ledger at its rotation point.
+ownscout ledger rotate --ledger /path/to/ownscout-ledger.jsonl
 ```
 
 Add `--json` to any validation command for a single machine-readable line.
 Use it in scripts and agents; omit it when a person is diagnosing a failure.
 
 The ledger is capped at 1 MiB so `Open` stays a bounded whole-file validation.
-A full ledger is a rotation point, not a failure: `mv` it aside and the next
-`node verify` starts a fresh hash chain; `ledger verify` audits each file
-independently. The CLI names this path when it fires (`ledger is full`).
+A full ledger is a rotation point, not a failure: `ledger rotate` archives it as
+`<ledger>.<first 8 of the chain tip>` and the next `node verify` starts a fresh
+hash chain; `ledger verify` audits each file independently. `node verify` names
+this path when it fires (`ledger is full`), and `ledger rotate` refuses to
+overwrite an archive that already exists.
 
 ### When the evidence moved
 

@@ -22,8 +22,11 @@ Commands:
 - `ownscout doctor`
 - `ownscout version` -> `ownscout 0.1.0`
 - `ownscout contract validate --packet <file> [--json]`
-- `ownscout evidence verify --repo <dir> --packet <file> [--json]`
-- `ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--json]`
+- `ownscout evidence verify --repo <dir> --packet <file> [--relocate] [--json]`
+- `ownscout node verify --repo <dir> --packet <file> --envelope <file> --ledger <file> [--relocate] [--json]`
+- `ownscout node bind --packet <file> [--json]`
+- `ownscout ledger verify --ledger <file> [--json]`
+- `ownscout ledger rotate --ledger <file> [--json]`
 - `--help` at the root and for each command, plus `ownscout <cmd> --help`
 
 ## Exit codes

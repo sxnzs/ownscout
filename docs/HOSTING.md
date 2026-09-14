@@ -13,8 +13,11 @@ Two pipelines are provided and should stay in sync:
 | `.github/workflows/ci.yml` | GitHub Actions |
 | `.gitlab-ci.yml` | GitLab CI |
 
-Both build the Go reference, build all three ports, and run
-`spec/parity/verify-all.sh`.
+Both build the Go reference, build all three ports, run
+`spec/parity/verify-all.sh`, and sweep fuzz seeds with `make fuzz-sweep`. The
+sweep is a separate job because it is slower and because a single seed is not a
+verification strategy: several divergence classes were reachable only at seeds
+the recorded corpus never exercised.
 
 ## Where to host
 
