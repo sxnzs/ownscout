@@ -50,12 +50,15 @@ enforces the record-size cap but not the whole-ledger append-time cap.~~
 `appendLedger` now checks the opened file's `fstat` size plus the encoded record
 against `ledger_max_size` and returns `error.LedgerFull`, which `node verify`
 surfaces as `ledger is full`; an oversized single record returns
-`error.LedgerAppendFailed` first, matching `Store.Append`'s ordering. The
-*open-time* cap is pinned by `ledger-edge-verify-full-*` and
-`node-edge-ledger-full-*`. **The append-time cap itself has no corpus case** —
-`ledger-full.jsonl` is over-cap before `Open`, so `Append`'s overflow path is
-unexercised. Pinning it needs a `node verify` case against a valid ledger sized
-just under 1 MiB.
+`error.LedgerAppendFailed` first, matching `Store.Append`'s ordering. Both cap
+sites are pinned: the open-time cap by `ledger-edge-verify-full-*` and
+`node-edge-ledger-full-*` (`ledger-full.jsonl` is over-cap before `Open`), the
+append-time cap by `node-edge-ledger-append-full-*` against
+`ledger-near-full.jsonl`, a valid ledger sized just under 1 MiB whose append
+overflows. The ledger's JSON-walk structural rejections (duplicate keys flat
+and nested, unknown and case-folded fields, non-object records, trailing data,
+missing final LF, blank lines, node_results shapes, per-result rules) are
+pinned by the `ledger-edge-shape-*` family.
 
 ## 4. Per-line scanner bound — fixed
 

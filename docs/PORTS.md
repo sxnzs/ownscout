@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded trace corpus.
 
 | Port | Binary | Base traces | Edge traces | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 31/31 | 245/245 | 149 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 31/31 | 245/245 | 37 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 31/31 | 245/245 | 38 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 31/31 | 247/247 | 149 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 31/31 | 247/247 | 37 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 31/31 | 247/247 | 38 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 77 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
@@ -35,7 +35,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base trace corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge trace corpus: 245 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge trace corpus: 247 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
@@ -115,7 +115,7 @@ The fix needs three escape widths - `\xNN` for control bytes and DEL, `\uNNNN` u
 to U+FFFF, `\UNNNNNNNN` above it - with printable runes left literal, and the
 unknown-field check interleaved with the type checks so document order decides.
 Twelve cases pin it (`contract-edge-unknown-*` and
-`contract-edge-precedence-*`). All three ports pass 245/245 and fuzz seed 13 is
+`contract-edge-precedence-*`). All three ports pass 247/247 and fuzz seed 13 is
 clean; the `DIVERGENCES.md` files they had been recorded in are gone.
 
 ### Strict decoding on every command (seeds 3-21, then unification)
