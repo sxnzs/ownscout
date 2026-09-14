@@ -434,14 +434,6 @@ func permittedSystemSymlink(path string) bool {
 	return err == nil && filepath.Clean(resolved) == string(filepath.Separator)+"private"+string(filepath.Separator)+"var"
 }
 
-func isPathPrefix(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
 func rejectLedgerInsideRepo(ledgerPath, repoPath string) error {
 	rel, err := filepath.Rel(repoPath, ledgerPath)
 	if err != nil {
