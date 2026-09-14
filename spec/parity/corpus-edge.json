@@ -2817,6 +2817,29 @@
         "ledger",
         "verify",
         "--ledger",
+        "fixtures/edge/ledger-shape-dup-key-in-array.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-in-array-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-dup-key-in-array.jsonl\": line 1: malformed JSON: duplicate JSON field \"c\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key-in-array.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-in-array-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-dup-key-in-array.jsonl\\\": line 1: malformed JSON: duplicate JSON field \\\"c\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
         "fixtures/edge/ledger-shape-unknown-field.jsonl"
       ],
       "exitCode": 1,

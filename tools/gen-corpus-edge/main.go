@@ -806,6 +806,13 @@ func run() error {
 			return editSeed("dup-key-nested", "\"ownscout_version\":\""+ownscoutVersion+"\"",
 				"\"ownscout_version\":{\"a\":1,\"a\":2}")
 		}},
+		{"dup-key-in-array", func() (string, error) {
+			// The only shape that reaches the array arm of the value walker:
+			// an array value recursing through objects, one holding a
+			// duplicate key the walker must name before the typed decode runs.
+			return editSeed("dup-key-in-array", "\"ownscout_version\":\""+ownscoutVersion+"\"",
+				"\"ownscout_version\":[1,{\"b\":2},{\"c\":3,\"c\":4}]")
+		}},
 		{"unknown-field", func() (string, error) {
 			return strings.TrimSuffix(seedLine, "}") + ",\"bogus\":1}\n", nil
 		}},
