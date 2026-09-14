@@ -775,6 +775,139 @@ func run() error {
 			})
 		}
 	}
+	// Structural rejections in the ledger's JSON walk: duplicate keys (flat and
+	// nested inside an arbitrary value), unknown and case-folded field names,
+	// non-object records, trailing data, a missing final LF, blank lines,
+	// node_results shape errors and per-result rule failures. Each fixture is
+	// the seed record with one edit, so the case is about the rule it names.
+	// No other corpus case reaches these branches, which is exactly how a port
+	// could skip them and still pass.
+	editSeed := func(name, from, to string) (string, error) {
+		if !strings.Contains(seedLine, from) {
+			return "", fmt.Errorf("ledger shape %s: %q not found in the seed record", name, from)
+		}
+		return strings.Replace(seedLine, from, to, 1) + "\n", nil
+	}
+	seqNum := int(seedRecord["seq"].(float64))
+	resultsAt := strings.Index(seedLine, "\"node_results\":[")
+	if resultsAt < 0 {
+		return fmt.Errorf("ledger shape: node_results not found in the seed record")
+	}
+	ownscoutVersion, _ := seedRecord["ownscout_version"].(string)
+	shapes := []struct {
+		name string
+		line func() (string, error)
+	}{
+		{"dup-key", func() (string, error) {
+			return editSeed("dup-key", fmt.Sprintf("\"seq\":%d", seqNum),
+				fmt.Sprintf("\"seq\":%d,\"seq\":%d", seqNum, seqNum))
+		}},
+		{"dup-key-nested", func() (string, error) {
+			return editSeed("dup-key-nested", "\"ownscout_version\":\""+ownscoutVersion+"\"",
+				"\"ownscout_version\":{\"a\":1,\"a\":2}")
+		}},
+		{"unknown-field", func() (string, error) {
+			return strings.TrimSuffix(seedLine, "}") + ",\"bogus\":1}\n", nil
+		}},
+		{"folded-node-id", func() (string, error) {
+			return editSeed("folded-node-id", "\"node_id\":\"", "\"NODE_ID\":\"")
+		}},
+		{"not-object", func() (string, error) { return "[1,2]\n", nil }},
+		{"trailing", func() (string, error) { return seedLine + " {}\n", nil }},
+		{"no-newline", func() (string, error) { return seedLine, nil }},
+		{"blank-line", func() (string, error) { return seedLine + "\n\n", nil }},
+		{"node-results-object", func() (string, error) {
+			return seedLine[:resultsAt] + "\"node_results\":{}}\n", nil
+		}},
+		{"node-result-scalar", func() (string, error) {
+			return seedLine[:resultsAt] + "\"node_results\":[7]}\n", nil
+		}},
+		{"seq-string", func() (string, error) {
+			return editSeed("seq-string", fmt.Sprintf("\"seq\":%d", seqNum), "\"seq\":\"1\"")
+		}},
+		{"hash-length", func() (string, error) {
+			// record_hash, not prev: prev's format check is shadowed by the
+			// chain check (any malformed prev already mismatches the expected
+			// value), so the length rule is only reachable on record_hash.
+			recordHash, _ := seedRecord["record_hash"].(string)
+			return editSeed("hash-length", "\"record_hash\":\""+recordHash+"\"",
+				"\"record_hash\":\""+strings.Repeat("f", len(recordHash)-1)+"\"")
+		}},
+		{"dup-node-id", func() (string, error) {
+			end := strings.LastIndex(seedLine, "]")
+			result := seedLine[resultsAt+len("\"node_results\":["):end]
+			return seedLine[:resultsAt] + "\"node_results\":[" + result + "," + result + seedLine[end:] + "\n", nil
+		}},
+	}
+	for _, shape := range shapes {
+		line, err := shape.line()
+		if err != nil {
+			return err
+		}
+		file := "fixtures/edge/ledger-shape-" + shape.name + ".jsonl"
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(line), 0o644); err != nil {
+			return err
+		}
+		ledgerArgs := []string{"ledger", "verify", "--ledger", file}
+		for _, mode := range []struct {
+			suffix string
+			extra  []string
+		}{{"human", nil}, {"json", []string{"--json"}}} {
+			caseArgs := append(append([]string{}, ledgerArgs...), mode.extra...)
+			command := exec.Command(bin, caseArgs...)
+			command.Dir = dir
+			var out bytes.Buffer
+			command.Stdout = &out
+			command.Stderr = &out
+			exitCode := 0
+			if err := command.Run(); err != nil {
+				exitErr, ok := err.(*exec.ExitError)
+				if !ok {
+					return fmt.Errorf("ledger-edge-shape-%s-%s: %v", shape.name, mode.suffix, err)
+				}
+				exitCode = exitErr.ExitCode()
+			}
+			recorded = append(recorded, map[string]any{
+				"name":     "ledger-edge-shape-" + shape.name + "-" + mode.suffix,
+				"args":     caseArgs,
+				"exitCode": exitCode,
+				"stdout":   normalize(out.String(), dir, repoDir, bin),
+			})
+		}
+	}
+	// Node verify summarises Open's validation failure without naming the rule;
+	// two representative shapes pin that mapping for the walker's rejections.
+	for _, name := range []string{"dup-key", "not-object"} {
+		file := "fixtures/edge/ledger-shape-" + name + ".jsonl"
+		args := []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
+			"--envelope", "fixtures/envelope-valid.json", "--ledger", file}
+		for _, mode := range []struct {
+			suffix string
+			extra  []string
+		}{{"human", nil}, {"json", []string{"--json"}}} {
+			caseArgs := append(append([]string{}, args...), mode.extra...)
+			command := exec.Command(bin, caseArgs...)
+			command.Dir = dir
+			var out bytes.Buffer
+			command.Stdout = &out
+			command.Stderr = &out
+			exitCode := 0
+			if err := command.Run(); err != nil {
+				exitErr, ok := err.(*exec.ExitError)
+				if !ok {
+					return fmt.Errorf("node-edge-ledger-shape-%s-%s: %v", name, mode.suffix, err)
+				}
+				exitCode = exitErr.ExitCode()
+			}
+			recorded = append(recorded, map[string]any{
+				"name":     "node-edge-ledger-shape-" + name + "-" + mode.suffix,
+				"args":     caseArgs,
+				"exitCode": exitCode,
+				"stdout":   normalize(out.String(), dir, repoDir, bin),
+			})
+		}
+	}
+
 	// A ledger past the size cap: node verify must name the rotation path
 	// rather than a bare open failure, and ledger verify reports the bound
 	// without reading past it. The repeated seed line need not validate — the

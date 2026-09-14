@@ -2768,6 +2768,375 @@
     },
     {
       "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-dup-key.jsonl\": line 1: malformed JSON: duplicate JSON field \"seq\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-dup-key.jsonl\\\": line 1: malformed JSON: duplicate JSON field \\\"seq\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key-nested.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-nested-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-dup-key-nested.jsonl\": line 1: malformed JSON: duplicate JSON field \"a\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key-nested.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-key-nested-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-dup-key-nested.jsonl\\\": line 1: malformed JSON: duplicate JSON field \\\"a\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-unknown-field.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-unknown-field-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-unknown-field.jsonl\": line 1: malformed JSON: unknown JSON field \"bogus\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-unknown-field.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-unknown-field-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-unknown-field.jsonl\\\": line 1: malformed JSON: unknown JSON field \\\"bogus\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-folded-node-id.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-folded-node-id-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-folded-node-id.jsonl\": line 1: malformed JSON: non-canonical JSON field \"NODE_ID\"; use \"node_id\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-folded-node-id.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-folded-node-id-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-folded-node-id.jsonl\\\": line 1: malformed JSON: non-canonical JSON field \\\"NODE_ID\\\"; use \\\"node_id\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-not-object.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-not-object-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-not-object.jsonl\": line 1: record must be a JSON object\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-not-object.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-not-object-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-not-object.jsonl\\\": line 1: record must be a JSON object\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-trailing.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-trailing-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-trailing.jsonl\": line 1: trailing data\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-trailing.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-trailing-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-trailing.jsonl\\\": line 1: trailing data\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-no-newline.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-no-newline-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-no-newline.jsonl\": nonempty ledger must end with LF\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-no-newline.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-no-newline-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-no-newline.jsonl\\\": nonempty ledger must end with LF\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-blank-line.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-blank-line-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-blank-line.jsonl\": empty or blank line\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-blank-line.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-blank-line-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-blank-line.jsonl\\\": empty or blank line\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-node-results-object.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-node-results-object-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-node-results-object.jsonl\": line 1: malformed JSON: node_results must be an array\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-node-results-object.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-node-results-object-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-node-results-object.jsonl\\\": line 1: malformed JSON: node_results must be an array\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-node-result-scalar.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-node-result-scalar-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-node-result-scalar.jsonl\": line 1: malformed JSON: node result must be a JSON object\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-node-result-scalar.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-node-result-scalar-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-node-result-scalar.jsonl\\\": line 1: malformed JSON: node result must be a JSON object\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-seq-string.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-seq-string-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-seq-string.jsonl\": line 1: malformed record: json: cannot unmarshal string into Go struct field Record.seq of type uint64\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-seq-string.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-seq-string-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-seq-string.jsonl\\\": line 1: malformed record: json: cannot unmarshal string into Go struct field Record.seq of type uint64\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-hash-length.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-hash-length-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-hash-length.jsonl\": line 1: record_hash must be exactly 64 lowercase hexadecimal characters\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-hash-length.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-hash-length-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-hash-length.jsonl\\\": line 1: record_hash must be exactly 64 lowercase hexadecimal characters\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-node-id.jsonl"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-node-id-human",
+      "stdout": "ERROR: ledger verification failed\n  - validate ledger \"{{DIR}}/fixtures/edge/ledger-shape-dup-node-id.jsonl\": line 1: duplicate node_id \"build\"\nNext action: Repair the ledger, then run ledger verification again.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "verify",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-node-id.jsonl",
+        "--json"
+      ],
+      "exitCode": 1,
+      "name": "ledger-edge-shape-dup-node-id-json",
+      "stdout": "{\"command\":\"ledger verify\",\"ok\":false,\"summary\":\"ledger verification failed\",\"details\":[\"validate ledger \\\"{{DIR}}/fixtures/edge/ledger-shape-dup-node-id.jsonl\\\": line 1: duplicate node_id \\\"build\\\"\"],\"next_action\":\"Repair the ledger, then run ledger verification again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-shape-dup-key-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-shape-dup-key.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-shape-dup-key-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-shape-not-object.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-shape-not-object-human",
+      "stdout": "ERROR: ledger could not be opened\n  - ledger open failed\nNext action: Provide a writable ledger path outside the repository and try again.\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "fixtures/edge/ledger-shape-not-object.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-ledger-shape-not-object-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"ledger could not be opened\",\"details\":[\"ledger open failed\"],\"next_action\":\"Provide a writable ledger path outside the repository and try again.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",
