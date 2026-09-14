@@ -10,19 +10,9 @@ than silently approximated, per `spec/parity/PORT.md`.
 it for the store's lifetime, so two concurrent `node verify` runs cannot
 interleave appends. Node's standard library has no file-locking primitive, and
 this repository stays dependency-free and `npm`-free, so the TypeScript port
-reads and renames without a lock.
+holds one descriptor for the store's lifetime but takes no lock.
 
 The gap is unobservable in the trace corpus, which is single-process: every case
 sees one writer. It is real under concurrency - two simultaneous appends could
 interleave - and it is not fixable without a native dependency, so it is recorded
 rather than left implicit.
-
-## 2. `O_NOFOLLOW` on the ledger's final component
-
-The reference opens the ledger with `O_NOFOLLOW`, so a symlink at the final path
-component is refused by the kernel. This port reaches the same outcome through an
-`lstat` check and a "not a regular file" refusal, which is what the pinned case
-records, but it is a check-then-open rather than an atomic one.
-
-The window is a race between the two calls, not a difference in the ordinary
-outcome.
