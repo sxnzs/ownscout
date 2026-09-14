@@ -8,8 +8,8 @@
   <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
-  <a href="#verification"><img alt="Parity 28/28 + 208/208" src="https://img.shields.io/badge/parity-28%2F28%20%2B%20208%2F208-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="293 tests passing" src="https://img.shields.io/badge/tests-293%20passing-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="Parity 31/31 + 245/245" src="https://img.shields.io/badge/parity-31%2F31%20%2B%20245%2F245-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="301 tests passing" src="https://img.shields.io/badge/tests-301%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
@@ -229,19 +229,23 @@ A port is only interesting if a passing grade means something. Here is how
 equivalence is established.
 
 <p align="center">
-  <img src="docs/assets/parity.svg" alt="Trace-equivalence matrix: every port passes 28 base and 208 edge cases" width="100%">
+  <img src="docs/assets/parity.svg" alt="Trace-equivalence matrix: every port passes 31 base and 245 edge cases" width="100%">
 </p>
 
-- **Recorded traces.** The Go reference records 28 base cases and 208 hardening
+- **Recorded traces.** The Go reference records 31 base cases and 245 hardening
   cases (path escape, non-UTF-8, graph cycles, ledger hash chaining, in-repo
   ledger rejection, JSON HTML-escaping, the null/empty field shapes, the
   raw-byte evidence shapes: invalid UTF-8 and CRLF in evidence files, a single
-  empty selected line, and evidence files beyond 1 MiB, and the anchor
-  re-resolution outcomes: moved, absent, shrunken file, and budget-stopped).
+  empty selected line, and evidence files beyond 1 MiB, the anchor
+  re-resolution outcomes: moved, absent, shrunken file, and budget-stopped, and
+  the ledger JSON-walk structural rejections: duplicate keys flat and nested,
+  unknown and case-folded fields, non-object records, trailing data, a missing
+  final LF, blank lines, and node_results shape and per-result rules).
   Every port replays them byte-for-byte.
 - **Mutation-tested traces.** Four deliberately broken reference builds fail
   the trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 172/208, 106/208, 206/208
-  and 206/208), so a pass is evidence, not a formality. The newest mutant strips
+  and 206/208 — fractions as recorded against the 28+208 corpus those builds
+  faced), so a pass is evidence, not a formality. The newest mutant strips
   the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
   see, which is why the edge trace corpus exists.
 - **Differential fuzzing.** `spec/parity/fuzz.py` mutates the fixtures and
