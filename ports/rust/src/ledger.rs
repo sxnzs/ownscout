@@ -50,7 +50,8 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
     // path (`verify`) deliberately skips this check.
     let full = abs_clean(path);
     reject_symlink_ancestors(&full)?;
-    if let Ok(m) = fs::symlink_metadata(&full) {
+    let expected = fs::symlink_metadata(&full).ok();
+    if let Some(m) = &expected {
         if m.file_type().is_symlink() {
             return Err(format!("ledger path {:?} is a symlink", full.display()));
         }
@@ -66,14 +67,26 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
             repo.display()
         ));
     }
+    let parent = full.parent().unwrap_or(Path::new("."));
+    let parent_meta = fs::metadata(parent).map_err(|e| {
+        format!(
+            "open ledger parent {:?}: {}",
+            parent.display(),
+            go_errno(&e)
+        )
+    })?;
     let mut options = OpenOptions::new();
     options.read(true).append(true).create(true);
     #[cfg(unix)]
-    options.custom_flags(nofollow_flag());
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(nofollow_flag());
+    }
     let mut f = options
         .open(&full)
         .map_err(|e| format!("open ledger {:?}: {}", full.display(), e))?;
     lock_exclusive(&f).map_err(|e| format!("lock ledger {:?}: {}", full.display(), go_errno(&e)))?;
+    reject_opened_file(&full, &resolved, &repo, expected.as_ref(), &parent_meta, &f)?;
     let lock = LedgerLock::new(&f);
     let mut data = Vec::new();
     f.read_to_end(&mut data)
@@ -349,6 +362,92 @@ fn resolve_ledger_path(path: &Path) -> PathBuf {
     }
 }
 
+// os.SameFile: identity is the (device, inode) pair.
+#[cfg(unix)]
+fn same_file(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+// reject_opened_file mirrors the reference's post-open checks: the file found
+// now must be the one inspected before open, still in the same directory, with
+// exactly one link, and still resolving to the same path outside the repo.
+fn reject_opened_file(
+    path: &Path,
+    expected_resolved: &Path,
+    resolved_repo: &Path,
+    expected: Option<&fs::Metadata>,
+    expected_parent: &fs::Metadata,
+    file: &File,
+) -> Result<(), String> {
+    #[cfg(not(unix))]
+    let _ = (expected, expected_parent);
+    reject_symlink_ancestors(path)?;
+    let info = fs::symlink_metadata(path).map_err(|e| {
+        format!(
+            "inspect ledger {:?} after opening: {}",
+            path.display(),
+            go_errno(&e)
+        )
+    })?;
+    if info.file_type().is_symlink() {
+        return Err(format!("ledger path {:?} is a symlink", path.display()));
+    }
+    if !info.is_file() {
+        return Err(format!("ledger {:?} is not a regular file", path.display()));
+    }
+    #[cfg(unix)]
+    if let Some(exp) = expected {
+        if !same_file(exp, &info) {
+            return Err(format!("ledger {:?} changed while opening", path.display()));
+        }
+    }
+    let opened = file
+        .metadata()
+        .map_err(|e| format!("stat ledger {:?}: {}", path.display(), go_errno(&e)))?;
+    if !opened.is_file() {
+        return Err(format!("ledger {:?} is not a regular file", path.display()));
+    }
+    #[cfg(unix)]
+    if !same_file(&info, &opened) {
+        return Err(format!("ledger {:?} changed while opening", path.display()));
+    }
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let parent_now = fs::metadata(parent).map_err(|e| {
+        format!(
+            "stat ledger parent {:?} after opening: {}",
+            parent.display(),
+            go_errno(&e)
+        )
+    })?;
+    #[cfg(unix)]
+    if !same_file(expected_parent, &parent_now) {
+        return Err(format!(
+            "ledger parent {:?} changed while opening",
+            parent.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened.nlink() != 1 {
+            return Err(format!("ledger {:?} must have link count 1", path.display()));
+        }
+    }
+    let resolved_now = resolve_ledger_path(path);
+    if resolved_now != expected_resolved {
+        return Err(format!("ledger path {:?} changed while opening", path.display()));
+    }
+    if inside(resolved_repo, &resolved_now) {
+        return Err(format!(
+            "ledger path {:?} is inside repository {:?}",
+            resolved_now.display(),
+            resolved_repo.display()
+        ));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Read-only ledger verification (mirrors internal/ledger/ledger.go Verify).
 // ---------------------------------------------------------------------------
@@ -521,7 +620,7 @@ fn nofollow_flag() -> i32 {
 fn lock_exclusive(file: &File) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        if unsafe { flock(file.as_raw_fd(), 2) } == -1 {
+        if unsafe { flock(file.as_raw_fd(), 2 | 4) } == -1 {
             return Err(std::io::Error::last_os_error());
         }
     }
