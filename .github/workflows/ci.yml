@@ -15,6 +15,9 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: make corpus-check
+      # Informational: prints per-package coverage and never-executed
+      # functions under corpus replay; a newly dead path is a corpus gap.
+      - run: make coverage
 
   ports:
     runs-on: ubuntu-latest

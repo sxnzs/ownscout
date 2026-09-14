@@ -29,6 +29,9 @@ reference:
     - go test ./...
     - go build -o bin/ownscout ./cmd/ownscout
     - make corpus-check
+    # Informational: per-package coverage + never-executed functions under
+    # corpus replay; a newly dead path is a corpus gap.
+    - make coverage
 
 ports:
   stage: ports
