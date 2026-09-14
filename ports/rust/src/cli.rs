@@ -783,6 +783,17 @@ fn node_verify_command(args: &[String], json: bool) -> (String, i32) {
             "Fix the envelope binding or graph, then run node verification again.",
         );
     }
+    // The repository resolves before the ledger opens it, so a repo problem
+    // keeps the repository label instead of surfacing as a ledger failure.
+    if let Err(e) = evidence::resolve_repo(&repo) {
+        return node_error(
+            json,
+            "repository could not be checked",
+            &e,
+            2,
+            "Provide a readable repository directory with --repo <dir>.",
+        );
+    }
     let mut store = match ledger::open(&ledger_path, &repo) {
         Ok(v) => v,
         Err(e) => {

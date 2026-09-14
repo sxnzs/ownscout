@@ -1076,15 +1076,37 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         const details = [_][]const u8{"node-envelope-v1 validation failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "envelope validation failed", .details = &details, .next_action = "Fix the envelope binding or graph, then run node verification again." }, json_output), .code = 2 };
     };
-    if (std.mem.eql(u8, ledger_path, repo) or (std.mem.startsWith(u8, ledger_path, repo) and ledger_path.len > repo.len and ledger_path[repo.len] == '/')) {
-        const details = [_][]const u8{"ledger open failed"};
-        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
-    }
+    // The repository resolves before the ledger opens it, so a bad repo keeps
+    // the repository label instead of surfacing as a ledger-open failure.
+    const early_repo_root = std.fs.path.resolve(allocator, &.{repo}) catch return repositoryError(allocator, "node verify", repo, json_output);
+    var early_repo_dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, early_repo_root, .{}) catch return repositoryError(allocator, "node verify", repo, json_output);
+    early_repo_dir.close(std.Options.debug_io);
     const absolute_ledger_path = absolutePath(allocator, ledger_path) catch {
         const details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     };
     if (ledgerSymlinkAncestor(absolute_ledger_path) != null) {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    }
+    // rejectLedgerInsideRepo compares resolved paths, not spellings.
+    const resolved_ledger = resolveLedgerPath(allocator, absolute_ledger_path) catch {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    };
+    var resolved_repo_buf: [4096]u8 = undefined;
+    const resolved_repo_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, repo, &resolved_repo_buf) catch {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    };
+    const resolved_repo = resolved_repo_buf[0..resolved_repo_len];
+    const resolved_repo_z = try allocator.dupeZ(u8, resolved_repo);
+    var repo_stat: std.c.Stat = undefined;
+    if (std.c.fstatat(std.c.AT.FDCWD, resolved_repo_z, &repo_stat, 0) != 0 or repo_stat.mode & std.c.S.IFMT != std.c.S.IFDIR) {
+        const details = [_][]const u8{"ledger open failed"};
+        return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
+    }
+    if (std.mem.eql(u8, resolved_ledger, resolved_repo) or (std.mem.startsWith(u8, resolved_ledger, resolved_repo) and resolved_ledger.len > resolved_repo.len and resolved_ledger[resolved_repo.len] == '/')) {
         const details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     }
@@ -2358,10 +2380,11 @@ fn validateLedgerData(allocator: std.mem.Allocator, data: []const u8) LedgerScan
     var start: usize = 0;
     while (start < data.len) {
         const newline = std.mem.indexOfScalarPos(u8, data, start, '\n') orelse return .{ .invalid = "nonempty ledger must end with LF" };
-        const trimmed = trimGoSpace(data[start..newline]);
+        const raw = data[start..newline];
+        if (raw.len > ledger_max_record_size) return .{ .invalid = "read line: bufio.Scanner: token too long" };
+        const trimmed = trimGoSpace(raw);
         start = newline + 1;
         if (trimmed.len == 0) return .{ .invalid = "empty or blank line" };
-        if (trimmed.len > ledger_max_record_size + 1) return .{ .invalid = "read line: bufio.Scanner: token too long" };
         var parse_error: []const u8 = "malformed JSON";
         const record = parseLedgerRecordDetailed(allocator, trimmed, &parse_error) orelse {
             return .{ .invalid = std.fmt.allocPrint(allocator, "line {d}: {s}", .{ count + 1, parse_error }) catch "line: malformed JSON" };
@@ -2633,13 +2656,86 @@ fn ledgerResults(allocator: std.mem.Allocator, details: []const []const u8) ![]L
     return try out.toOwnedSlice(allocator);
 }
 
-fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [64]u8, binding: [64]u8, details: []const []const u8) !void {
+/// os.SameFile: identity is the (device, inode) pair.
+fn sameLedgerFile(a: std.c.Stat, b: std.c.Stat) bool {
+    return a.dev == b.dev and a.ino == b.ino;
+}
+
+/// resolveLedgerPath: the ledger's resolved parent directory joined to its
+/// basename. The file itself need not exist; its parent must.
+fn resolveLedgerPath(allocator: std.mem.Allocator, abs: []const u8) ![]u8 {
     const io = std.Options.debug_io;
-    const old: []const u8 = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1 << 20)) catch |err| switch (err) {
-        error.FileNotFound => "",
-        error.StreamTooLong, error.FileTooBig => return error.LedgerFull,
-        else => return error.LedgerOpenFailed,
-    };
+    const parent_path = std.fs.path.dirname(abs) orelse "/";
+    var resolved_buf: [4096]u8 = undefined;
+    const resolved_len = std.Io.Dir.cwd().realPathFile(io, parent_path, &resolved_buf) catch return error.LedgerOpenFailed;
+    return try std.fs.path.resolve(allocator, &.{ resolved_buf[0..resolved_len], std.fs.path.basename(abs) });
+}
+
+fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [64]u8, binding: [64]u8, details: []const []const u8) !void {
+    // Mirrors ledger.Open + Store.Append: open once with
+    // O_RDWR|O_CREAT|O_APPEND|O_NOFOLLOW, hold an exclusive flock for the
+    // read-validate-append sequence, and confirm the opened file is still the
+    // file inspected before opening (same inode, same parent, one link).
+    const abs = try absolutePath(allocator, path);
+    if (ledgerSymlinkAncestor(abs) != null) return error.LedgerOpenFailed;
+    const path_z = try allocator.dupeZ(u8, abs);
+
+    var expected: ?std.c.Stat = null;
+    var pre: std.c.Stat = undefined;
+    const pre_rc = std.c.fstatat(std.c.AT.FDCWD, path_z, &pre, std.c.AT.SYMLINK_NOFOLLOW);
+    if (pre_rc == 0) {
+        if (pre.mode & std.c.S.IFMT == std.c.S.IFLNK) return error.LedgerOpenFailed;
+        expected = pre;
+    } else if (std.c.errno(pre_rc) != .NOENT) return error.LedgerOpenFailed;
+
+    const expected_resolved = try resolveLedgerPath(allocator, abs);
+    const parent_path = std.fs.path.dirname(abs) orelse "/";
+    const parent_z = try allocator.dupeZ(u8, parent_path);
+    var expected_parent: std.c.Stat = undefined;
+    if (std.c.fstatat(std.c.AT.FDCWD, parent_z, &expected_parent, 0) != 0) return error.LedgerOpenFailed;
+
+    const fd = std.c.open(path_z, .{ .ACCMODE = .RDWR, .APPEND = true, .NOFOLLOW = true, .CREAT = true }, @as(std.c.mode_t, 0o600));
+    if (fd < 0) return error.LedgerOpenFailed;
+    var locked = false;
+    defer {
+        if (locked) _ = std.c.flock(fd, std.c.LOCK.UN);
+        _ = std.c.close(fd);
+    }
+    if (std.c.flock(fd, std.c.LOCK.EX | std.c.LOCK.NB) != 0) return error.LedgerOpenFailed;
+    locked = true;
+
+    // rejectOpenedFile: re-run the path checks against what was opened.
+    if (ledgerSymlinkAncestor(abs) != null) return error.LedgerOpenFailed;
+    var now: std.c.Stat = undefined;
+    if (std.c.fstatat(std.c.AT.FDCWD, path_z, &now, std.c.AT.SYMLINK_NOFOLLOW) != 0) return error.LedgerOpenFailed;
+    if (now.mode & std.c.S.IFMT == std.c.S.IFLNK) return error.LedgerOpenFailed;
+    if (now.mode & std.c.S.IFMT != std.c.S.IFREG) return error.LedgerOpenFailed;
+    if (expected) |pre_stat| {
+        if (!sameLedgerFile(pre_stat, now)) return error.LedgerOpenFailed;
+    }
+    var opened: std.c.Stat = undefined;
+    if (std.c.fstat(fd, &opened) != 0) return error.LedgerOpenFailed;
+    if (opened.mode & std.c.S.IFMT != std.c.S.IFREG) return error.LedgerOpenFailed;
+    if (!sameLedgerFile(now, opened)) return error.LedgerOpenFailed;
+    var parent_now: std.c.Stat = undefined;
+    if (std.c.fstatat(std.c.AT.FDCWD, parent_z, &parent_now, 0) != 0) return error.LedgerOpenFailed;
+    if (!sameLedgerFile(expected_parent, parent_now)) return error.LedgerOpenFailed;
+    if (opened.nlink != 1) return error.LedgerOpenFailed;
+    const resolved_now = try resolveLedgerPath(allocator, abs);
+    if (!std.mem.eql(u8, resolved_now, expected_resolved)) return error.LedgerOpenFailed;
+
+    if (opened.size > ledger_max_size) return error.LedgerFull;
+    if (std.c.lseek(fd, 0, std.c.SEEK.SET) != 0) return error.LedgerOpenFailed;
+    var data = std.ArrayList(u8).empty;
+    var rbuf: [8192]u8 = undefined;
+    while (true) {
+        const n = std.c.read(fd, &rbuf, rbuf.len);
+        if (n < 0) return error.LedgerOpenFailed;
+        if (n == 0) break;
+        try data.appendSlice(allocator, rbuf[0..@intCast(n)]);
+        if (data.items.len > ledger_max_size) return error.LedgerFull;
+    }
+    const old = data.items;
     var count: u64 = 0;
     var last_hash: []const u8 = ledger_zero_hash;
     switch (validateLedgerData(allocator, old)) {
@@ -2676,12 +2772,20 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
         .node_results = pending.node_results,
     };
     const encoded = try ledgerRecordJson(allocator, final, true);
-    var output = std.ArrayList(u8).empty;
-    if (old.len != 0) try output.appendSlice(allocator, old);
-    try output.appendSlice(allocator, encoded);
-    try output.append(allocator, '\n');
-    if (output.items.len > ledger_max_size) return error.LedgerFull;
-    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = output.items, .flags = .{ .truncate = true, .permissions = .default_file } }) catch return error.LedgerAppendFailed;
+    if (encoded.len > ledger_max_record_size) return error.LedgerAppendFailed;
+    var stat_now: std.c.Stat = undefined;
+    if (std.c.fstat(fd, &stat_now) != 0) return error.LedgerAppendFailed;
+    if (stat_now.size < 0 or stat_now.size > ledger_max_size or encoded.len + 1 > ledger_max_size - @as(usize, @intCast(stat_now.size))) return error.LedgerFull;
+    const line = try allocator.alloc(u8, encoded.len + 1);
+    @memcpy(line[0..encoded.len], encoded);
+    line[encoded.len] = '\n';
+    var written: usize = 0;
+    while (written < line.len) {
+        const n = std.c.write(fd, line.ptr + written, line.len - written);
+        if (n <= 0) return error.LedgerAppendFailed;
+        written += @intCast(n);
+    }
+    if (std.c.fsync(fd) != 0) return error.LedgerAppendFailed;
 }
 test "evidence verification hashes selected lines and normalizes CRLF" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

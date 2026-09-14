@@ -747,20 +747,60 @@ function ledgerRecordCanonical(r:any):any{
   return {schema_version:r.schema_version,seq:r.seq,prev_record_hash:r.prev_record_hash,record_hash:"",envelope_sha256:r.envelope_sha256,packet_binding_sha256:r.packet_binding_sha256,ownscout_version:r.ownscout_version,node_results:results.map((n:any)=>({node_id:n.node_id,status:n.status,...(n.reason?{reason:n.reason}:{})}))};
 }
 function hashRecord(r:any):string{return sha256(goJson(ledgerRecordCanonical(r)));}
-function ledgerOpen(ledger:string,repo:string):{path:string;list:any[]} {
+// ledgerOpen mirrors ledger.Open: one descriptor opened O_RDWR|O_CREAT|
+// O_APPEND|O_NOFOLLOW is held for the store's lifetime, and the opened file is
+// re-validated against the pre-open lstat, its parent directory, the resolved
+// path and a link count of 1. Only the advisory flock is missing — node's
+// standard library has no file-locking primitive (see DIVERGENCES.md).
+function ledgerOpen(ledger:string,repo:string):{path:string;fd:number;list:any[]} {
   const p=safeLedgerPath(ledger,repo);
   rejectSymlinkAncestors(p);
-  if(!fs.existsSync(path.dirname(p))) throw new Error(`open ledger parent "${path.dirname(p)}": no such file or directory`);
-  if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, "a", 0o600));
-  const data=fs.readFileSync(p); if(data.length>MAX_LEDGER)throw new Error("ledger exceeds 1048576 bytes");
-  return {path:p,list:validateLedger(data).list};
+  let expected:fs.Stats|undefined;
+  try{expected=fs.lstatSync(p);}catch(e:any){if(!(e&&e.code==="ENOENT"))throw new Error(`inspect ledger "${p}": ${e&&e.message||e}`);}
+  if(expected&&expected.isSymbolicLink())throw new Error(`ledger path "${p}" is a symlink`);
+  const parent=path.dirname(p);
+  let resolved:string;
+  try{resolved=path.join(fs.realpathSync(parent),path.basename(p));}catch(e:any){throw new Error(`resolve ledger path "${p}": ${e&&e.message||e}`);}
+  const rr=repoRoot(repo), rel2=path.relative(rr,resolved);
+  if(rel2==="."||(rel2!==".."&&!rel2.startsWith(".."+path.sep)))throw new Error(`ledger path "${resolved}" is inside repository "${rr}"`);
+  let expectedParent:fs.Stats;
+  try{expectedParent=fs.statSync(parent);}catch(e:any){throw new Error(`open ledger parent "${parent}": ${e&&e.message||e}`);}
+  let fd:number;
+  try{fd=fs.openSync(p,fs.constants.O_RDWR|fs.constants.O_CREAT|fs.constants.O_APPEND|(fs.constants.O_NOFOLLOW||0),0o600);}
+  catch(e:any){throw new Error(`open ledger "${p}": ${e&&e.message||e}`);}
+  try{
+    rejectSymlinkAncestors(p);
+    const now=fs.lstatSync(p);
+    if(now.isSymbolicLink())throw new Error(`ledger path "${p}" is a symlink`);
+    if(!now.isFile())throw new Error(`ledger "${p}" is not a regular file`);
+    if(expected&&(expected.dev!==now.dev||expected.ino!==now.ino))throw new Error(`ledger "${p}" changed while opening`);
+    const opened=fs.fstatSync(fd);
+    if(!opened.isFile())throw new Error(`ledger "${p}" is not a regular file`);
+    if(opened.dev!==now.dev||opened.ino!==now.ino)throw new Error(`ledger "${p}" changed while opening`);
+    const parentNow=fs.statSync(parent);
+    if(parentNow.dev!==expectedParent.dev||parentNow.ino!==expectedParent.ino)throw new Error(`ledger parent "${parent}" changed while opening`);
+    if(opened.nlink!==1)throw new Error(`ledger "${p}" must have link count 1`);
+    let resolvedNow:string;
+    try{resolvedNow=path.join(fs.realpathSync(parent),path.basename(p));}catch(e:any){throw new Error(`resolve ledger path "${p}": ${e&&e.message||e}`);}
+    if(resolvedNow!==resolved)throw new Error(`ledger path "${p}" changed while opening`);
+    const rel3=path.relative(rr,resolvedNow);
+    if(rel3==="."||(rel3!==".."&&!rel3.startsWith(".."+path.sep)))throw new Error(`ledger path "${resolvedNow}" is inside repository "${rr}"`);
+    if(opened.size>MAX_LEDGER)throw new Error("ledger exceeds 1048576 bytes");
+    const data=fs.readFileSync(fd); if(data.length>MAX_LEDGER)throw new Error("ledger exceeds 1048576 bytes");
+    return {path:p,fd,list:validateLedger(data).list};
+  }catch(e){try{fs.closeSync(fd);}catch{}throw e;}
 }
 function appendLedger(l:any,b:string,envHash:string,results:any[]):void {
   if(!results.length)throw new Error("node_results must be non-empty");
   const prev=l.list.length?l.list[l.list.length-1].record_hash:zero;
   const rec:any={schema_version:"ownscout-ledger-v1",seq:l.list.length+1,prev_record_hash:prev,record_hash:zero,envelope_sha256:envHash,packet_binding_sha256:b,ownscout_version:VERSION,node_results:results};
-  rec.record_hash=hashRecord(rec);const line=goJson(rec)+"\n";if(Buffer.byteLength(line)>64<<10||fs.statSync(l.path).size+Buffer.byteLength(line)>1<<20)throw new Error("ledger exceeds 1048576 bytes");
-  fs.appendFileSync(l.path,line,{mode:0o600});l.list.push(rec);
+  rec.record_hash=hashRecord(rec);const json=goJson(rec);
+  if(Buffer.byteLength(json)>64<<10)throw new Error("record exceeds 65536 bytes");
+  const line=json+"\n",lineLen=Buffer.byteLength(line),size=fs.fstatSync(l.fd).size;
+  if(size>MAX_LEDGER||lineLen>MAX_LEDGER-size)throw new Error("ledger exceeds 1048576 bytes");
+  const buf=Buffer.from(line);let off=0;
+  while(off<buf.length)off+=fs.writeSync(l.fd,buf,off,buf.length-off);
+  fs.fsyncSync(l.fd);l.list.push(rec);
 }
 
 // --- ledger verify -------------------------------------------------------
@@ -1313,10 +1353,16 @@ function nodeCmd(a:string[],out:any):number{
   let pd:Buffer;try{pd=readBounded(q.f["--packet"]);}catch(e:any){return emit(out,q.j,{command:"node verify",ok:false,summary:"packet could not be loaded",details:[e.message],next_action:"Provide a readable packet file with --packet <file>."},2);}
   let ed:Buffer;try{ed=readBounded(q.f["--envelope"],"envelope");}catch(e:any){return emit(out,q.j,{command:"node verify",ok:false,summary:"envelope could not be loaded",details:[e.message],next_action:"Provide a readable envelope file with --envelope <file>."},2);}
   let p:any,env:any,ord:number[],b:string;try{const d=decodePacketValid(pd);if(d.violations.length){if(d.violations.length===1&&d.violations[0].rule==="packet_decode")return emit(out,q.j,{command:"node verify",ok:false,summary:"packet could not be decoded",details:["strict packet decoding failed"],next_action:"Provide one valid packet-v1 JSON object with --packet <file>."},2);return emit(out,q.j,{command:"node verify",ok:false,summary:`packet contract failed (${d.violations.length} violation(s))`,details:details(d.violations),next_action:"Fix the packet contract, then run node verification again."},2);}p=d.packet;try{env=parseEnvelope(ed);}catch(e:any){throw new Error("ENVELOPE_PARSE: "+e.message);}b=binding(p);ord=validateEnvelope(env,p,b);
-    let ledger:any;try{ledger=ledgerOpen(q.f["--ledger"],q.f["--repo"]);}catch(e:any){ if(e.message==="ledger exceeds 1048576 bytes")return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger is full",details:[e.message],next_action:"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."},2); return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be opened",details:["ledger open failed"],next_action:"Provide a writable ledger path outside the repository and try again."},2); }let report:any;try{report=verifyEvidence(q.f["--repo"],p,{relocate});}catch(e:any){return emit(out,q.j,{command:"node verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}const ev=evaluate(env,p,b,report,ord);const results=ev.results.map((x:any)=>({node_id:x.node_id,status:x.status,...(x.reason?{reason:x.reason}:{})}));try{appendLedger(ledger,b,sha256(ed),results);}catch(e:any){if(e.message==="ledger exceeds 1048576 bytes")return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger is full",details:[e.message],next_action:"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."},2);return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger append failed",details:["node results could not be appended"],next_action:"Check the ledger and try again; no result was consumed."},2);}
+    // The repository resolves before the ledger opens it, so a bad repo keeps
+    // the repository label instead of surfacing as a ledger-open failure.
+    try{repoRoot(q.f["--repo"]);}catch(e:any){return emit(out,q.j,{command:"node verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}
+    let ledger:any;try{ledger=ledgerOpen(q.f["--ledger"],q.f["--repo"]);}catch(e:any){ if(e.message==="ledger exceeds 1048576 bytes")return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger is full",details:[e.message],next_action:"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."},2); return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be opened",details:["ledger open failed"],next_action:"Provide a writable ledger path outside the repository and try again."},2); }
+    const closeLedger=()=>{try{fs.closeSync(ledger.fd);return false;}catch{return true;}};
+    const fin=(r:any,code:number)=>{if(closeLedger())return emit(out,q.j,{command:"node verify",ok:false,summary:"ledger could not be closed",details:["ledger close failed"],next_action:"Check the ledger path and try again."},2);return emit(out,q.j,r,code);};
+    let report:any;try{report=verifyEvidence(q.f["--repo"],p,{relocate});}catch(e:any){return fin({command:"node verify",ok:false,summary:"repository could not be checked",details:[e.message],next_action:"Provide a readable repository directory with --repo <dir>."},2);}const ev=evaluate(env,p,b,report,ord);const results=ev.results.map((x:any)=>({node_id:x.node_id,status:x.status,...(x.reason?{reason:x.reason}:{})}));try{appendLedger(ledger,b,sha256(ed),results);}catch(e:any){if(e.message==="ledger exceeds 1048576 bytes")return fin({command:"node verify",ok:false,summary:"ledger is full",details:[e.message],next_action:"Archive the full ledger aside (mv) and rerun to start a fresh chain; audit archives with ownscout ledger verify."},2);return fin({command:"node verify",ok:false,summary:"ledger append failed",details:["node results could not be appended"],next_action:"Check the ledger and try again; no result was consumed."},2);}
     let det=ev.results.map((x:any)=>`node "${x.node_id}": ${x.status}${x.reason?" ("+x.reason+")":""}`);
     if(!ev.ok&&relocate)det=det.concat(evidenceIssues(report));
-    return emit(out,q.j,{command:"node verify",ok:ev.ok,summary:ev.ok?"all nodes are evidence_current":"node evaluation failed",details:det,next_action:ev.ok?"The node envelope is recorded and ready for its declared workflow.":"Refresh or correct the failed evidence, then run node verification again."},ev.ok?0:1);
+    return fin({command:"node verify",ok:ev.ok,summary:ev.ok?"all nodes are evidence_current":"node evaluation failed",details:det,next_action:ev.ok?"The node envelope is recorded and ready for its declared workflow.":"Refresh or correct the failed evidence, then run node verification again."},ev.ok?0:1);
   }catch(e:any){let summary="envelope validation failed",detail="node-envelope-v1 validation failed",next="Fix the envelope binding or graph, then run node verification again.";if(String(e.message).startsWith("ENVELOPE_PARSE")){summary="envelope could not be parsed";detail="strict envelope parsing failed";next="Provide one valid node-envelope-v1 JSON object with --envelope <file>."}return emit(out,q.j,{command:"node verify",ok:false,summary,details:[detail],next_action:next},2);}
 }
 if (import.meta.url === `file://${process.argv[1]}`) {

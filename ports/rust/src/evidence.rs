@@ -37,8 +37,10 @@ pub fn verify(repo: &str, p: &Packet) -> Result<Report, String> {
     verify_with_options(repo, p, &Options { relocate: false })
 }
 
-// verify_with_options is verify with optional behaviour enabled.
-pub fn verify_with_options(repo: &str, p: &Packet, options: &Options) -> Result<Report, String> {
+// resolve_repo is the repository-resolution half of verification, exposed so
+// node verify can check the repo before the ledger opens it — a repo problem
+// keeps the repository label instead of surfacing as a ledger-open failure.
+pub fn resolve_repo(repo: &str) -> Result<PathBuf, String> {
     let root = match fs::canonicalize(repo) {
         Ok(v) => v,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -54,6 +56,12 @@ pub fn verify_with_options(repo: &str, p: &Packet, options: &Options) -> Result<
     if !root.is_dir() {
         return Err(format!("repository {:?} is not a directory", repo));
     }
+    Ok(root)
+}
+
+// verify_with_options is verify with optional behaviour enabled.
+pub fn verify_with_options(repo: &str, p: &Packet, options: &Options) -> Result<Report, String> {
+    let root = resolve_repo(repo)?;
     let mut r = Report {
         results: Vec::new(),
         verified_count: 0,
