@@ -55,6 +55,10 @@ ENVELOPE_CASES = [
 LEDGER_CASES = [
     ["ledger", "verify", "--ledger", "fixtures/mutated.jsonl"],
     ["ledger", "verify", "--ledger", "fixtures/mutated.jsonl", "--json"],
+    # rotate validates before renaming — a port that skips validation would
+    # rotate broken chains the reference refuses to touch. run_isolated gives
+    # each binary a fresh workdir, so the rename is safe to exercise.
+    ["ledger", "rotate", "--ledger", "fixtures/mutated.jsonl", "--json"],
     ["node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
      "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/mutated.jsonl", "--json"],
 ]

@@ -687,8 +687,8 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
         const details = try invalidPacketDetails(allocator, violations);
         return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "packet is invalid", .details = details, .next_action = "Fix the packet contract, then verify evidence again." }, json_output), .code = 1 };
     }
-    const root = std.fs.path.resolve(allocator, &.{repo.?}) catch return repositoryError(allocator, repo.?, json_output);
-    const dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, root, .{}) catch return repositoryError(allocator, repo.?, json_output);
+    const root = std.fs.path.resolve(allocator, &.{repo.?}) catch return repositoryError(allocator, "evidence verify", repo.?, json_output);
+    const dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, root, .{}) catch return repositoryError(allocator, "evidence verify", repo.?, json_output);
     var verified: usize = 0;
     var issues: std.ArrayList([]const u8) = .empty;
     for (packet.evidence) |item| {
@@ -707,19 +707,19 @@ fn evidenceVerify(allocator: std.mem.Allocator, args: []const []const u8, json_o
     return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = true, .summary = "evidence verified", .details = &details, .next_action = "The packet is ready for its declared default action." }, json_output), .code = 0 };
 }
 
-fn repositoryError(allocator: std.mem.Allocator, repo: []const u8, json_output: bool) !RunResult {
+fn repositoryError(allocator: std.mem.Allocator, command: []const u8, repo: []const u8, json_output: bool) !RunResult {
     if (std.Io.Dir.cwd().statFile(std.Options.debug_io, repo, .{})) |stat| {
         if (stat.kind != .directory) {
             const details = [_][]const u8{try std.fmt.allocPrint(allocator, "repository \"{s}\" is not a directory", .{repo})};
-            return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
+            return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
         }
     } else |_| {}
     var cwd_buf: [4096]u8 = undefined;
-    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &.{ "could not determine current directory" }, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
+    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "repository could not be checked", .details = &.{ "could not determine current directory" }, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
     const cwd = try allocator.dupe(u8, cwd_buf[0..cwd_len]);
     const detail = try std.fmt.allocPrint(allocator, "resolve repository root \"{s}\": lstat {s}/{s}: no such file or directory", .{ repo, cwd, repo });
     const details = [_][]const u8{detail};
-    return .{ .output = try result.render(allocator, .{ .command = "evidence verify", .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
+    return .{ .output = try result.render(allocator, .{ .command = command, .ok = false, .summary = "repository could not be checked", .details = &details, .next_action = "Provide a readable repository directory with --repo <dir>." }, json_output), .code = 2 };
 }
 
 // Evidence verification mirrors the reference: files are read raw with no
@@ -1088,8 +1088,8 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
         const details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     }
-    const root = std.fs.path.resolve(allocator, &.{repo}) catch return repositoryError(allocator, repo, json_output);
-    const dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, root, .{}) catch return repositoryError(allocator, repo, json_output);
+    const root = std.fs.path.resolve(allocator, &.{repo}) catch return repositoryError(allocator, "node verify", repo, json_output);
+    const dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, root, .{}) catch return repositoryError(allocator, "node verify", repo, json_output);
     var details = std.ArrayList([]const u8).empty;
     var failed = try allocator.alloc(bool, envelope.nodes.len);
     @memset(failed, false);
