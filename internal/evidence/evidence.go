@@ -84,6 +84,13 @@ func VerifyPacketWithOptions(repoRoot string, packet contract.Packet, options Op
 	return report, nil
 }
 
+// ResolveRoot exposes repository resolution so callers that open a ledger
+// first (node verify) can still report a repository problem under the
+// repository label rather than swallowing it into a ledger-open error.
+func ResolveRoot(repoRoot string) (string, error) {
+	return repositoryRoot(repoRoot)
+}
+
 func repositoryRoot(repoRoot string) (string, error) {
 	if repoRoot == "" {
 		return "", fmt.Errorf("repository root is empty")

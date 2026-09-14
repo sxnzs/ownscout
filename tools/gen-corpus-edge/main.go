@@ -613,6 +613,11 @@ func run() error {
 		spec{"node-edge-packet-is-dir-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/repo", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--json"}},
 		spec{"node-edge-envelope-is-dir-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/repo", "--ledger", "ledger.jsonl", "--json"}},
 		spec{"node-edge-bind-packet-is-dir-json", []string{"node", "bind", "--packet", "fixtures/repo", "--json"}},
+		// A bad repository on the node path is a repository error, not a
+		// mislabeled ledger-open failure: the repo resolves before the ledger
+		// opens it.
+		spec{"node-edge-repo-missing-json", []string{"node", "verify", "--repo", "fixtures/repo-missing", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--json"}},
+		spec{"node-edge-repo-is-file-json", []string{"node", "verify", "--repo", "fixtures/repo/notes.txt", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--json"}},
 		spec{"node-edge-ledger-garbage-human", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-garbage.jsonl"}},
 		spec{"node-edge-ledger-garbage-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-garbage.jsonl", "--json"}},
 	)

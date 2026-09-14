@@ -276,6 +276,11 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 		return nodeError("envelope validation failed", "node-envelope-v1 validation failed", "Fix the envelope binding or graph, then run node verification again."), 2
 	}
 
+	// Resolve the repository before the ledger opens it: a repo error reported
+	// here keeps the repository label instead of surfacing as a ledger failure.
+	if _, err := evidence.ResolveRoot(repoPath); err != nil {
+		return nodeError("repository could not be checked", err.Error(), "Provide a readable repository directory with --repo <dir>."), 2
+	}
 	store, err := ledger.Open(ledgerPath, repoPath)
 	if err != nil {
 		var full *ledger.FullError

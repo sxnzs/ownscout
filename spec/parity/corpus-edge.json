@@ -2379,6 +2379,42 @@
         "node",
         "verify",
         "--repo",
+        "fixtures/repo-missing",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-repo-missing-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"repository could not be checked\",\"details\":[\"resolve repository root \\\"fixtures/repo-missing\\\": lstat {{REPO}}-missing: no such file or directory\"],\"next_action\":\"Provide a readable repository directory with --repo \\u003cdir\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
+        "fixtures/repo/notes.txt",
+        "--packet",
+        "fixtures/packet-valid.json",
+        "--envelope",
+        "fixtures/envelope-valid.json",
+        "--ledger",
+        "ledger.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "node-edge-repo-is-file-json",
+      "stdout": "{\"command\":\"node verify\",\"ok\":false,\"summary\":\"repository could not be checked\",\"details\":[\"repository \\\"fixtures/repo/notes.txt\\\" is not a directory\"],\"next_action\":\"Provide a readable repository directory with --repo \\u003cdir\\u003e.\"}\n"
+    },
+    {
+      "args": [
+        "node",
+        "verify",
+        "--repo",
         "fixtures/repo",
         "--packet",
         "fixtures/packet-valid.json",
