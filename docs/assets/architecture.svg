@@ -1,9 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" width="1200" height="620" role="img" aria-label="OwnScout architecture: the Go reference records a trace corpus and TypeScript, Rust and Zig ports replay it byte-for-byte">
+  <title>OwnScout architecture: one contract, four implementations</title>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
       <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
     </pattern>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8e8e8" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#7ee787" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#e8e8e8" stop-opacity="0"/>
+    </linearGradient>
   </defs>
+
+  <style>
+    .flow  { stroke-dasharray: 5 9; animation: flow 3.4s linear infinite; }
+    .f2 { animation-delay: -.6s } .f3 { animation-delay: -1.2s } .f4 { animation-delay: -1.8s }
+    .f5 { animation-delay: -2.4s } .f6 { animation-delay: -3s } .f7 { animation-delay: -1s }
+    .bar   { animation: bar 4.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    .b2 { animation-delay: .3s } .b3 { animation-delay: .6s } .b4 { animation-delay: .9s }
+    .b5 { animation-delay: 1.2s } .b6 { animation-delay: 1.5s } .b7 { animation-delay: 1.8s }
+    .b8 { animation-delay: 2.1s } .b9 { animation-delay: 2.4s } .b10 { animation-delay: 2.7s }
+    .b11 { animation-delay: 3s } .b12 { animation-delay: 3.3s } .b13 { animation-delay: 3.6s } .b14 { animation-delay: 3.9s }
+    .node  { animation: node 8s ease-in-out infinite; }
+    .n2 { animation-delay: -2s } .n3 { animation-delay: -4s } .n4 { animation-delay: -6s }
+    .card  { animation: card 8s ease-in-out infinite; }
+    .k2 { animation-delay: -2.6s } .k3 { animation-delay: -5.2s }
+    @keyframes flow { to { stroke-dashoffset: -14 } }
+    @keyframes bar  { 0%,100% { opacity: .4 } 50% { opacity: .95 } }
+    @keyframes node { 0%,100% { fill-opacity: .02 } 12%,28% { fill-opacity: .07 } 50% { fill-opacity: .02 } }
+    @keyframes card { 0%,100% { stroke-opacity: .18 } 12%,28% { stroke-opacity: .42 } 50% { stroke-opacity: .18 } }
+    @media (prefers-reduced-motion: reduce) {
+      .flow, .bar, .node, .card { animation: none }
+      .bar { opacity: .7 } .node { fill-opacity: .03 } .card { stroke-opacity: .22 }
+    }
+  </style>
+
   <rect width="1200" height="620" fill="#0b0b0b"/>
   <rect width="1200" height="620" fill="url(#grid)"/>
   <rect x="0.5" y="0.5" width="1199" height="619" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
@@ -22,54 +52,69 @@
   <text x="108" y="184" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">GO REFERENCE</text>
   <text x="108" y="202" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">records the trace corpus</text>
   <path d="M280 185 C 400 185 430 210 544 210" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
+  <path d="M280 185 C 400 185 430 210 544 210" fill="none" stroke="#7ee787" stroke-opacity="0.75" stroke-width="1.3" class="flow"/>
+
   <rect x="56" y="240" width="224" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
   <circle cx="82" cy="267" r="6.5" fill="none" stroke="#f2f2f2" stroke-width="1.2"/>
   <text x="108" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">TYPESCRIPT</text>
   <text x="108" y="284" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">replays it</text>
   <path d="M280 267 C 400 267 430 265 544 265" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
+  <path d="M280 267 C 400 267 430 265 544 265" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f2"/>
+
   <rect x="56" y="322" width="224" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
   <rect x="76" y="343" width="12" height="12" fill="none" stroke="#f2f2f2" stroke-width="1.2"/>
   <text x="108" y="348" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">RUST</text>
   <text x="108" y="366" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">replays it</text>
   <path d="M280 349 C 400 349 430 320 544 320" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
+  <path d="M280 349 C 400 349 430 320 544 320" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f3"/>
+
   <rect x="56" y="404" width="224" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
   <line x1="74" y1="431" x2="90" y2="431" stroke="#f2f2f2" stroke-width="1.6"/>
   <text x="108" y="430" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">ZIG</text>
   <text x="108" y="448" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">replays it</text>
   <path d="M280 431 C 400 431 430 375 544 375" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
+  <path d="M280 431 C 400 431 430 375 544 375" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f4"/>
 
   <line x1="548" y1="180" x2="548" y2="440" stroke="#e8e8e8" stroke-opacity="0.5" stroke-width="2"/>
   <line x1="692" y1="180" x2="692" y2="440" stroke="#e8e8e8" stroke-opacity="0.5" stroke-width="2"/>
-    <line x1="560.0" y1="265.0" x2="560.0" y2="355.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="569.5" y1="245.0" x2="569.5" y2="375.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="579.0" y1="273.0" x2="579.0" y2="347.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="588.5" y1="226.0" x2="588.5" y2="394.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="598.0" y1="252.0" x2="598.0" y2="368.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="607.5" y1="207.0" x2="607.5" y2="413.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="617.0" y1="234.0" x2="617.0" y2="386.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="626.5" y1="192.0" x2="626.5" y2="428.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="636.0" y1="222.0" x2="636.0" y2="398.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="645.5" y1="204.0" x2="645.5" y2="416.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="655.0" y1="241.0" x2="655.0" y2="379.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="664.5" y1="218.0" x2="664.5" y2="402.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="674.0" y1="258.0" x2="674.0" y2="362.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
-    <line x1="683.5" y1="240.0" x2="683.5" y2="380.0" stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5"/>
+  <rect x="548" y="180" width="144" height="260" fill="url(#band)"/>
+  <g stroke="#e8e8e8" stroke-opacity="0.55" stroke-width="3.5">
+    <line x1="560.0" y1="265.0" x2="560.0" y2="355.0" class="bar"/>
+    <line x1="569.5" y1="245.0" x2="569.5" y2="375.0" class="bar b2"/>
+    <line x1="579.0" y1="273.0" x2="579.0" y2="347.0" class="bar b3"/>
+    <line x1="588.5" y1="226.0" x2="588.5" y2="394.0" class="bar b4"/>
+    <line x1="598.0" y1="252.0" x2="598.0" y2="368.0" class="bar b5"/>
+    <line x1="607.5" y1="207.0" x2="607.5" y2="413.0" class="bar b6"/>
+    <line x1="617.0" y1="234.0" x2="617.0" y2="386.0" class="bar b7"/>
+    <line x1="626.5" y1="192.0" x2="626.5" y2="428.0" class="bar b8"/>
+    <line x1="636.0" y1="222.0" x2="636.0" y2="398.0" class="bar b9"/>
+    <line x1="645.5" y1="204.0" x2="645.5" y2="416.0" class="bar b10"/>
+    <line x1="655.0" y1="241.0" x2="655.0" y2="379.0" class="bar b11"/>
+    <line x1="664.5" y1="218.0" x2="664.5" y2="402.0" class="bar b12"/>
+    <line x1="674.0" y1="258.0" x2="674.0" y2="362.0" class="bar b13"/>
+    <line x1="683.5" y1="240.0" x2="683.5" y2="380.0" class="bar b14"/>
+  </g>
 
-  <text x="620" y="134" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#f2f2f2" letter-spacing="3.4">TRACES</text>
-  <text x="620" y="496" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6f6f6f" letter-spacing="1.6">28 BASE + 93 EDGE</text>
+  <text x="620" y="134" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#f2f2f2" letter-spacing="3.4">TRACE CORPUS</text>
+  <text x="620" y="496" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6f6f6f" letter-spacing="1.6">28 BASE + 213 EDGE</text>
 
   <path d="M696 225 C 790 225 810 223 872 223" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
-  <rect x="872" y="196" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <path d="M696 225 C 790 225 810 223 872 223" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f5"/>
+  <rect x="872" y="196" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" class="card"/>
   <path d="M893 214 h9 l5 5 v13 h-14 z" fill="none" stroke="#f2f2f2" stroke-width="1.1"/><path d="M902 214 v5 h5" fill="none" stroke="#f2f2f2" stroke-width="1.1"/>
   <text x="926" y="222" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">CORPUS.JSON</text>
-  <text x="926" y="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">28 base + 208 edge</text>
+  <text x="926" y="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">28 base + 213 edge</text>
+
   <path d="M696 310 C 790 310 810 333 872 333" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
-  <rect x="872" y="306" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <path d="M696 310 C 790 310 810 333 872 333" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f6"/>
+  <rect x="872" y="306" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" class="card k2"/>
   <path d="M892 333 l5 6 l11 -13" fill="none" stroke="#7ee787" stroke-width="1.6"/>
   <text x="926" y="332" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">PARITY OK</text>
   <text x="926" y="350" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">stdout + exit codes</text>
+
   <path d="M696 395 C 790 395 810 443 872 443" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1"/>
-  <rect x="872" y="416" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.18"/>
+  <path d="M696 395 C 790 395 810 443 872 443" fill="none" stroke="#7ee787" stroke-opacity="0.6" stroke-width="1.3" class="flow f7"/>
+  <rect x="872" y="416" width="272" height="54" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" class="card k3"/>
   <g fill="none" stroke="#f2f2f2" stroke-width="1.1"><line x1="900" y1="435" x2="892" y2="450"/><line x1="900" y1="435" x2="908" y2="450"/><line x1="892" y1="450" x2="908" y2="450"/><circle cx="900" cy="435" r="3"/><circle cx="892" cy="450" r="3"/><circle cx="908" cy="450" r="3"/></g>
   <text x="926" y="442" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#e6e6e6" letter-spacing="1.7">CI GREEN</text>
   <text x="926" y="460" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" fill="#6a6a6a" letter-spacing="1.1">both forges</text>

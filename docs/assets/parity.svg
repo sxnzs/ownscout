@@ -1,16 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" role="img" aria-label="OwnScout parity matrix: every port replays 28 base and 208 edge cases byte-for-byte">
+  <title>OwnScout parity matrix</title>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
       <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
     </pattern>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7ee787" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#7ee787" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7ee787" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="frame"><rect width="1000" height="400"/></clipPath>
   </defs>
+
+  <style>
+    .row  { animation: row 9s ease-in-out infinite; }
+    .r2 { animation-delay: -1.5s } .r3 { animation-delay: -3s } .r4 { animation-delay: -4.5s }
+    .pass { animation: pass 9s ease-in-out infinite; }
+    .p2 { animation-delay: -1.5s } .p3 { animation-delay: -3s } .p4 { animation-delay: -4.5s }
+    .sweep { animation: sweep 7s cubic-bezier(.45,0,.55,1) infinite; }
+    @keyframes row   { 0%,4% { opacity: .78 } 12%,38% { opacity: 1 } 62%,100% { opacity: .78 } }
+    @keyframes pass  { 0%,4% { fill-opacity: .6 } 12%,38% { fill-opacity: 1 } 62%,100% { fill-opacity: .6 } }
+    @keyframes sweep { 0% { transform: translateX(-460px) } 100% { transform: translateX(1000px) } }
+    @media (prefers-reduced-motion: reduce) {
+      .row, .pass, .sweep { animation: none }
+      .row { opacity: 1 } .pass { fill-opacity: 1 } .sweep { opacity: 0 }
+    }
+  </style>
+
   <rect width="1000" height="400" fill="#0a0a0a"/>
   <rect width="1000" height="400" fill="url(#grid)"/>
   <rect x="20.5" y="20.5" width="959" height="359" fill="none" stroke="#7ee787" stroke-opacity="0.3"/>
 
-  <text x="48" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#7ee787" letter-spacing="3.4">TRACE EQUIVALENCE</text>
+  <g clip-path="url(#frame)">
+    <rect x="-460" y="0" width="460" height="400" fill="url(#sweep)" class="sweep"/>
+  </g>
+
+  <text x="48" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#7ee787" letter-spacing="3.4">PARITY MATRIX</text>
   <line x1="48" y1="82" x2="952" y2="82" stroke="#7ee787" stroke-opacity="0.22" stroke-width="1"/>
-  <text x="48" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.6">replayed against the trace corpus — stdout and exit codes match exactly</text>
+  <text x="48" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#5c8f63" letter-spacing="1.6">replayed against the recorded oracle — stdout and exit codes match exactly</text>
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#8fce97" letter-spacing="2.4">
     <text x="48" y="144">PORT</text>
@@ -22,31 +49,31 @@
   <line x1="48" y1="156" x2="952" y2="156" stroke="#7ee787" stroke-opacity="0.16" stroke-width="1"/>
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
-    <g>
+    <g class="row">
       <text x="48" y="194" fill="#e8e8e8">GO REFERENCE</text>
       <text x="560" y="194" text-anchor="end" fill="#7ee787">28/28</text>
-      <text x="690" y="194" text-anchor="end" fill="#7ee787">208/208</text>
+      <text x="690" y="194" text-anchor="end" fill="#7ee787" class="pass">208/208</text>
       <text x="820" y="194" text-anchor="end" fill="#c8c8c8">69</text>
       <text x="952" y="194" text-anchor="end" fill="#6f8f74">stdlib</text>
     </g>
-    <g>
+    <g class="row r2">
       <text x="48" y="232" fill="#e8e8e8">TYPESCRIPT</text>
       <text x="560" y="232" text-anchor="end" fill="#7ee787">28/28</text>
-      <text x="690" y="232" text-anchor="end" fill="#7ee787">208/208</text>
+      <text x="690" y="232" text-anchor="end" fill="#7ee787" class="pass p2">208/208</text>
       <text x="820" y="232" text-anchor="end" fill="#c8c8c8">149</text>
       <text x="952" y="232" text-anchor="end" fill="#6f8f74">none</text>
     </g>
-    <g>
+    <g class="row r3">
       <text x="48" y="270" fill="#e8e8e8">RUST</text>
       <text x="560" y="270" text-anchor="end" fill="#7ee787">28/28</text>
-      <text x="690" y="270" text-anchor="end" fill="#7ee787">208/208</text>
+      <text x="690" y="270" text-anchor="end" fill="#7ee787" class="pass p3">208/208</text>
       <text x="820" y="270" text-anchor="end" fill="#c8c8c8">38</text>
       <text x="952" y="270" text-anchor="end" fill="#6f8f74">none</text>
     </g>
-    <g>
+    <g class="row r4">
       <text x="48" y="308" fill="#e8e8e8">ZIG</text>
       <text x="560" y="308" text-anchor="end" fill="#7ee787">28/28</text>
-      <text x="690" y="308" text-anchor="end" fill="#7ee787">208/208</text>
+      <text x="690" y="308" text-anchor="end" fill="#7ee787" class="pass p4">208/208</text>
       <text x="820" y="308" text-anchor="end" fill="#c8c8c8">37</text>
       <text x="952" y="308" text-anchor="end" fill="#6f8f74">none</text>
     </g>
