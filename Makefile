@@ -77,7 +77,7 @@ COVREF ?= /tmp/ownscout-cover
 #                     another error. Nothing wraps it, so errors.As matches the
 #                     concrete type directly. It stays so a future wrapper keeps
 #                     working, and internal/ledger tests it.
-COVER_EXEMPT ?= ownscout/internal/evidence/evidence.go:53:VerifyPacket \
+COVER_EXEMPT ?= ownscout/internal/evidence/evidence.go:52:VerifyPacket \
                 ownscout/internal/ledger/ledger.go:267:*ValidationError.Unwrap
 
 coverage:
