@@ -106,7 +106,7 @@ coverage:
 # denominator under a total using another.
 #
 # It also pins the mutation *count* - "five deliberately broken reference
-# builds" in four documents - to the number of mutation rows in the port
+# builds" in five files - to the number of mutation rows in the port
 # contract. That sentence said "three" above a four-row table and no gate
 # noticed. The mutation numerators stay out of this target: they need five
 # builds and ten corpus replays, which is `mutants-check`.

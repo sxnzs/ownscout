@@ -216,7 +216,7 @@ What it checks: both case counts everywhere they appear, including every
 occurrence in a file rather than the first, so one document contradicting itself
 fails; the denominator of every mutation-table row against the corpus it was
 measured on; the spelled-out mutation count ("five deliberately broken reference
-builds" in four documents) against the number of mutation rows in the port
+builds" in five files) against the number of mutation rows in the port
 contract; and, for a quantity the corpus cannot supply, the README test total
 against the sum of the per-language counts in the parity diagram.
 

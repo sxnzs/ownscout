@@ -358,6 +358,9 @@ func languageTestCounts(root string) (map[string]int, error) {
 	return counts, nil
 }
 
+// ports is how many ports the documents must state a test count for.
+const ports = 3
+
 // testCountAgreement checks every other statement of the per-language test
 // counts against the diagram. Those numbers are hand-copied into two documents
 // and nothing watched them: ports/README.md advertised 106/17/16 while the
@@ -384,6 +387,9 @@ func testCountAgreement(root string) ([]failure, error) {
 	}
 	if seen == 0 {
 		failures = append(failures, failure{"ports/README.md", 0, "test count", "no test counts found"})
+	} else if seen != ports {
+		failures = append(failures, failure{"ports/README.md", 0, "test count",
+			fmt.Sprintf("states %d port test counts, want one per port (%d)", seen, ports)})
 	}
 
 	// Two more copies, each in its own column order: the README port table and
@@ -409,6 +415,11 @@ func testCountAgreement(root string) ([]failure, error) {
 		}
 		if seen == 0 {
 			failures = append(failures, failure{d.file, 0, "test count", "no port table test counts found"})
+		} else if seen != ports {
+			// A row deleted rather than edited used to pass: the loop only
+			// failed when it matched nothing at all.
+			failures = append(failures, failure{d.file, 0, "test count",
+				fmt.Sprintf("states %d port test counts, want one per port (%d)", seen, ports)})
 		}
 	}
 	return failures, nil

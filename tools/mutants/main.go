@@ -54,9 +54,10 @@ type mutation struct {
 	new   string // replacement
 }
 
-// The four bugs the corpus was designed to catch. Each is a single-behavior
-// change a reasonable implementer could ship by accident, and all four are
-// invisible to a naive reading of the specification.
+// The bugs the corpus was designed to catch - five when this list was last
+// measured, and the table in spec/parity/PORT.md is the authority on how many.
+// Each is a single-behavior change a reasonable implementer could ship by
+// accident, and all of them are invisible to a naive reading of the spec.
 var mutations = []mutation{
 	{
 		name:  "html",
@@ -408,7 +409,7 @@ func renderRegion(res result) string {
 	return b.String()
 }
 
-// countWord spells small counts, so the sentence reads "four ... builds".
+// countWord spells small counts, so the sentence reads "five ... builds".
 func countWord(n int) string {
 	words := []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
 	if n >= 0 && n < len(words) {

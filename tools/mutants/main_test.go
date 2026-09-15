@@ -110,7 +110,7 @@ func TestApplyMutationRefusesAmbiguousAnchors(t *testing.T) {
 }
 
 // A score equal to the corpus total is the signal that a mutation is invisible.
-// Turning the count into words is what the prose in four documents depends on.
+// Turning the count into words is what the prose in five files depends on.
 func TestCountWord(t *testing.T) {
 	cases := map[int]string{0: "zero", 1: "one", 4: "four", 10: "ten", 11: "11", 247: "247"}
 	for n, want := range cases {
