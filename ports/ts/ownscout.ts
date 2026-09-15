@@ -93,6 +93,12 @@ function utf8(data: Buffer): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(data); }
   catch { throw new Error("input is not valid UTF-8"); }
 }
+// The reference's JSON decoder rejects a leading UTF-8 BOM, but TextDecoder
+// silently strips one, so the bytes have to be inspected before decoding. The
+// corpus has no BOM case, so only the fuzzer's wire-shape phase reaches this.
+function hasBom(data: Buffer): boolean {
+  return data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf;
+}
 // Go's utf8.DecodeRune: a valid rune is returned with its width, and every
 // malformed sequence is reported as RuneError with width 1. TextDecoder instead
 // collapses a maximal subpart into a single U+FFFD, so a raw "\xf0\x9f" becomes
@@ -372,6 +378,9 @@ function decodePacket(data: Buffer): AnyObj {
   return new StrictParser(text, true, false, true).parse(packetSchema);
 }
 function decodePacketValid(data: Buffer): { packet: AnyObj; violations: Violation[] } {
+  if (hasBom(data)) {
+    return { packet: {}, violations: [{ rule: "packet_decode", field: "packet", message: "nodepacket: packet: invalid JSON" }] };
+  }
   try {
     const packet = decodePacket(data);
     return { packet, violations: validatePacket(packet) };
@@ -481,6 +490,10 @@ function loadPacket(pth: string): {packet:AnyObj;violations:Violation[]} {
     if(e&&e.code==="EISDIR") throw new Error(`read packet "${pth}": read ${pth}: is a directory`);
     throw new Error(`open packet "${pth}": ${e&&e.message||e}`);
   }
+  // The reference bounds the read before it decodes, so an oversized packet is a
+  // load failure rather than a decode failure. Without this the two commands
+  // that use loadPacket reported the wrong summary for the same input.
+  if(data.length>MAX_INPUT) throw new Error(`packet exceeds ${MAX_INPUT} byte input limit`);
   return decodePacketValid(data);
 }
 function isDecodeFailure(violations:Violation[]):boolean{return violations.length===1&&violations[0].rule==="packet_decode";}
@@ -670,6 +683,7 @@ const envSchema={schema_version:"string",envelope_id:"string",packet_id:"string"
   nodes:{array:{node_id:"string",depends_on:{array:"string"},verifier:"string",evidence_ids:{array:"string"}}}};
 function parseEnvelope(data:Buffer):AnyObj {
   if(data.length>MAX_INPUT) throw new Error("envelope exceeds 1048576 byte input limit");
+  if(hasBom(data)) throw new Error("invalid JSON");
   const e=new StrictParser(utf8(data)).parse(envSchema);
   for (const k of ["schema_version","envelope_id","packet_id","packet_binding_sha256","nodes"]) if (!(k in e)) throw new Error("missing required fields");
   if (e.nodes.length === 0) throw new Error("nodes must contain at least one node");

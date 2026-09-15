@@ -221,7 +221,9 @@ spec/parity/verify-all.sh
 
 The full guide is in [ports/README.md](ports/README.md); the contract every port
 must satisfy is [spec/parity/PORT.md](spec/parity/PORT.md), and the recorded
-status is [docs/PORTS.md](docs/PORTS.md).
+status is [docs/PORTS.md](docs/PORTS.md). Design notes: [docs/DECISION.md](docs/DECISION.md)
+records the v0 decision, and [docs/DELTADB.md](docs/DELTADB.md) maps OwnScout's
+primitives to the DeltaDB ones it borrows from.
 
 ## Verification
 

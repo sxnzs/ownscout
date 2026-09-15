@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -159,6 +160,63 @@ def mutate(data, rng):
     return mutate_bytes(data, rng)
 
 
+def wire_shapes(original):
+    """Return the wire shapes that random byte mutation rarely produces.
+
+    A byte-level fuzzer almost never creates a duplicate key, a case-folded
+    name, a UTF-8 BOM or a 1 MiB document, yet those are exactly the shapes that
+    have diverged between the reference and the ports. The shapes are derived
+    from whichever key the fixture happens to hold first, so the same function
+    covers the packet and the envelope. A shape that does not change the input
+    is dropped rather than replayed unchanged, so no run is spent proving
+    nothing.
+    """
+    text = original.decode("utf-8")
+    shapes = {
+        "trailing-json": text + "{}",
+        "bom": "\ufeff" + text,
+        "oversize": text + " " + "x" * (1 << 20),
+        "truncated": text[: len(text) // 2],
+    }
+    first = re.search(r'"([A-Za-z_][A-Za-z0-9_]*)":', text)
+    if first:
+        key = first.group(1)
+        shapes["duplicate-key"] = (
+            text[: first.start()] + '"{}": null, '.format(key) + text[first.start():])
+        shapes["case-folding"] = text[: first.start(1)] + key.upper() + text[first.end(1):]
+        shapes["unknown-field"] = (
+            text[: first.start()] + '"extra_field": "DO_NOT_PRINT", ' + text[first.start():])
+    nulled, count = re.subn(r'("[A-Za-z_][A-Za-z0-9_]*": )"[^"]*"', r"\1null", text, count=1)
+    if count:
+        shapes["null-value"] = nulled
+    return {name: data.encode() for name, data in shapes.items() if data != text}
+
+
+def replay(reference, candidate, cases, data, workdir, label):
+    """Run every case against both binaries and report the differences."""
+    findings = []
+    with open(os.path.join(workdir, "fixtures", "mutated.json"), "wb") as handle:
+        handle.write(data)
+    repo = os.path.join(workdir, "fixtures", "repo")
+    for case in cases:
+        ledger = os.path.join(workdir, "ledger.jsonl")
+        expected = None
+        for binary in (reference, candidate):
+            if os.path.exists(ledger):
+                os.remove(ledger)
+            code, text = run(binary, case, workdir)
+            text = normalize(text, workdir, repo, binary)
+            if binary is reference:
+                expected = (code, text)
+            elif (code, text) != expected:
+                findings.append(
+                    "DIVERGENCE {}\n  case:     {}\n  exit:     {} != {}\n  {}\n"
+                    "  input:    {!r}".format(
+                        label, " ".join(case), code, expected[0],
+                        first_difference(expected[1], text).strip(), data[:120]))
+    return findings
+
+
 def first_difference(expected, actual):
     limit = min(len(expected), len(actual))
     index = next((i for i in range(limit) if expected[i] != actual[i]), limit)
@@ -232,6 +290,25 @@ def main():
     ledger_rng = random.Random(args.seed * 7919 + 13)
     print("fuzz: seed={} iterations={}".format(args.seed, args.iterations))
     divergences = 0
+
+    # Deterministic wire shapes first. A divergence here is a hard defect, so
+    # the phase stops before the random sweep rather than adding noise to it.
+    for source, cases in (("packet-valid.json", PACKET_CASES),
+                          ("envelope-valid.json", ENVELOPE_CASES)):
+        original = open(os.path.join(FIXTURES, source), "rb").read()
+        for name, data in sorted(wire_shapes(original).items()):
+            with tempfile.TemporaryDirectory() as workdir:
+                shutil.copytree(FIXTURES, os.path.join(workdir, "fixtures"), symlinks=True)
+                findings = replay(reference, candidate, cases, data, workdir,
+                                  "wire-shape {} on {}".format(name, source))
+            for finding in findings:
+                print(finding)
+            divergences += len(findings)
+    if divergences:
+        print("fuzz: {} wire-shape divergence(s)".format(divergences))
+        return 1
+    print("fuzz: wire shapes replay clean")
+
     for iteration in range(args.iterations):
         source, cases = (("packet-valid.json", PACKET_CASES) if rng.randrange(2) == 0
                          else ("envelope-valid.json", ENVELOPE_CASES))
