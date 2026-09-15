@@ -1858,7 +1858,7 @@ fn scanJsonString(allocator: std.mem.Allocator, data: []const u8, start: usize, 
             }
         }
         if (c < 0x20) {
-            scanErrorAt(allocator, error_out, data, index, "in string");
+            scanErrorAt(allocator, error_out, data, index, "in string literal");
             return null;
         }
         index += runeBytesAt(data, index).len;

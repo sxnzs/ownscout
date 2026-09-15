@@ -1085,7 +1085,7 @@ impl<'a> GoDec<'a> {
                         }
                     }
                 }
-                c if c < 0x20 => return Err(self.err_at(self.pos - 1, "in string")),
+                c if c < 0x20 => return Err(self.err_at(self.pos - 1, "in string literal")),
                 _ => {
                     let start = self.pos - 1;
                     while self.pos < self.data.len() && self.data[self.pos] >= 0x80 {

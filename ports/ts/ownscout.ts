@@ -959,7 +959,7 @@ class GoDec {
         else throw new Error(`invalid escape sequence \`${goDecodeUtf8(this.data.subarray(escape,this.pos))}\` in string`);
         continue;
       }
-      if(c<0x20) throw this.err(c,"in string");
+      if(c<0x20) throw this.err(c,"in string literal");
       const start=this.pos-1;
       while(this.pos<this.data.length && this.data[this.pos]>=0x80) this.pos++;
       out+=goDecodeUtf8(this.data.subarray(start,this.pos));
