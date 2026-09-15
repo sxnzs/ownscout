@@ -16,6 +16,12 @@ jobs:
       - run: go build ./...
       - run: make corpus-check
       - run: make docs-check
+      # Re-measures the mutation table in spec/parity/PORT.md instead of
+      # trusting it. Slow enough (five builds, ten replays of 278 cases) to be a
+      # job step rather than part of `make gate`, but it must run by default:
+      # that table is the reason a passing harness is evidence rather than a
+      # formality, and it was hand-transcribed until now.
+      - run: make mutants-check
       # Informational: prints per-package coverage and never-executed
       # functions under corpus replay; a newly dead path is a corpus gap.
       - run: make coverage

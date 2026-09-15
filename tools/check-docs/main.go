@@ -33,6 +33,10 @@ const (
 	anyValue = iota
 	baseValue
 	edgeValue
+	// mutationValue means "the spelled-out number of mutation rows in the port
+	// contract's table" - a quantity the corpus cannot supply, but one the
+	// documents still disagree about unless something pins them.
+	mutationValue
 )
 
 type expectation struct {
@@ -64,6 +68,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "docs-check:", err)
 		os.Exit(2)
 	}
+	mutants, err := mutationCount(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "docs-check:", err)
+		os.Exit(2)
+	}
 
 	expectations := []expectation{
 		// README badges and prose.
@@ -76,9 +85,10 @@ func main() {
 			[]int{baseValue, edgeValue}},
 		{"README.md", "recorded oracle", regexp.MustCompile(`records (\d+) base cases and (\d+) hardening`),
 			[]int{baseValue, edgeValue}},
-		{"README.md", "mutation prose", regexp.MustCompile(`base\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+);\s*edge\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+)`),
+		{"README.md", "mutation prose", regexp.MustCompile(`base\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+);\s*edge\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+)`),
 			[]int{anyValue, baseValue, anyValue, baseValue, anyValue, baseValue, anyValue, baseValue,
-				anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue}},
+				anyValue, baseValue, anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue,
+				anyValue, edgeValue, anyValue, edgeValue}},
 		{"README.md", "mutation corpus label", regexp.MustCompile(`against the (\d+)\+(\d+) corpus`),
 			[]int{baseValue, edgeValue}},
 
@@ -87,16 +97,35 @@ func main() {
 			[]int{baseValue, baseValue, edgeValue, edgeValue, anyValue}},
 		{"docs/PORTS.md", "edge corpus line", regexp.MustCompile(`Edge trace corpus: (\d+) cases`), []int{edgeValue}},
 		{"docs/PORTS.md", "all ports line", regexp.MustCompile(`All three ports pass (\d+)/(\d+)`), []int{edgeValue, edgeValue}},
-		{"docs/PORTS.md", "mutation table", regexp.MustCompile(`\| ([^|]+?) \| (\d+)/(\d+) \| (\d+)/(\d+) \|`),
+		// docs/PORTS.md carries its mutation numbers in prose, not in a table.
+		// This pattern matches the port status table, whose first cell is a
+		// binary path; it was labelled "mutation table" until that mislabel
+		// sent a reader looking for a table that does not exist.
+		{"docs/PORTS.md", "port status denominators", regexp.MustCompile(`\| ([^|]+?) \| (\d+)/(\d+) \| (\d+)/(\d+) \|`),
 			[]int{anyValue, anyValue, baseValue, anyValue, edgeValue}},
-		{"docs/PORTS.md", "mutation prose", regexp.MustCompile(`base\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+);\s*edge\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+)`),
+		{"docs/PORTS.md", "mutation prose", regexp.MustCompile(`base\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+);\s*edge\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+),\s+(\d+)/(\d+)\s+and\s+(\d+)/(\d+)`),
 			[]int{anyValue, baseValue, anyValue, baseValue, anyValue, baseValue, anyValue, baseValue,
-				anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue}},
+				anyValue, baseValue, anyValue, edgeValue, anyValue, edgeValue, anyValue, edgeValue,
+				anyValue, edgeValue, anyValue, edgeValue}},
 
 		// Port contract.
 		{"spec/parity/PORT.md", "edge corpus size", regexp.MustCompile("`corpus-edge.json` \\((\\d+) cases\\)"), []int{edgeValue}},
 		{"spec/parity/PORT.md", "mutation table", regexp.MustCompile(`\| ([^|]+?) \| (\d+)/(\d+) \| (\d+)/(\d+) \|`),
 			[]int{anyValue, anyValue, baseValue, anyValue, edgeValue}},
+
+		// The mutation count itself. The table's rows are the only source for
+		// it, and every document that spells it out must agree with them. This
+		// guards a drift that actually shipped: the port contract announced
+		// "three deliberately broken reference builds" above a table listing
+		// four, and no gate noticed.
+		{"spec/parity/PORT.md", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
+			[]int{mutationValue}},
+		{"docs/PORTS.md", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
+			[]int{mutationValue}},
+		{"README.md", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
+			[]int{mutationValue}},
+		{"ports/README.md", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
+			[]int{mutationValue}},
 
 		// Port guide.
 		{"ports/README.md", "corpus sizes", regexp.MustCompile(`\((\d+) base cases, (\d+) edge\s+cases\)`),
@@ -114,7 +143,7 @@ func main() {
 
 	var failures []failure
 	for _, e := range expectations {
-		found, err := evaluate(root, e, base, edge)
+		found, err := evaluate(root, e, base, edge, mutants)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "docs-check:", err)
 			os.Exit(2)
@@ -141,7 +170,7 @@ func main() {
 // evaluate checks one expectation, returning a failure for every match whose
 // capture groups disagree and one for a pattern that no longer appears at all.
 // A deleted line must fail loudly rather than silently pass.
-func evaluate(root string, e expectation, base, edge int) ([]failure, error) {
+func evaluate(root string, e expectation, base, edge, mutants int) ([]failure, error) {
 	data, err := os.ReadFile(filepath.Join(root, e.file))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", e.file, err)
@@ -162,15 +191,18 @@ func evaluate(root string, e expectation, base, edge int) ([]failure, error) {
 			if start < 0 {
 				continue
 			}
-			want := base
+			want := strconv.Itoa(base)
 			name := "base"
-			if e.want[group] == edgeValue {
-				want, name = edge, "edge"
+			switch e.want[group] {
+			case edgeValue:
+				want, name = strconv.Itoa(edge), "edge"
+			case mutationValue:
+				want, name = countWord(mutants), "mutation"
 			}
 			got := text[start:end]
-			if got != strconv.Itoa(want) {
+			if !strings.EqualFold(got, want) {
 				failures = append(failures, failure{e.file, line, e.label,
-					fmt.Sprintf("%s count is %s, corpus says %d", name, got, want)})
+					fmt.Sprintf("%s count is %q, expected %q", name, got, want)})
 			}
 		}
 	}
@@ -211,6 +243,54 @@ func testTotalConsistency(root string) ([]failure, error) {
 			fmt.Sprintf("badge says %s, the parity diagram's per-language counts sum to %d", badge[1], sum)}}, nil
 	}
 	return nil, nil
+}
+
+// mutationCount derives how many deliberately broken builds the port contract
+// documents, from the contract's own table. Everything else that names this
+// quantity is compared against it.
+//
+// The table's last row is the unmutated baseline, which is not a mutation and
+// must not be counted; the spelled-out numbers in the prose mean "how many
+// broken builds", not "how many rows".
+func mutationCount(root string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(root, "spec", "parity", "PORT.md"))
+	if err != nil {
+		return 0, fmt.Errorf("read PORT.md: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "| Mutation |") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return 0, fmt.Errorf("PORT.md: no mutation table found")
+	}
+	mutations := 0
+	for _, line := range lines[start+1:] {
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		if strings.Contains(line, "---") || strings.Contains(line, "unmutated reference") {
+			continue
+		}
+		mutations++
+	}
+	if mutations == 0 {
+		return 0, fmt.Errorf("PORT.md: the mutation table has no mutation rows")
+	}
+	return mutations, nil
+}
+
+// countWord spells small counts, so a document can say "four".
+func countWord(n int) string {
+	words := []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
+	if n >= 0 && n < len(words) {
+		return words[n]
+	}
+	return strconv.Itoa(n)
 }
 
 func corpusCounts(root string) (int, int, error) {

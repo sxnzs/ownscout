@@ -30,6 +30,10 @@ reference:
     - go build -o bin/ownscout ./cmd/ownscout
     - make corpus-check
     - make docs-check
+    # Re-measures the mutation table in spec/parity/PORT.md instead of trusting
+    # it; that table is why a passing harness is evidence rather than a
+    # formality, and it was hand-transcribed until now.
+    - make mutants-check
     # Informational: per-package coverage + never-executed functions under
     # corpus replay; a newly dead path is a corpus gap.
     - make coverage

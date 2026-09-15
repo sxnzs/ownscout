@@ -246,6 +246,60 @@
         "evidence",
         "verify",
         "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-prefixed.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-prefixed-hash-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-prefixed.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-prefixed-hash-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-upperhash.json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-uppercase-hash-human",
+      "stdout": "OK: evidence verified\n  - verified 1 evidence span(s)\nNext action: The packet is ready for its declared default action.\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
+        "fixtures/repo",
+        "--packet",
+        "fixtures/packet-upperhash.json",
+        "--json"
+      ],
+      "exitCode": 0,
+      "name": "evidence-uppercase-hash-json",
+      "stdout": "{\"command\":\"evidence verify\",\"ok\":true,\"summary\":\"evidence verified\",\"details\":[\"verified 1 evidence span(s)\"],\"next_action\":\"The packet is ready for its declared default action.\"}\n"
+    },
+    {
+      "args": [
+        "evidence",
+        "verify",
+        "--repo",
         "fixtures/absent",
         "--packet",
         "fixtures/packet-valid.json"

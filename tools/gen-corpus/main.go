@@ -113,16 +113,33 @@ func run() error {
 		return err
 	}
 
-	stale := map[string]any{}
-	if err := json.Unmarshal(packetValid, &stale); err != nil {
+	stale, err := rewriteHash(packetValid, func(string) string { return strings.Repeat("0", 64) })
+	if err != nil {
 		return err
 	}
-	if evidence, ok := stale["evidence"].([]any); ok && len(evidence) > 0 {
-		if first, ok := evidence[0].(map[string]any); ok {
-			first["content_hash"] = strings.Repeat("0", 64)
-		}
-	}
 	if err := writeJSON(filepath.Join(fixtures, "packet-stale.json"), stale); err != nil {
+		return err
+	}
+
+	// The reference strips an optional "sha256:" prefix from an expected content
+	// hash and lowercases the digest before comparing. Case folding was not
+	// covered by either corpus: a build that dropped strings.ToLower scored
+	// 31/31 and 247/247, so all three ports could have diverged there while
+	// passing everything. The prefixed form was already caught by the edge
+	// corpus, and is pinned here too because it is a documented input form that
+	// the base corpus should state outright.
+	prefixed, err := rewriteHash(packetValid, func(hash string) string { return "sha256:" + hash })
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(fixtures, "packet-prefixed.json"), prefixed); err != nil {
+		return err
+	}
+	upper, err := rewriteHash(packetValid, strings.ToUpper)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(fixtures, "packet-upperhash.json"), upper); err != nil {
 		return err
 	}
 
@@ -157,6 +174,10 @@ func run() error {
 		{"evidence-valid-json", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--json"}},
 		{"evidence-stale-human", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-stale.json"}},
 		{"evidence-stale-json", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-stale.json", "--json"}},
+		{"evidence-prefixed-hash-human", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-prefixed.json"}},
+		{"evidence-prefixed-hash-json", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-prefixed.json", "--json"}},
+		{"evidence-uppercase-hash-human", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-upperhash.json"}},
+		{"evidence-uppercase-hash-json", []string{"evidence", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-upperhash.json", "--json"}},
 		{"evidence-missing-repo", []string{"evidence", "verify", "--repo", "fixtures/absent", "--packet", "fixtures/packet-valid.json"}},
 		{"node-valid-human", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl"}},
 		{"node-valid-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json", "--envelope", "fixtures/envelope-valid.json", "--ledger", "ledger.jsonl", "--json"}},
@@ -205,6 +226,31 @@ func run() error {
 		"note":    "Recorded from the Go reference. {{DIR}} is the spec/parity directory, {{REPO}} is its fixtures/repo child.",
 		"cases":   recorded,
 	})
+}
+
+// rewriteHash clones the valid packet with the first evidence entry's
+// content_hash replaced by transform of the recorded digest. The fixture is
+// recorded from the reference like every other case, so a variant only has to be
+// constructed here, not asserted against by hand.
+func rewriteHash(packetValid []byte, transform func(string) string) (map[string]any, error) {
+	cloned := map[string]any{}
+	if err := json.Unmarshal(packetValid, &cloned); err != nil {
+		return nil, err
+	}
+	evidence, ok := cloned["evidence"].([]any)
+	if !ok || len(evidence) == 0 {
+		return nil, fmt.Errorf("fixture packet has no evidence array")
+	}
+	first, ok := evidence[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("fixture evidence[0] is not an object")
+	}
+	hash, ok := first["content_hash"].(string)
+	if !ok {
+		return nil, fmt.Errorf("fixture evidence[0] has no content_hash")
+	}
+	first["content_hash"] = transform(hash)
+	return cloned, nil
 }
 
 func errorsAs(err error, target **exec.ExitError) bool {

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" role="img" aria-label="OwnScout parity matrix: every port replays 31 base and 247 edge cases byte-for-byte">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" role="img" aria-label="OwnScout parity matrix: every port replays 35 base and 247 edge cases byte-for-byte">
   <title>OwnScout parity matrix</title>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -51,28 +51,28 @@
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
     <g class="row">
       <text x="48" y="194" fill="#e8e8e8">GO REFERENCE</text>
-      <text x="560" y="194" text-anchor="end" fill="#7ee787">31/31</text>
+      <text x="560" y="194" text-anchor="end" fill="#7ee787">35/35</text>
       <text x="690" y="194" text-anchor="end" fill="#7ee787" class="pass">247/247</text>
       <text x="820" y="194" text-anchor="end" fill="#c8c8c8">77</text>
       <text x="952" y="194" text-anchor="end" fill="#6f8f74">stdlib</text>
     </g>
     <g class="row r2">
       <text x="48" y="232" fill="#e8e8e8">TYPESCRIPT</text>
-      <text x="560" y="232" text-anchor="end" fill="#7ee787">31/31</text>
+      <text x="560" y="232" text-anchor="end" fill="#7ee787">35/35</text>
       <text x="690" y="232" text-anchor="end" fill="#7ee787" class="pass p2">247/247</text>
       <text x="820" y="232" text-anchor="end" fill="#c8c8c8">149</text>
       <text x="952" y="232" text-anchor="end" fill="#6f8f74">none</text>
     </g>
     <g class="row r3">
       <text x="48" y="270" fill="#e8e8e8">RUST</text>
-      <text x="560" y="270" text-anchor="end" fill="#7ee787">31/31</text>
+      <text x="560" y="270" text-anchor="end" fill="#7ee787">35/35</text>
       <text x="690" y="270" text-anchor="end" fill="#7ee787" class="pass p3">247/247</text>
       <text x="820" y="270" text-anchor="end" fill="#c8c8c8">38</text>
       <text x="952" y="270" text-anchor="end" fill="#6f8f74">none</text>
     </g>
     <g class="row r4">
       <text x="48" y="308" fill="#e8e8e8">ZIG</text>
-      <text x="560" y="308" text-anchor="end" fill="#7ee787">31/31</text>
+      <text x="560" y="308" text-anchor="end" fill="#7ee787">35/35</text>
       <text x="690" y="308" text-anchor="end" fill="#7ee787" class="pass p4">247/247</text>
       <text x="820" y="308" text-anchor="end" fill="#c8c8c8">37</text>
       <text x="952" y="308" text-anchor="end" fill="#6f8f74">none</text>

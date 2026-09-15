@@ -66,10 +66,10 @@ spec/parity/status.sh         # compact per-port status, never fails
 make fuzz                     # differential fuzzing vs a freshly built reference
 ```
 
-`verify-all.sh` grades every port against both trace corpora (31 base cases, 247 edge
+`verify-all.sh` grades every port against both trace corpora (35 base cases, 247 edge
 cases), runs that port's own test suite, and then fails if anything outside
 `ports/` was modified. Commit unrelated changes before running it.
 
-The trace corpus itself is mutation-tested: four deliberately broken reference builds
+The trace corpus itself is mutation-tested: five deliberately broken reference builds
 fail the trace corpora, so a passing harness is meaningful rather than vacuous. See
 `docs/PORTS.md` for those numbers.

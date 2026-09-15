@@ -1,7 +1,7 @@
 GO ?= go
 REF ?= spec/parity/reference-ownscout
 
-.PHONY: build gate test corpus corpus-check docs-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
+.PHONY: build gate test corpus corpus-check docs-check mutants mutants-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
 
 build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
@@ -77,7 +77,27 @@ coverage:
 # contract and two diagrams, and every copy is hand-maintained; a diagram once
 # said 93 edge beside a card saying 208, and a mutation table carried one
 # denominator under a total using another.
+#
+# It also pins the mutation *count* - "four deliberately broken reference
+# builds" in four documents - to the number of mutation rows in the port
+# contract. That sentence said "three" above a four-row table and no gate
+# noticed. The mutation numerators stay out of this target: they need five
+# builds and ten corpus replays, which is `mutants-check`.
 docs-check:
 	$(GO) run ./tools/check-docs
+
+# Re-measure the mutation table: stage a copy of the module per mutation, apply
+# one exact edit, build, replay both corpora, and rewrite the governed region of
+# spec/parity/PORT.md. The working tree is never mutated.
+mutants:
+	$(GO) run ./tools/mutants -write
+
+# Fails when that table disagrees with a fresh measurement. Unlike corpus-check
+# this compares against a measurement rather than `git diff`, so unrelated
+# uncommitted work cannot make it fail. It costs about 33s - five builds and ten
+# replays of 278 cases - which is why it is its own target and a CI job rather
+# than part of `make gate`, whose warm run is under 10s.
+mutants-check:
+	$(GO) run ./tools/mutants -check
 
 gate: test corpus-check docs-check

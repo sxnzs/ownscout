@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded trace corpus.
 
 | Port | Binary | Base traces | Edge traces | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 31/31 | 247/247 | 149 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 31/31 | 247/247 | 37 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 31/31 | 247/247 | 38 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 35/35 | 247/247 | 149 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 35/35 | 247/247 | 37 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 35/35 | 247/247 | 38 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 77 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
@@ -47,9 +47,9 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   nested, unknown and case-folded fields, non-object records, trailing data,
   a missing final LF, blank lines, and node_results shape and per-result
   rules).
-- Trace corpus mutation test: four deliberately broken reference builds fail the
-  trace corpora (base 29/31, 23/31, 31/31 and 31/31; edge 205/247, 123/247, 245/247 and
-  245/247 — fractions as recorded against the 31+247 corpus those builds
+- Trace corpus mutation test: five deliberately broken reference builds fail the
+  trace corpora (base 33/35, 25/35, 35/35, 35/35 and 33/35; edge 205/247, 123/247,
+  245/247, 245/247 and 247/247 — fractions as recorded against the 35+247 corpus those builds
   faced), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
   the decoder; they are validated instead by all three ports failing them
@@ -207,18 +207,32 @@ both pipelines.
 What it checks: both case counts everywhere they appear, including every
 occurrence in a file rather than the first, so one document contradicting itself
 fails; the denominator of every mutation-table row against the corpus it was
-measured on; and, for a quantity the corpus cannot supply, the README test total
+measured on; the spelled-out mutation count ("five deliberately broken reference
+builds" in four documents) against the number of mutation rows in the port
+contract; and, for a quantity the corpus cannot supply, the README test total
 against the sum of the per-language counts in the parity diagram.
 
 What it does not check: mutation **numerators**, per-language test counts, and
-the coverage percentages above. All three require running things - four
+the coverage percentages above. All three require running things - five
 deliberately broken reference builds, four test suites, and an instrumented
-replay of both corpora - rather than reading the corpus, so they stay
-hand-maintained. Re-run `make coverage` after a corpus change; it is the one of
-the three that moves on its own. When
-the corpus grows, re-measure the mutants (the table's note records which corpus a
-run faced) and update the numbers; `docs-check` will insist the denominators
-match in the meantime.
+replay of both corpora - rather than reading the corpus.
+
+Two of the three are now measured by a command rather than by hand:
+
+- `make mutants` re-measures the mutation table. It stages a copy of the module
+  per mutation, applies one exact edit, builds it and replays both corpora, then
+  rewrites the governed region of `spec/parity/PORT.md`. It never touches the
+  working tree. If an anchor no longer matches, it fails loudly instead of
+  silently reporting a mutation the corpus "catches".
+- `make mutants-check` re-measures and fails if the committed table disagrees.
+  It runs in the reference job of both pipelines, not in `make gate`: a warm gate
+  is under 10s and this costs about 33s, which is too much to put in front of
+  every local change. `make coverage` remains informational and the per-language
+  test counts stay hand-maintained.
+
+When the corpus grows, run `make mutants` and `make coverage` and commit the
+result; `docs-check` will insist the mutation denominators match in the
+meantime.
 
 ## Port design
 

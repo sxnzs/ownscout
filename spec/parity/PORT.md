@@ -88,23 +88,29 @@ python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin <bina
 
 ## Trace corpus validation
 
-The corpus was mutation-tested against three deliberately broken reference builds:
+The corpus was mutation-tested against five deliberately broken reference builds:
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 29/31 | 205/247 |
-| `next_action` renamed to `nextAction` | 23/31 | 123/247 |
-| final newline always appended to the hashed evidence range | 31/31 | 245/247 |
-| `\r` stripped without its `\n` in the relocation path | 31/31 | 245/247 |
-| unmutated reference | 31/31 | 247/247 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 33/35 | 205/247 |
+| `next_action` renamed to `nextAction` | 25/35 | 123/247 |
+| final newline always appended to the hashed evidence range | 35/35 | 245/247 |
+| `\r` stripped without its `\n` in the relocation path | 35/35 | 245/247 |
+| `strings.ToLower` dropped from the expected-hash comparison | 33/35 | 247/247 |
+| unmutated reference | 35/35 | 247/247 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the
 shape cases exist because all three ports shipped that exact bug while passing
-the earlier 93-case corpus. The fourth mutation is the mirror image - stripping
-a `\r` without consuming its `\n` - and it is invisible to the base corpus,
-which is the point of keeping the two corpora separate. All four were
-re-measured against the current 120-case set.
+the much smaller corpus of the time. The fourth mutation is the mirror image -
+stripping a `\r` without consuming its `\n` - and it is invisible to the base
+corpus, which is the point of keeping the two corpora separate.
+
+The table is measured, not transcribed. `make mutants` stages a copy of the
+module, applies each mutation to that copy, builds it, and replays both corpora;
+`make mutants-check` re-measures and fails when the table above no longer
+matches. `make mutants` rewrites only the sentence and table shown here, so the
+prose below is hand-written and the numbers above are not.
 
 ## Behavior to preserve (read the Go source)
 

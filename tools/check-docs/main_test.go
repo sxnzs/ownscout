@@ -32,7 +32,7 @@ func TestEvaluateAcceptsMatchingCounts(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "diagram.svg", "<text>31 BASE + 247 EDGE</text>\n")
 
-	failures, err := evaluate(root, band(), 31, 247)
+	failures, err := evaluate(root, band(), 31, 247, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestEvaluateCatchesMismatchAndNamesTheFile(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "diagram.svg", "line one\n<text>28 BASE + 213 EDGE</text>\n")
 
-	failures, err := evaluate(root, band(), 31, 247)
+	failures, err := evaluate(root, band(), 31, 247, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestEvaluateCatchesMismatchAndNamesTheFile(t *testing.T) {
 		t.Fatalf("expected two failures, got %d: %v", len(failures), failures)
 	}
 	joined := failures[0].String() + "|" + failures[1].String()
-	for _, want := range []string{"diagram.svg:2", "base count is 28, corpus says 31", "edge count is 213, corpus says 247"} {
+	for _, want := range []string{"diagram.svg:2", "base count is \"28\", expected \"31\"", "edge count is \"213\", expected \"247\""} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("failure output %q missing %q", joined, want)
 		}
@@ -65,7 +65,7 @@ func TestEvaluateFailsWhenThePatternIsGone(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "diagram.svg", "<text>nothing to see</text>\n")
 
-	failures, err := evaluate(root, band(), 31, 247)
+	failures, err := evaluate(root, band(), 31, 247, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,14 +81,14 @@ func TestEvaluateCatchesOneFileContradictingItself(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "diagram.svg", "31 BASE + 247 EDGE\n31 BASE + 245 EDGE\n")
 
-	failures, err := evaluate(root, band(), 31, 247)
+	failures, err := evaluate(root, band(), 31, 247, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(failures) != 1 {
 		t.Fatalf("expected exactly the contradictory occurrence to fail, got %v", failures)
 	}
-	if failures[0].line != 2 || !strings.Contains(failures[0].detail, "edge count is 245, corpus says 247") {
+	if failures[0].line != 2 || !strings.Contains(failures[0].detail, "edge count is \"245\", expected \"247\"") {
 		t.Fatalf("unexpected failure: %v", failures[0])
 	}
 }
