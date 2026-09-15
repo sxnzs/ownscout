@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const result = @import("result.zig");
 const json = @import("json.zig");
 const contract = @import("contract.zig");
@@ -1101,8 +1102,8 @@ fn nodeVerify(allocator: std.mem.Allocator, args: []const []const u8, json_outpu
     };
     const resolved_repo = resolved_repo_buf[0..resolved_repo_len];
     const resolved_repo_z = try allocator.dupeZ(u8, resolved_repo);
-    var repo_stat: std.c.Stat = undefined;
-    if (std.c.fstatat(std.c.AT.FDCWD, resolved_repo_z, &repo_stat, 0) != 0 or repo_stat.mode & std.c.S.IFMT != std.c.S.IFDIR) {
+    var repo_stat: Stat = undefined;
+    if (fstatatAny(AT_FDCWD, resolved_repo_z, &repo_stat, 0) != 0 or repo_stat.mode & S_IFMT != S_IFDIR) {
         const details = [_][]const u8{"ledger open failed"};
         return .{ .output = try result.render(allocator, .{ .command = "node verify", .ok = false, .summary = "ledger could not be opened", .details = &details, .next_action = "Provide a writable ledger path outside the repository and try again." }, json_output), .code = 2 };
     }
@@ -2657,8 +2658,103 @@ fn ledgerResults(allocator: std.mem.Allocator, details: []const []const u8) ![]L
 }
 
 /// os.SameFile: identity is the (device, inode) pair.
-fn sameLedgerFile(a: std.c.Stat, b: std.c.Stat) bool {
+fn sameLedgerFile(a: Stat, b: Stat) bool {
     return a.dev == b.dev and a.ino == b.ino;
+}
+
+// --- libc portability shim ---------------------------------------------------
+// Zig 0.16 voids most of std.c on linux (the symbols sit behind glibc version
+// gating that no longer resolves), so the ledger's POSIX surface is declared
+// against libc directly for linux; macOS keeps std.c. build.zig links libc.
+const Stat = switch (builtin.os.tag) {
+    .linux => extern struct {
+        dev: u64,
+        ino: u64,
+        nlink: u64,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        __pad0: u32,
+        rdev: u64,
+        size: i64,
+        blksize: i64,
+        blocks: i64,
+        atim: i64,
+        atns: i64,
+        mtim: i64,
+        mtns: i64,
+        ctim: i64,
+        ctns: i64,
+    },
+    else => std.c.Stat,
+};
+
+const S_IFMT: u32 = 0o170000;
+const S_IFDIR: u32 = 0o040000;
+const S_IFLNK: u32 = 0o120000;
+const S_IFREG: u32 = 0o100000;
+const AT_FDCWD: c_int = -100;
+const AT_SYMLINK_NOFOLLOW: c_int = switch (builtin.os.tag) {
+    .linux => 0o400,
+    else => @intCast(std.c.AT.SYMLINK_NOFOLLOW),
+};
+const LOCK_EX: c_int = 2;
+const LOCK_NB: c_int = 4;
+const LOCK_UN: c_int = 8;
+const SEEK_SET: c_int = 0;
+const O_RDWR: c_int = 0o2;
+const O_CREAT: c_int = 0o100;
+const O_APPEND: c_int = 0o2000;
+const O_NOFOLLOW: c_int = 0o400000;
+const ENOENT: c_int = 2;
+
+const libc = switch (builtin.os.tag) {
+    .linux => struct {
+        extern "c" fn fstatat(dirfd: c_int, path: [*:0]const u8, buf: *Stat, flags: c_int) c_int;
+        extern "c" fn fstat(fd: c_int, buf: *Stat) c_int;
+        extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
+        extern "c" fn read(fd: c_int, buf: [*]u8, count: usize) isize;
+        extern "c" fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
+        extern "c" fn lseek(fd: c_int, off: i64, whence: c_int) i64;
+        extern "c" fn fsync(fd: c_int) c_int;
+        extern "c" fn close(fd: c_int) c_int;
+        extern "c" fn flock(fd: c_int, op: c_int) c_int;
+        extern "c" fn __errno_location() *c_int;
+    },
+    else => struct {
+        const fstatat = std.c.fstatat;
+        const fstat = std.c.fstat;
+        const open = std.c.open;
+        const read = std.c.read;
+        const write = std.c.write;
+        const lseek = std.c.lseek;
+        const fsync = std.c.fsync;
+        const close = std.c.close;
+        const flock = std.c.flock;
+    },
+};
+
+fn fstatatAny(dirfd: c_int, path: [*:0]const u8, buf: *Stat, flags: c_int) c_int {
+    return switch (builtin.os.tag) {
+        .linux => libc.fstatat(dirfd, path, buf, flags),
+        else => std.c.fstatat(dirfd, path, buf, @bitCast(flags)),
+    };
+}
+
+fn errnoOf(rc: c_int) c_int {
+    return switch (builtin.os.tag) {
+        .linux => libc.__errno_location().*,
+        else => @intFromEnum(std.c.errno(rc)),
+    };
+}
+
+// open with O_RDWR|O_CREAT|O_APPEND|O_NOFOLLOW, mode 0600: std.c.open takes a
+// flags struct on macOS, raw open(2) bits on linux.
+fn openLedger(path: [*:0]const u8) c_int {
+    return switch (builtin.os.tag) {
+        .linux => libc.open(path, O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW, @as(c_uint, 0o600)),
+        else => std.c.open(path, .{ .ACCMODE = .RDWR, .APPEND = true, .NOFOLLOW = true, .CREAT = true }, @as(std.c.mode_t, 0o600)),
+    };
 }
 
 /// resolveLedgerPath: the ledger's resolved parent directory joined to its
@@ -2680,56 +2776,56 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     if (ledgerSymlinkAncestor(abs) != null) return error.LedgerOpenFailed;
     const path_z = try allocator.dupeZ(u8, abs);
 
-    var expected: ?std.c.Stat = null;
-    var pre: std.c.Stat = undefined;
-    const pre_rc = std.c.fstatat(std.c.AT.FDCWD, path_z, &pre, std.c.AT.SYMLINK_NOFOLLOW);
+    var expected: ?Stat = null;
+    var pre: Stat = undefined;
+    const pre_rc = fstatatAny(AT_FDCWD, path_z, &pre, AT_SYMLINK_NOFOLLOW);
     if (pre_rc == 0) {
-        if (pre.mode & std.c.S.IFMT == std.c.S.IFLNK) return error.LedgerOpenFailed;
+        if (pre.mode & S_IFMT == S_IFLNK) return error.LedgerOpenFailed;
         expected = pre;
-    } else if (std.c.errno(pre_rc) != .NOENT) return error.LedgerOpenFailed;
+    } else if (errnoOf(pre_rc) != ENOENT) return error.LedgerOpenFailed;
 
     const expected_resolved = try resolveLedgerPath(allocator, abs);
     const parent_path = std.fs.path.dirname(abs) orelse "/";
     const parent_z = try allocator.dupeZ(u8, parent_path);
-    var expected_parent: std.c.Stat = undefined;
-    if (std.c.fstatat(std.c.AT.FDCWD, parent_z, &expected_parent, 0) != 0) return error.LedgerOpenFailed;
+    var expected_parent: Stat = undefined;
+    if (fstatatAny(AT_FDCWD, parent_z, &expected_parent, 0) != 0) return error.LedgerOpenFailed;
 
-    const fd = std.c.open(path_z, .{ .ACCMODE = .RDWR, .APPEND = true, .NOFOLLOW = true, .CREAT = true }, @as(std.c.mode_t, 0o600));
+    const fd = openLedger(path_z);
     if (fd < 0) return error.LedgerOpenFailed;
     var locked = false;
     defer {
-        if (locked) _ = std.c.flock(fd, std.c.LOCK.UN);
-        _ = std.c.close(fd);
+        if (locked) _ = libc.flock(fd, LOCK_UN);
+        _ = libc.close(fd);
     }
-    if (std.c.flock(fd, std.c.LOCK.EX | std.c.LOCK.NB) != 0) return error.LedgerOpenFailed;
+    if (libc.flock(fd, LOCK_EX | LOCK_NB) != 0) return error.LedgerOpenFailed;
     locked = true;
 
     // rejectOpenedFile: re-run the path checks against what was opened.
     if (ledgerSymlinkAncestor(abs) != null) return error.LedgerOpenFailed;
-    var now: std.c.Stat = undefined;
-    if (std.c.fstatat(std.c.AT.FDCWD, path_z, &now, std.c.AT.SYMLINK_NOFOLLOW) != 0) return error.LedgerOpenFailed;
-    if (now.mode & std.c.S.IFMT == std.c.S.IFLNK) return error.LedgerOpenFailed;
-    if (now.mode & std.c.S.IFMT != std.c.S.IFREG) return error.LedgerOpenFailed;
+    var now: Stat = undefined;
+    if (fstatatAny(AT_FDCWD, path_z, &now, AT_SYMLINK_NOFOLLOW) != 0) return error.LedgerOpenFailed;
+    if (now.mode & S_IFMT == S_IFLNK) return error.LedgerOpenFailed;
+    if (now.mode & S_IFMT != S_IFREG) return error.LedgerOpenFailed;
     if (expected) |pre_stat| {
         if (!sameLedgerFile(pre_stat, now)) return error.LedgerOpenFailed;
     }
-    var opened: std.c.Stat = undefined;
-    if (std.c.fstat(fd, &opened) != 0) return error.LedgerOpenFailed;
-    if (opened.mode & std.c.S.IFMT != std.c.S.IFREG) return error.LedgerOpenFailed;
+    var opened: Stat = undefined;
+    if (libc.fstat(fd, &opened) != 0) return error.LedgerOpenFailed;
+    if (opened.mode & S_IFMT != S_IFREG) return error.LedgerOpenFailed;
     if (!sameLedgerFile(now, opened)) return error.LedgerOpenFailed;
-    var parent_now: std.c.Stat = undefined;
-    if (std.c.fstatat(std.c.AT.FDCWD, parent_z, &parent_now, 0) != 0) return error.LedgerOpenFailed;
+    var parent_now: Stat = undefined;
+    if (fstatatAny(AT_FDCWD, parent_z, &parent_now, 0) != 0) return error.LedgerOpenFailed;
     if (!sameLedgerFile(expected_parent, parent_now)) return error.LedgerOpenFailed;
     if (opened.nlink != 1) return error.LedgerOpenFailed;
     const resolved_now = try resolveLedgerPath(allocator, abs);
     if (!std.mem.eql(u8, resolved_now, expected_resolved)) return error.LedgerOpenFailed;
 
     if (opened.size > ledger_max_size) return error.LedgerFull;
-    if (std.c.lseek(fd, 0, std.c.SEEK.SET) != 0) return error.LedgerOpenFailed;
+    if (libc.lseek(fd, 0, SEEK_SET) != 0) return error.LedgerOpenFailed;
     var data = std.ArrayList(u8).empty;
     var rbuf: [8192]u8 = undefined;
     while (true) {
-        const n = std.c.read(fd, &rbuf, rbuf.len);
+        const n = libc.read(fd, &rbuf, rbuf.len);
         if (n < 0) return error.LedgerOpenFailed;
         if (n == 0) break;
         try data.appendSlice(allocator, rbuf[0..@intCast(n)]);
@@ -2773,19 +2869,19 @@ fn appendLedger(allocator: std.mem.Allocator, path: []const u8, envelope_hash: [
     };
     const encoded = try ledgerRecordJson(allocator, final, true);
     if (encoded.len > ledger_max_record_size) return error.LedgerAppendFailed;
-    var stat_now: std.c.Stat = undefined;
-    if (std.c.fstat(fd, &stat_now) != 0) return error.LedgerAppendFailed;
+    var stat_now: Stat = undefined;
+    if (libc.fstat(fd, &stat_now) != 0) return error.LedgerAppendFailed;
     if (stat_now.size < 0 or stat_now.size > ledger_max_size or encoded.len + 1 > ledger_max_size - @as(usize, @intCast(stat_now.size))) return error.LedgerFull;
     const line = try allocator.alloc(u8, encoded.len + 1);
     @memcpy(line[0..encoded.len], encoded);
     line[encoded.len] = '\n';
     var written: usize = 0;
     while (written < line.len) {
-        const n = std.c.write(fd, line.ptr + written, line.len - written);
+        const n = libc.write(fd, line.ptr + written, line.len - written);
         if (n <= 0) return error.LedgerAppendFailed;
         written += @intCast(n);
     }
-    if (std.c.fsync(fd) != 0) return error.LedgerAppendFailed;
+    if (libc.fsync(fd) != 0) return error.LedgerAppendFailed;
 }
 test "evidence verification hashes selected lines and normalizes CRLF" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
