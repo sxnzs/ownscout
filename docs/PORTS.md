@@ -11,7 +11,7 @@ all verified byte-for-byte against the same recorded trace corpus.
 | Zig | `ports/zig/zig-out/bin/ownscout` | 35/35 | 249/249 | 37 | none (`.dependencies = .{}`) |
 | Rust | `ports/rust/target/release/ownscout` | 35/35 | 249/249 | 38 | none (empty `[dependencies]`) |
 
-The Go reference's observable behaviour is unchanged: 77 tests,
+The Go reference's observable behaviour is unchanged: 78 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
 verification hashes cited ranges in place (no intermediate copies), with a
 differential reference kept in the test package, and `evidence verify --relocate`
@@ -220,10 +220,10 @@ builds" in four documents) against the number of mutation rows in the port
 contract; and, for a quantity the corpus cannot supply, the README test total
 against the sum of the per-language counts in the parity diagram.
 
-What it does not check: mutation **numerators**, per-language test counts, and
-the coverage percentages above. All three require running things - five
-deliberately broken reference builds, four test suites, and an instrumented
-replay of both corpora - rather than reading the corpus.
+What it does not check: mutation **numerators**, per-language numerators and
+the coverage percentages above. All three require running things - a broken
+build per mutation, four test suites, and an instrumented replay of both corpora
+- rather than reading the corpus.
 
 Two of the three are now measured by a command rather than by hand:
 
@@ -235,8 +235,12 @@ Two of the three are now measured by a command rather than by hand:
 - `make mutants-check` re-measures and fails if the committed table disagrees.
   It runs in the reference job of both pipelines, not in `make gate`: a warm gate
   is under 10s and this costs about 33s, which is too much to put in front of
-  every local change. `make coverage` remains informational and the per-language
-  test counts stay hand-maintained.
+  every local change.
+
+The per-language test counts are not hand-maintained either: they are bound to
+the parity diagram, which is bound to the README badge, and the diagram's Go
+count is compared against `go test -list` so it cannot age the way it did when a
+test was added and the diagram kept the old figure.
 
 When the corpus grows, run `make mutants` and `make coverage` and commit the
 result; `docs-check` will insist the mutation denominators match in the

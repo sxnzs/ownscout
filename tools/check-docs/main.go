@@ -1,7 +1,7 @@
 // Command check-docs fails when a document restates a corpus count that no
 // longer matches the corpus.
 //
-// The case counts appear in a dozen places - two badges, several prose
+// The case counts appear in many places - two badges, several prose
 // sentences, a status table, the port contract, and two diagrams - and every one
 // of them is a hand-maintained copy. They drift: a diagram once said "93 EDGE"
 // beside a card that said 208, and a mutation table carried /190 denominators
@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -142,6 +143,11 @@ func main() {
 			[]int{mutationValue}},
 		{"ports/README.md", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
 			[]int{mutationValue}},
+		// The Makefile comment that describes this very check also spells the
+		// count out, and it was the one copy that went stale unnoticed. Its
+		// comment wraps mid-phrase, so the pattern tolerates the continuation.
+		{"Makefile", "mutation count", regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference\s+(?:#\s*)?builds`),
+			[]int{mutationValue}},
 
 		// Port guide.
 		{"ports/README.md", "corpus sizes", regexp.MustCompile(`\((\d+) base cases, (\d+) edge\s+cases\)`),
@@ -178,6 +184,12 @@ func main() {
 		os.Exit(2)
 	}
 	failures = append(failures, testCounts...)
+	goCount, err := goTestCountConsistency(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "docs-check:", err)
+		os.Exit(2)
+	}
+	failures = append(failures, goCount...)
 
 	if len(failures) > 0 {
 		for _, f := range failures {
@@ -366,43 +378,100 @@ func testCountAgreement(root string) ([]failure, error) {
 	seen := 0
 	for _, m := range regexp.MustCompile(`cd ports/(ts|rust|zig)\s+&&[^)]*\)\s*#\s*(\d+) tests`).FindAllStringSubmatch(string(readme), -1) {
 		seen++
-		lang := byDir[m[1]]
-		got, err := strconv.Atoi(m[2])
-		if err != nil {
-			return nil, fmt.Errorf("ports/README.md: test count %q: %w", m[2], err)
-		}
-		if want, ok := counts[lang]; ok && got != want {
-			failures = append(failures, failure{"ports/README.md", 0, "test count",
-				fmt.Sprintf("%s says %d tests, the parity diagram says %d", lang, got, want)})
+		if f := compareTestCount("ports/README.md", byDir[m[1]], m[2], counts); f != nil {
+			failures = append(failures, *f)
 		}
 	}
 	if seen == 0 {
 		failures = append(failures, failure{"ports/README.md", 0, "test count", "no test counts found"})
 	}
 
-	// docs/PORTS.md states them in its port status table, in another order.
-	guide, err := os.ReadFile(filepath.Join(root, "docs", "PORTS.md"))
-	if err != nil {
-		return nil, fmt.Errorf("read docs/PORTS.md: %w", err)
+	// Two more copies, each in its own column order: the README port table and
+	// the port guide's status table.
+	docs := []struct {
+		file string
+		re   *regexp.Regexp
+	}{
+		{"README.md", regexp.MustCompile(`\| (TypeScript|Rust|Zig) \|[^|]*\|[^|]*\| (\d+) \|`)},
+		{"docs/PORTS.md", regexp.MustCompile(`\| (TypeScript|Rust|Zig) \|[^|]*\|[^|]*\|[^|]*\| (\d+) \|`)},
 	}
-	guideRows := regexp.MustCompile(`\| (TypeScript|Rust|Zig) \|[^|]*\|[^|]*\|[^|]*\| (\d+) \|`)
-	seen = 0
-	for _, m := range guideRows.FindAllStringSubmatch(string(guide), -1) {
-		seen++
-		lang := strings.ToLower(m[1])
-		got, err := strconv.Atoi(m[2])
+	for _, d := range docs {
+		data, err := os.ReadFile(filepath.Join(root, d.file))
 		if err != nil {
-			return nil, fmt.Errorf("docs/PORTS.md: test count %q: %w", m[2], err)
+			return nil, fmt.Errorf("read %s: %w", d.file, err)
 		}
-		if want, ok := counts[lang]; ok && got != want {
-			failures = append(failures, failure{"docs/PORTS.md", 0, "test count",
-				fmt.Sprintf("%s says %d tests, the parity diagram says %d", lang, got, want)})
+		seen = 0
+		for _, m := range d.re.FindAllStringSubmatch(string(data), -1) {
+			seen++
+			if f := compareTestCount(d.file, strings.ToLower(m[1]), m[2], counts); f != nil {
+				failures = append(failures, *f)
+			}
 		}
-	}
-	if seen == 0 {
-		failures = append(failures, failure{"docs/PORTS.md", 0, "test count", "no port table test counts found"})
+		if seen == 0 {
+			failures = append(failures, failure{d.file, 0, "test count", "no port table test counts found"})
+		}
 	}
 	return failures, nil
+}
+
+// compareTestCount reports a mismatch, and also reports a language the diagram
+// does not label: skipping it silently would let a diagram edit stop a
+// language's count from being checked at all.
+func compareTestCount(file, lang, gotText string, counts map[string]int) *failure {
+	if len(counts) == 0 {
+		return &failure{file, 0, "test count", "the parity diagram has no counts"}
+	}
+	want, ok := counts[lang]
+	if !ok {
+		return &failure{file, 0, "test count",
+			fmt.Sprintf("%s states a test count but the parity diagram has no row for it", lang)}
+	}
+	got, err := strconv.Atoi(gotText)
+	if err != nil {
+		return &failure{file, 0, "test count", fmt.Sprintf("unparsable test count %q", gotText)}
+	}
+	if got != want {
+		return &failure{file, 0, "test count",
+			fmt.Sprintf("%s says %d tests, the parity diagram says %d", lang, got, want)}
+	}
+	return nil
+}
+
+// goTestCountConsistency binds the diagram's Go reference count to the suite as
+// executed. Every other count in the diagram is bound only to the diagram
+// itself, so a stale but self-consistent number survives: after one Go test was
+// added the diagram said 77 and the badge said 301, and the two agreed with each
+// other perfectly while the suite ran 78.
+func goTestCountConsistency(root string) ([]failure, error) {
+	cmd := exec.Command("go", "test", "-list", ".*", "./internal/...", "./cmd/...")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list the Go tests: %w", err)
+	}
+	measured := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Test") {
+			measured++
+		}
+	}
+	if measured == 0 {
+		return nil, fmt.Errorf("go test -list reported no tests")
+	}
+	counts, err := languageTestCounts(root)
+	if err != nil {
+		return nil, err
+	}
+	documented, ok := counts["go reference"]
+	if !ok {
+		return []failure{{"docs/assets/parity.svg", 0, "go test count",
+			"the parity diagram has no labelled go reference row"}}, nil
+	}
+	if documented != measured {
+		return []failure{{"docs/assets/parity.svg", 0, "go test count",
+			fmt.Sprintf("the diagram says %d Go tests, go test -list reports %d", documented, measured)}}, nil
+	}
+	return nil, nil
 }
 
 func corpusCounts(root string) (int, int, error) {

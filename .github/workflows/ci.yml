@@ -17,7 +17,7 @@ jobs:
       - run: make corpus-check
       - run: make docs-check
       # Re-measures the mutation table in spec/parity/PORT.md instead of
-      # trusting it. Slow enough (five builds, ten replays of 278 cases) to be a
+      # trusting it. Slow enough (five builds and a replay of both corpora) to be a
       # job step rather than part of `make gate`, but it must run by default:
       # that table is the reason a passing harness is evidence rather than a
       # formality, and it was hand-transcribed until now.

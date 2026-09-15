@@ -105,7 +105,7 @@ coverage:
 # said 93 edge beside a card saying 208, and a mutation table carried one
 # denominator under a total using another.
 #
-# It also pins the mutation *count* - "four deliberately broken reference
+# It also pins the mutation *count* - "five deliberately broken reference
 # builds" in four documents - to the number of mutation rows in the port
 # contract. That sentence said "three" above a four-row table and no gate
 # noticed. The mutation numerators stay out of this target: they need five

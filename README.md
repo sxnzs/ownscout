@@ -9,7 +9,7 @@
   <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
   <br>
   <a href="#verification"><img alt="Parity 35/35 + 249/249" src="https://img.shields.io/badge/parity-35%2F35%20%2B%20249%2F249-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="301 tests passing" src="https://img.shields.io/badge/tests-301%20passing-2ea043?style=flat-square"></a>
+  <a href="#verification"><img alt="302 tests passing" src="https://img.shields.io/badge/tests-302%20passing-2ea043?style=flat-square"></a>
   <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
 </p>
