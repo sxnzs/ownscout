@@ -48,8 +48,8 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   a missing final LF, blank lines, and node_results shape and per-result
   rules).
 - Trace corpus mutation test: four deliberately broken reference builds fail the
-  trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 172/208, 106/208, 206/208 and
-  206/208 — fractions as recorded against the 28+208 corpus those builds
+  trace corpora (base 29/31, 23/31, 31/31 and 31/31; edge 205/247, 123/247, 245/247 and
+  245/247 — fractions as recorded against the 31+247 corpus those builds
   faced), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
   the decoder; they are validated instead by all three ports failing them
@@ -187,6 +187,33 @@ Current reading: `cmd` 100%, `cli` 92.0%, `contract` 89.3%, `evidence` 87.1%,
 executed: the retired `evidence.VerifyPacket` wrapper, `ValidationError.Unwrap`,
 and `ledger.isPathPrefix`. `ledger` is the low one, and it is also where every gap of this shape
 has been found, so it is the first place to look next.
+
+### Keeping the counts honest
+
+Case counts are restated in twenty-one places - two badges, several prose
+sentences, a status table, the port contract, the port guide and two diagrams -
+and every one is a hand-maintained copy. They drift silently: a diagram once read
+`93 EDGE` beside a card reading `208`, and the port contract's mutation table
+carried `/190` denominators under a `208/208` total. No gate caught either,
+because the corpora themselves were consistent.
+
+`make docs-check` derives the counts from `spec/parity/corpus.json` and
+`corpus-edge.json` and asserts every restatement agrees, naming the file, line
+and value on failure. It is part of `make gate` and runs in the reference job of
+both pipelines.
+
+What it checks: both case counts everywhere they appear, including every
+occurrence in a file rather than the first, so one document contradicting itself
+fails; the denominator of every mutation-table row against the corpus it was
+measured on; and, for a quantity the corpus cannot supply, the README test total
+against the sum of the per-language counts in the parity diagram.
+
+What it does not check: mutation **numerators** and per-language test counts.
+Both require running things - four deliberately broken reference builds, and four
+test suites - rather than reading the corpus, so they stay hand-maintained. When
+the corpus grows, re-measure the mutants (the table's note records which corpus a
+run faced) and update the numbers; `docs-check` will insist the denominators
+match in the meantime.
 
 ## Port design
 

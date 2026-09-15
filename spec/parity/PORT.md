@@ -62,7 +62,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (208 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (247 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), an in-repository ledger rejection, the raw-byte evidence shapes
@@ -92,11 +92,11 @@ The corpus was mutation-tested against three deliberately broken reference build
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 26/28 | 167/190 |
-| `next_action` renamed to `nextAction` | 20/28 | 99/190 |
-| final newline always appended to the hashed evidence range | 28/28 | 188/190 |
-| `\r` stripped without its `\n` in the relocation path | 28/28 | 188/190 |
-| unmutated reference | 28/28 | 208/208 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 29/31 | 205/247 |
+| `next_action` renamed to `nextAction` | 23/31 | 123/247 |
+| final newline always appended to the hashed evidence range | 31/31 | 245/247 |
+| `\r` stripped without its `\n` in the relocation path | 31/31 | 245/247 |
+| unmutated reference | 31/31 | 247/247 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the

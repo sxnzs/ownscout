@@ -1,7 +1,7 @@
 GO ?= go
 REF ?= spec/parity/reference-ownscout
 
-.PHONY: build gate test corpus corpus-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
+.PHONY: build gate test corpus corpus-check docs-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
 
 build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
@@ -72,4 +72,12 @@ coverage:
 	@echo "--- never executed ---"
 	@$(GO) tool covdata func -i=$(COVDIR) | awk '$$1 ~ /^ownscout/ && $$NF == "0.0%" { print "  " $$0 }'
 
-gate: test corpus-check
+# Fails when a document restates a corpus count the corpus no longer has. The
+# counts live in two badges, several prose sentences, a status table, the port
+# contract and two diagrams, and every copy is hand-maintained; a diagram once
+# said 93 edge beside a card saying 208, and a mutation table carried one
+# denominator under a total using another.
+docs-check:
+	$(GO) run ./tools/check-docs
+
+gate: test corpus-check docs-check

@@ -243,8 +243,8 @@ equivalence is established.
   final LF, blank lines, and node_results shape and per-result rules).
   Every port replays them byte-for-byte.
 - **Mutation-tested traces.** Four deliberately broken reference builds fail
-  the trace corpora (base 26/28, 20/28, 28/28 and 28/28; edge 172/208, 106/208, 206/208
-  and 206/208 — fractions as recorded against the 28+208 corpus those builds
+  the trace corpora (base 29/31, 23/31, 31/31 and 31/31; edge 205/247, 123/247, 245/247
+  and 245/247 — fractions as recorded against the 31+247 corpus those builds
   faced), so a pass is evidence, not a formality. The newest mutant strips
   the `\r` of a `\r\n` pair while leaving its `\n`, a divergence no base case can
   see, which is why the edge trace corpus exists.
