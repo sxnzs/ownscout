@@ -10,11 +10,11 @@ import (
 // TestAnchorsMatchTheRealSources is the most important test here.
 //
 // The measurement itself cannot run in a unit test - it builds five binaries and
-// replays 278 cases twice each - so nothing else in this file would notice if a
-// refactor moved one of the four anchors. And a mutation whose anchor does not
+// replays both corpora twice each - so nothing else in this file would notice if
+// a refactor moved one of the five anchors. And a mutation whose anchor does not
 // match is the one failure that would be silent: applyMutation errors, but if
 // the anchor check were ever relaxed to a no-op the mutated build would be the
-// unmutated one, score a perfect 31/31 and 247/247, and be reported as "the
+// unmutated one, score a perfect run, and be reported as "the
 // corpus cannot see this bug". That is precisely the wrong conclusion.
 func TestAnchorsMatchTheRealSources(t *testing.T) {
 	root, err := moduleRoot()

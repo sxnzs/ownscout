@@ -34,7 +34,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 
 ## Verification evidence
 
-- Base trace corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
+- Base trace corpus: 35 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
 - Edge trace corpus: 249 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
@@ -200,7 +200,7 @@ it is the first place to look next.
 
 ### Keeping the counts honest
 
-Case counts are restated in twenty-one places - two badges, several prose
+Case counts are restated in many places - two badges, several prose
 sentences, a status table, the port contract, the port guide and two diagrams -
 and every one is a hand-maintained copy. They drift silently: a diagram once read
 `93 EDGE` beside a card reading `208`, and the port contract's mutation table

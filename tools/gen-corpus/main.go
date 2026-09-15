@@ -123,8 +123,8 @@ func run() error {
 
 	// The reference strips an optional "sha256:" prefix from an expected content
 	// hash and lowercases the digest before comparing. Case folding was not
-	// covered by either corpus: a build that dropped strings.ToLower scored
-	// 31/31 and 247/247, so all three ports could have diverged there while
+	// covered by either corpus: a build that dropped strings.ToLower passed
+	// every case in both, so all three ports could have diverged there while
 	// passing everything. The prefixed form was already caught by the edge
 	// corpus, and is pinned here too because it is a documented input form that
 	// the base corpus should state outright.

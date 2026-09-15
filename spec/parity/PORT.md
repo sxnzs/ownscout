@@ -41,7 +41,7 @@ Commands:
 python3 spec/parity/harness.py --bin ports/<lang>/<binary>
 ```
 
-runs all 28 recorded cases. Expected stdout is stored with placeholders that the
+runs all 35 recorded cases. Expected stdout is stored with placeholders that the
 harness substitutes:
 
 - `{{DIR}}`  — the working directory the case ran in

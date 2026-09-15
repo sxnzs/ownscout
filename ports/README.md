@@ -51,9 +51,9 @@ ports/rust/target/release/ownscout node verify --repo /path/to/repo --packet pac
 ## Tests
 
 ```bash
-(cd ports/ts   && node --test)      # 106 tests
-(cd ports/rust && cargo test)       # 17 tests
-(cd ports/zig  && zig build test)   # 16 tests
+(cd ports/ts   && node --test)      # 149 tests
+(cd ports/rust && cargo test)       # 38 tests
+(cd ports/zig  && zig build test)   # 37 tests
 ```
 
 ## Verify

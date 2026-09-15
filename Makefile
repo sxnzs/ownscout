@@ -122,7 +122,7 @@ mutants:
 # Fails when that table disagrees with a fresh measurement. Unlike corpus-check
 # this compares against a measurement rather than `git diff`, so unrelated
 # uncommitted work cannot make it fail. It costs about 33s - five builds and ten
-# replays of 278 cases - which is why it is its own target and a CI job rather
+# replays both corpora against five builds - which is why it is its own target and a CI job rather
 # than part of `make gate`, whose warm run is under 10s.
 mutants-check:
 	$(GO) run ./tools/mutants -check

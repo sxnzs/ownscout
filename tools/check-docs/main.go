@@ -120,6 +120,14 @@ func main() {
 			[]int{baseValue, baseValue}},
 		{"spec/parity/PORT.md", "gate edge corpus", regexp.MustCompile("corpus-edge\\.json` reports (\\d+)/(\\d+)"),
 			[]int{edgeValue, edgeValue}},
+		// A second copy of the base count in the same section, which the gate
+		// patterns above did not match: it still read "runs all 28 recorded
+		// cases" while the corpus held 35, because the fix for the first one
+		// searched for the current count instead of for stale ones.
+		{"spec/parity/PORT.md", "gate corpus description", regexp.MustCompile("runs all (\\d+) recorded cases"),
+			[]int{baseValue}},
+		{"docs/PORTS.md", "base trace corpus", regexp.MustCompile("Base trace corpus: (\\d+) recorded CLI cases"),
+			[]int{baseValue}},
 
 		// The mutation count itself. The table's rows are the only source for
 		// it, and every document that spells it out must agree with them. This
@@ -164,6 +172,12 @@ func main() {
 		os.Exit(2)
 	}
 	failures = append(failures, total...)
+	testCounts, err := testCountAgreement(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "docs-check:", err)
+		os.Exit(2)
+	}
+	failures = append(failures, testCounts...)
 
 	if len(failures) > 0 {
 		for _, f := range failures {
@@ -172,7 +186,7 @@ func main() {
 		fmt.Printf("docs-check: %d mismatch(es) against the %d+%d corpus\n", len(failures), base, edge)
 		os.Exit(1)
 	}
-	fmt.Printf("docs-check: %d+%d consistent across %d expectations\n", base, edge, len(expectations)+1)
+	fmt.Printf("docs-check: %d+%d consistent across %d expectations\n", base, edge, len(expectations)+2)
 }
 
 // evaluate checks one expectation, returning a failure for every match whose
@@ -299,6 +313,96 @@ func countWord(n int) string {
 		return words[n]
 	}
 	return strconv.Itoa(n)
+}
+
+// languageTestCounts reads the per-language test counts out of the parity
+// diagram, which is their canonical source: testTotalConsistency already checks
+// the README badge against their sum, so a change has to originate there.
+func languageTestCounts(root string) (map[string]int, error) {
+	data, err := os.ReadFile(filepath.Join(root, "docs/assets/parity.svg"))
+	if err != nil {
+		return nil, fmt.Errorf("read parity.svg: %w", err)
+	}
+	text := string(data)
+	labels := map[string]string{}
+	for _, m := range regexp.MustCompile(`x="48" y="(\d+)"[^>]*>([A-Za-z ]+)<`).FindAllStringSubmatch(text, -1) {
+		labels[m[1]] = strings.ToLower(strings.TrimSpace(m[2]))
+	}
+	counts := map[string]int{}
+	for _, m := range regexp.MustCompile(`x="820" y="(\d+)"[^>]*>(\d+)<`).FindAllStringSubmatch(text, -1) {
+		label, ok := labels[m[1]]
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return nil, fmt.Errorf("parity.svg: test count %q: %w", m[2], err)
+		}
+		counts[label] = n
+	}
+	if len(counts) == 0 {
+		return nil, fmt.Errorf("parity.svg: no labelled test counts found")
+	}
+	return counts, nil
+}
+
+// testCountAgreement checks every other statement of the per-language test
+// counts against the diagram. Those numbers are hand-copied into two documents
+// and nothing watched them: ports/README.md advertised 106/17/16 while the
+// suites actually ran 149/38/37, and the stale values survived every gate.
+func testCountAgreement(root string) ([]failure, error) {
+	counts, err := languageTestCounts(root)
+	if err != nil {
+		return nil, err
+	}
+	var failures []failure
+
+	// ports/README.md states them in a bash block, keyed by port directory.
+	readme, err := os.ReadFile(filepath.Join(root, "ports", "README.md"))
+	if err != nil {
+		return nil, fmt.Errorf("read ports/README.md: %w", err)
+	}
+	byDir := map[string]string{"ts": "typescript", "rust": "rust", "zig": "zig"}
+	seen := 0
+	for _, m := range regexp.MustCompile(`cd ports/(ts|rust|zig)\s+&&[^)]*\)\s*#\s*(\d+) tests`).FindAllStringSubmatch(string(readme), -1) {
+		seen++
+		lang := byDir[m[1]]
+		got, err := strconv.Atoi(m[2])
+		if err != nil {
+			return nil, fmt.Errorf("ports/README.md: test count %q: %w", m[2], err)
+		}
+		if want, ok := counts[lang]; ok && got != want {
+			failures = append(failures, failure{"ports/README.md", 0, "test count",
+				fmt.Sprintf("%s says %d tests, the parity diagram says %d", lang, got, want)})
+		}
+	}
+	if seen == 0 {
+		failures = append(failures, failure{"ports/README.md", 0, "test count", "no test counts found"})
+	}
+
+	// docs/PORTS.md states them in its port status table, in another order.
+	guide, err := os.ReadFile(filepath.Join(root, "docs", "PORTS.md"))
+	if err != nil {
+		return nil, fmt.Errorf("read docs/PORTS.md: %w", err)
+	}
+	guideRows := regexp.MustCompile(`\| (TypeScript|Rust|Zig) \|[^|]*\|[^|]*\|[^|]*\| (\d+) \|`)
+	seen = 0
+	for _, m := range guideRows.FindAllStringSubmatch(string(guide), -1) {
+		seen++
+		lang := strings.ToLower(m[1])
+		got, err := strconv.Atoi(m[2])
+		if err != nil {
+			return nil, fmt.Errorf("docs/PORTS.md: test count %q: %w", m[2], err)
+		}
+		if want, ok := counts[lang]; ok && got != want {
+			failures = append(failures, failure{"docs/PORTS.md", 0, "test count",
+				fmt.Sprintf("%s says %d tests, the parity diagram says %d", lang, got, want)})
+		}
+	}
+	if seen == 0 {
+		failures = append(failures, failure{"docs/PORTS.md", 0, "test count", "no port table test counts found"})
+	}
+	return failures, nil
 }
 
 func corpusCounts(root string) (int, int, error) {

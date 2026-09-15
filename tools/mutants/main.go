@@ -17,7 +17,7 @@
 // Two deliberate choices:
 //
 //   - An anchor that does not match exactly once is an error, never a no-op. A
-//     silently-unapplied mutation would score 31/31 and 247/247 and be reported
+//     silently-unapplied mutation would score a perfect run and be reported
 //     as "the corpus catches this", which is the one wrong answer that would
 //     make this tool worse than the hand-written table it replaces.
 //   - The reference build is staged the same way as the mutants, so the
