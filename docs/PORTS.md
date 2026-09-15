@@ -182,11 +182,13 @@ the cheapest way to find the next gap, because a path no case reaches is a path 
 port can skip and still pass - which is how both the append-time ledger cap and
 the symlinked-ancestor check stayed invisible while every port was green.
 
-Current reading: `cmd` 100%, `cli` 92.0%, `contract` 89.3%, `evidence` 87.1%,
-`ledger` 72.1%, `node` 83.8%, `nodepacket` 83.5%, with three functions never
-executed: the retired `evidence.VerifyPacket` wrapper, `ValidationError.Unwrap`,
-and `ledger.isPathPrefix`. `ledger` is the low one, and it is also where every gap of this shape
-has been found, so it is the first place to look next.
+Current reading: `cmd` 100%, `cli` 92.1%, `contract` 89.3%, `evidence` 87.1%,
+`ledger` 76.9%, `node` 83.8%, `nodepacket` 83.5%, with two functions never
+executed: the retired `evidence.VerifyPacket` wrapper and
+`ValidationError.Unwrap`. `ledger` is still the low package - the ledger shape
+cases lifted it from 71.1% to 76.9% and covered `ledger.isPathPrefix` - and it is
+where every gap of this shape has been found, so it is the first place to look
+next.
 
 ### Keeping the counts honest
 
@@ -208,9 +210,12 @@ fails; the denominator of every mutation-table row against the corpus it was
 measured on; and, for a quantity the corpus cannot supply, the README test total
 against the sum of the per-language counts in the parity diagram.
 
-What it does not check: mutation **numerators** and per-language test counts.
-Both require running things - four deliberately broken reference builds, and four
-test suites - rather than reading the corpus, so they stay hand-maintained. When
+What it does not check: mutation **numerators**, per-language test counts, and
+the coverage percentages above. All three require running things - four
+deliberately broken reference builds, four test suites, and an instrumented
+replay of both corpora - rather than reading the corpus, so they stay
+hand-maintained. Re-run `make coverage` after a corpus change; it is the one of
+the three that moves on its own. When
 the corpus grows, re-measure the mutants (the table's note records which corpus a
 run faced) and update the numbers; `docs-check` will insist the denominators
 match in the meantime.
