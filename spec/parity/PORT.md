@@ -62,7 +62,7 @@ JSON mode is produced by Go's `encoding/json`, which HTML-escapes `<`, `>` and
 
 ## Edge corpus
 
-`corpus-edge.json` (247 cases) is a hardening set: every contract-testdata
+`corpus-edge.json` (249 cases) is a hardening set: every contract-testdata
 fixture, the subcommand surface, synthesized node-envelope graph failures, raw
 JSON parse failures, a graph whose evidence verification fails (exit 1, with a
 ledger), an in-repository ledger rejection, the raw-byte evidence shapes
@@ -92,12 +92,12 @@ The corpus was mutation-tested against five deliberately broken reference builds
 
 | Mutation | Base corpus | Edge corpus |
 |---|---|---|
-| `SetEscapeHTML(false)` in the JSON result encoder | 33/35 | 205/247 |
-| `next_action` renamed to `nextAction` | 25/35 | 123/247 |
-| final newline always appended to the hashed evidence range | 35/35 | 245/247 |
-| `\r` stripped without its `\n` in the relocation path | 35/35 | 245/247 |
-| `strings.ToLower` dropped from the expected-hash comparison | 33/35 | 247/247 |
-| unmutated reference | 35/35 | 247/247 |
+| `SetEscapeHTML(false)` in the JSON result encoder | 33/35 | 206/249 |
+| `next_action` renamed to `nextAction` | 25/35 | 124/249 |
+| final newline always appended to the hashed evidence range | 35/35 | 247/249 |
+| `\r` stripped without its `\n` in the relocation path | 35/35 | 247/249 |
+| `strings.ToLower` dropped from the expected-hash comparison | 33/35 | 249/249 |
+| unmutated reference | 35/35 | 249/249 |
 
 Each subtle divergence is caught, so a passing harness is meaningful rather
 than vacuous. The third mutation is the single-empty-line rule above: the
@@ -149,13 +149,16 @@ prose below is hand-written and the numbers above are not.
 - **node bind** (`internal/cli/cli.go`): the canonical packet binding digest,
   computed at the shared strict boundary — contract violations exit 1, decode
   failures exit 2 with the generic detail.
-- **Path safety**: repository and ledger paths are resolved, symlink ancestors
-  are rejected where the Go code rejects them, and inputs are size-bounded.
+- **Path safety**: repository and ledger paths are resolved. The append path and
+  `ledger rotate` reject a symlinked ancestor; the read-only `ledger verify`
+  follows one, and a symlink as the final path is rejected everywhere. Inputs are
+  size-bounded.
 
 ## Gate (all three must pass)
 
 1. The language's own build and full test suite pass.
-2. `python3 spec/parity/harness.py --bin <binary>` reports 28/28.
+2. `python3 spec/parity/harness.py --bin <binary>` reports 35/35, and the same
+   command with `--corpus spec/parity/corpus-edge.json` reports 249/249.
 3. The Go unit tests under `internal/*/*_test.go` are ported for your language
    (at minimum every case they cover), so regressions fail locally.
 

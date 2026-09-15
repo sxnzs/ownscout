@@ -112,6 +112,14 @@ func main() {
 		{"spec/parity/PORT.md", "edge corpus size", regexp.MustCompile("`corpus-edge.json` \\((\\d+) cases\\)"), []int{edgeValue}},
 		{"spec/parity/PORT.md", "mutation table", regexp.MustCompile(`\| ([^|]+?) \| (\d+)/(\d+) \| (\d+)/(\d+) \|`),
 			[]int{anyValue, anyValue, baseValue, anyValue, edgeValue}},
+		// The gate section a port author reads first. It claimed "reports
+		// 28/28" for several corpus revisions while every other copy of the
+		// counts was checked, so the one statement a porter acts on was the one
+		// number nobody watched.
+		{"spec/parity/PORT.md", "gate base corpus", regexp.MustCompile("harness\\.py --bin <binary>` reports (\\d+)/(\\d+)"),
+			[]int{baseValue, baseValue}},
+		{"spec/parity/PORT.md", "gate edge corpus", regexp.MustCompile("corpus-edge\\.json` reports (\\d+)/(\\d+)"),
+			[]int{edgeValue, edgeValue}},
 
 		// The mutation count itself. The table's rows are the only source for
 		// it, and every document that spells it out must agree with them. This

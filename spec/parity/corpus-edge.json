@@ -3413,6 +3413,29 @@
     },
     {
       "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-rotate-symlink-ancestor-human",
+      "stdout": "ERROR: ledger could not be rotated\n  - ledger path \"{{DIR}}/fixtures/edge/ledger-linked/out.jsonl\" has symlink ancestor \"{{DIR}}/fixtures/edge/ledger-linked\"\nNext action: Provide a readable, non-empty ledger file with --ledger \u003cfile\u003e.\n"
+    },
+    {
+      "args": [
+        "ledger",
+        "rotate",
+        "--ledger",
+        "fixtures/edge/ledger-linked/out.jsonl",
+        "--json"
+      ],
+      "exitCode": 2,
+      "name": "ledger-edge-rotate-symlink-ancestor-json",
+      "stdout": "{\"command\":\"ledger rotate\",\"ok\":false,\"summary\":\"ledger could not be rotated\",\"details\":[\"ledger path \\\"{{DIR}}/fixtures/edge/ledger-linked/out.jsonl\\\" has symlink ancestor \\\"{{DIR}}/fixtures/edge/ledger-linked\\\"\"],\"next_action\":\"Provide a readable, non-empty ledger file with --ledger \\u003cfile\\u003e.\"}\n"
+    },
+    {
+      "args": [
         "node",
         "verify",
         "--repo",

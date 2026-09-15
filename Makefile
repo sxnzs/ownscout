@@ -60,8 +60,25 @@ verify-ports:
 # is a path a port can skip and still pass, which is how the append-time ledger
 # cap and the symlinked-ancestor check stayed invisible. Build the reference with
 # coverage, replay both corpora against it, and list what never ran.
+#
+# This lane now fails on a never-executed function that is not on the exemption
+# list below. It used to only print, so an entry could sit there forever; two
+# did. An exemption is a claim that no corpus case *can* reach the code, not
+# that writing one would be inconvenient.
 COVDIR ?= /tmp/ownscout-cov
 COVREF ?= /tmp/ownscout-cover
+
+# <file:line:func> entries that the corpus cannot reach, each justified:
+#   VerifyPacket      a Go-level wrapper around VerifyPacketWithOptions. The CLI
+#                     (the only thing the corpora drive) never calls it; the
+#                     unit tests and benchmarks do. No case can call a Go API.
+#   *ValidationError.Unwrap
+#                     reached only when a ValidationError is wrapped inside
+#                     another error. Nothing wraps it, so errors.As matches the
+#                     concrete type directly. It stays so a future wrapper keeps
+#                     working, and internal/ledger tests it.
+COVER_EXEMPT ?= ownscout/internal/evidence/evidence.go:53:VerifyPacket \
+                ownscout/internal/ledger/ledger.go:267:*ValidationError.Unwrap
 
 coverage:
 	rm -rf $(COVDIR) && mkdir -p $(COVDIR)
@@ -69,8 +86,18 @@ coverage:
 	GOCOVERDIR=$(COVDIR) python3 spec/parity/harness.py --bin $(COVREF) >/dev/null
 	GOCOVERDIR=$(COVDIR) python3 spec/parity/harness.py --corpus spec/parity/corpus-edge.json --bin $(COVREF) >/dev/null
 	$(GO) tool covdata percent -i=$(COVDIR)
-	@echo "--- never executed ---"
-	@$(GO) tool covdata func -i=$(COVDIR) | awk '$$1 ~ /^ownscout/ && $$NF == "0.0%" { print "  " $$0 }'
+	@$(GO) tool covdata func -i=$(COVDIR) | awk '$$1 ~ /^ownscout/ && $$NF == "0.0%" { print $$1 $$2 }' > $(COVDIR)/dead.txt
+	@printf '%s\n' $(COVER_EXEMPT) > $(COVDIR)/exempt.txt
+	@echo "--- never executed, exempt and justified ---"
+	@grep -Fxf $(COVDIR)/exempt.txt $(COVDIR)/dead.txt | sed 's/^/  /' || true
+	@echo "--- never executed, UNEXPLAINED ---"
+	@grep -vFxf $(COVDIR)/exempt.txt $(COVDIR)/dead.txt > $(COVDIR)/unexplained.txt || true
+	@if [ -s $(COVDIR)/unexplained.txt ]; then \
+		sed 's/^/  /' $(COVDIR)/unexplained.txt; \
+		echo "coverage: unexplained never-executed function: add a corpus case, delete the code, or add it to COVER_EXEMPT with a reason"; \
+		exit 1; \
+	fi
+	@echo "coverage: every never-executed function is accounted for"
 
 # Fails when a document restates a corpus count the corpus no longer has. The
 # counts live in two badges, several prose sentences, a status table, the port

@@ -1127,10 +1127,14 @@ func run() error {
 		"stdout":   normalize(emptyOut.String(), dir, repoDir, bin),
 	})
 
-	// The ledger has two readers with different path hardening: the append path
-	// (Open) rejects a symlinked ancestor, while the read-only verify path does
-	// not, so the same ledger is accepted by `ledger verify` and refused by
-	// `node verify`. A port that shares one resolver gets half of this wrong.
+	// The ledger has three readers with two different path hardenings: the
+	// append path (Open) and rotate both reject a symlinked ancestor, while the
+	// read-only verify path does not, so the same ledger is accepted by
+	// `ledger verify` and refused by `node verify` and `ledger rotate`. A port
+	// that shares one resolver gets this wrong in one direction or the other.
+	//
+	// rotate is recorded last on purpose: it is the only case here that would
+	// rename the fixture if the reference ever stopped rejecting the symlink.
 	linkDir := filepath.Join(edge, "ledger-link")
 	if err := os.RemoveAll(linkDir); err != nil {
 		return err
@@ -1158,6 +1162,8 @@ func run() error {
 			"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-linked/out.jsonl"}},
 		{"node-edge-ledger-symlink-ancestor-json", []string{"node", "verify", "--repo", "fixtures/repo", "--packet", "fixtures/packet-valid.json",
 			"--envelope", "fixtures/envelope-valid.json", "--ledger", "fixtures/edge/ledger-linked/out.jsonl", "--json"}},
+		{"ledger-edge-rotate-symlink-ancestor-human", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-linked/out.jsonl"}},
+		{"ledger-edge-rotate-symlink-ancestor-json", []string{"ledger", "rotate", "--ledger", "fixtures/edge/ledger-linked/out.jsonl", "--json"}},
 	} {
 		command := exec.Command(bin, mode.args...)
 		command.Dir = dir

@@ -7,9 +7,9 @@ all verified byte-for-byte against the same recorded trace corpus.
 
 | Port | Binary | Base traces | Edge traces | Tests | Third-party deps |
 |---|---|---|---|---|---|
-| TypeScript | `ports/ts/bin/ownscout` | 35/35 | 247/247 | 149 | none (Node built-ins only) |
-| Zig | `ports/zig/zig-out/bin/ownscout` | 35/35 | 247/247 | 37 | none (`.dependencies = .{}`) |
-| Rust | `ports/rust/target/release/ownscout` | 35/35 | 247/247 | 38 | none (empty `[dependencies]`) |
+| TypeScript | `ports/ts/bin/ownscout` | 35/35 | 249/249 | 149 | none (Node built-ins only) |
+| Zig | `ports/zig/zig-out/bin/ownscout` | 35/35 | 249/249 | 37 | none (`.dependencies = .{}`) |
+| Rust | `ports/rust/target/release/ownscout` | 35/35 | 249/249 | 38 | none (empty `[dependencies]`) |
 
 The Go reference's observable behaviour is unchanged: 77 tests,
 `node` 98.7% / `nodepacket` 94.5% coverage, `go test -race` clean. Evidence
@@ -35,7 +35,7 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
 ## Verification evidence
 
 - Base trace corpus: 28 recorded CLI cases (human and `--json`, exit codes 0/1/2, ledger).
-- Edge trace corpus: 247 cases (path escape, non-UTF8, graph cycles, ledger hash
+- Edge trace corpus: 249 cases (path escape, non-UTF8, graph cycles, ledger hash
   chaining, in-repo ledger rejection, Go JSON HTML-escaping, null/empty
   field shapes, the raw-byte evidence shapes: invalid UTF-8 and CRLF in
   evidence files, a single empty selected line, oversize evidence files, and
@@ -48,8 +48,8 @@ python3 spec/parity/fuzz.py --candidate <binary> --iterations 300
   a missing final LF, blank lines, and node_results shape and per-result
   rules).
 - Trace corpus mutation test: five deliberately broken reference builds fail the
-  trace corpora (base 33/35, 25/35, 35/35, 35/35 and 33/35; edge 205/247, 123/247,
-  245/247, 245/247 and 247/247 — fractions as recorded against the 35+247 corpus those builds
+  trace corpora (base 33/35, 25/35, 35/35, 35/35 and 33/35; edge 206/249, 124/249,
+  247/249, 247/249 and 249/249 — fractions as recorded against the 35+249 corpus those builds
   faced), so a pass is meaningful. The quoting and precedence cases cannot be
   mutation-tested this way, because the reference's behaviour there comes from
   the decoder; they are validated instead by all three ports failing them
@@ -115,7 +115,7 @@ The fix needs three escape widths - `\xNN` for control bytes and DEL, `\uNNNN` u
 to U+FFFF, `\UNNNNNNNN` above it - with printable runes left literal, and the
 unknown-field check interleaved with the type checks so document order decides.
 Twelve cases pin it (`contract-edge-unknown-*` and
-`contract-edge-precedence-*`). All three ports pass 247/247 and fuzz seed 13 is
+`contract-edge-precedence-*`). All three ports pass 249/249 and fuzz seed 13 is
 clean; the `DIVERGENCES.md` files they had been recorded in are gone.
 
 ### Strict decoding on every command (seeds 3-21, then unification)
@@ -182,13 +182,21 @@ the cheapest way to find the next gap, because a path no case reaches is a path 
 port can skip and still pass - which is how both the append-time ledger cap and
 the symlinked-ancestor check stayed invisible while every port was green.
 
+It now fails when a never-executed function is not on the justified exemption list
+in the Makefile, so an entry cannot sit there unnoticed the way two did. An
+exemption is a claim that no corpus case *can* reach the code, not that writing one
+would be inconvenient; each carries its reason beside the list. The test for
+whether a new entry belongs there is whether a porter could get it wrong - a Go
+error-chain method cannot be ported wrongly, a ledger path check can.
+
 Current reading: `cmd` 100%, `cli` 92.1%, `contract` 89.3%, `evidence` 87.1%,
-`ledger` 76.9%, `node` 83.8%, `nodepacket` 83.5%, with two functions never
-executed: the retired `evidence.VerifyPacket` wrapper and
-`ValidationError.Unwrap`. `ledger` is still the low package - the ledger shape
-cases lifted it from 71.1% to 76.9% and covered `ledger.isPathPrefix` - and it is
-where every gap of this shape has been found, so it is the first place to look
-next.
+`ledger` 77.1%, `node` 83.8%, `nodepacket` 83.5%, with two exempt functions: the
+`evidence.VerifyPacket` wrapper, which only the unit tests and benchmarks call
+because no corpus case can invoke a Go API, and `ValidationError.Unwrap`, which is
+reached only if something wraps that error and nothing does. `ledger` is still the
+low package - the ledger shape cases lifted it from 71.1% and covered
+`ledger.isPathPrefix` - and it is where every gap of this shape has been found, so
+it is the first place to look next.
 
 ### Keeping the counts honest
 

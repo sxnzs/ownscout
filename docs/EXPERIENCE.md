@@ -141,6 +141,8 @@ differently, and the difference is deliberate:
 The ledger is capped at 1 MiB, which keeps opening it a bounded whole-file
 validation. A full ledger is a rotation point rather than an error: `node verify`
 reports `ledger is full` and names the way out, and the chain restarts cleanly
-after a rotation. Only the append path hardens the ledger's path - it refuses a
-symlinked ancestor - while the read-only paths follow one, so `ledger verify` and
-`node verify` can legitimately disagree about the same path.
+after a rotation. Two paths harden the ledger: the append path and `ledger rotate`
+both refuse a symlinked ancestor, while the read-only `ledger verify` follows one.
+So `ledger verify` and `node verify` can legitimately disagree about the same
+path, and the corpus records all three readers rather than the two a shared
+resolver would suggest.

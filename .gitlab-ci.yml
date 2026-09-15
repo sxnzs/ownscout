@@ -34,8 +34,8 @@ reference:
     # it; that table is why a passing harness is evidence rather than a
     # formality, and it was hand-transcribed until now.
     - make mutants-check
-    # Informational: per-package coverage + never-executed functions under
-    # corpus replay; a newly dead path is a corpus gap.
+    # Fails when a function under corpus replay is never executed and is not on
+    # the justified exemption list in the Makefile.
     - make coverage
 
 ports:

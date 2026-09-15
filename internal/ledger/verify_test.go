@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -73,5 +74,31 @@ func TestVerifyReturnsValidationError(t *testing.T) {
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) || !strings.Contains(err.Error(), "validate ledger") {
 		t.Fatalf("Verify error = %v, want ValidationError", err)
+	}
+}
+
+// Unwrap is never reached by the corpus: both call sites in internal/cli pass
+// the error straight out of Verify or Rotate to errors.As, which matches the
+// concrete *ValidationError without walking a chain. It stays because that is
+// only true as long as nothing wraps it, and the CLI's error classification
+// depends on staying able to see through a wrapper. This pins both halves so
+// the method cannot be removed as "dead" without this failing.
+func TestValidationErrorUnwrapSurvivesWrapping(t *testing.T) {
+	inner := &ValidationError{Err: errors.New("bad chain")}
+
+	var direct *ValidationError
+	if !errors.As(inner, &direct) {
+		t.Fatal("errors.As did not match an unwrapped ValidationError")
+	}
+
+	var wrapped *ValidationError
+	if !errors.As(fmt.Errorf("rotate %q: %w", "ledger.jsonl", inner), &wrapped) {
+		t.Fatal("errors.As did not unwrap to ValidationError; the CLI would misreport this as an I/O error")
+	}
+	if wrapped != inner {
+		t.Fatalf("errors.As unwrapped to %p, want %p", wrapped, inner)
+	}
+	if got := errors.Unwrap(inner); got == nil || got.Error() != "bad chain" {
+		t.Fatalf("Unwrap = %v, want the wrapped cause", got)
 	}
 }
