@@ -25,17 +25,6 @@
       ]
     },
     { "type": "gap" },
-    { "type": "cmd", "text": "ownscout node verify --repo repo --packet packet.json --envelope envelope.json --ledger ledger.jsonl" },
-    {
-      "type": "stream",
-      "lines": [
-        "ERROR: node evaluation failed",
-        "  - node \"a\": failed (evidence \"evidence-1\" is missing or not verified)",
-        "  - node \"b\": blocked (dependency \"a\" is not evidence_current)",
-        "Next action: Refresh or correct the failed evidence, then run node verification again."
-      ]
-    },
-    { "type": "gap" },
     { "type": "cmd", "text": "ownscout ledger verify --ledger ledger.jsonl" },
     { "type": "out", "text": "OK: ledger is intact", "cls": "ok" },
     {

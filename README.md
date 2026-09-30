@@ -1,10 +1,9 @@
-<p align="center">
-  <img src="docs/assets/banner.png" alt="ownscout — Know whether the evidence is still true before you trust the work." width="100%">
-</p>
+<p align="center"><img src="docs/assets/banner.png" alt="ownscout — Know whether the evidence still holds before you trust the work." width="100%"></p>
+
+<p align="center"><a href="#install">Install</a> · <a href="#usage">Usage</a> · <a href="#how-it-works">How it works</a> · <a href="#development">Development</a></p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-00ffb2?labelColor=000000"></a>
-  <a href="#install"><img alt="Go 1.26" src="https://img.shields.io/badge/go-1.26-00ffb2?labelColor=000000"></a>
   <a href="#verification"><img alt="Parity 35/35 + 249/249" src="https://img.shields.io/badge/parity-35%2F35%20%2B%20249%2F249-00ffb2?labelColor=000000"></a>
   <a href="#verification"><img alt="302 tests passing" src="https://img.shields.io/badge/tests-302%20passing-00ffb2?labelColor=000000"></a>
 </p>
