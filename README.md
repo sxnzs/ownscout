@@ -71,9 +71,9 @@ ownscout evidence verify --repo /path/to/repo --packet packet.json --relocate
 ownscout node bind --packet packet.json
 
 # Check a dependency graph and append the ordered results to a ledger.
-# --relocate adds evidence relocation diagnostics to failure details.
+# Add --relocate for evidence relocation diagnostics in failure details.
 ownscout node verify --repo /path/to/repo --packet packet.json \
-  --envelope envelope.json --ledger /path/to/ownscout-ledger.jsonl [--relocate]
+  --envelope envelope.json --ledger /path/to/ownscout-ledger.jsonl
 
 # Audit a ledger's hash chain without locking or appending.
 ownscout ledger verify --ledger /path/to/ownscout-ledger.jsonl
