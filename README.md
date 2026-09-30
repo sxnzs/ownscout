@@ -1,63 +1,26 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="OwnScout — local-first evidence verification for autonomous agents" width="100%">
+  <img src="docs/assets/banner.png" alt="ownscout — Know whether the evidence is still true before you trust the work." width="100%">
 </p>
 
 <p align="center">
-  <a href="#install"><img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go&logoColor=white"></a>
-  <a href="#language-ports"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-Node%2024-3178C6?style=flat-square&logo=typescript&logoColor=white"></a>
-  <a href="#language-ports"><img alt="Rust" src="https://img.shields.io/badge/Rust-edition%202021-000000?style=flat-square&logo=rust&logoColor=white"></a>
-  <a href="#language-ports"><img alt="Zig" src="https://img.shields.io/badge/Zig-0.16-F7A41D?style=flat-square&logo=zig&logoColor=white"></a>
-  <br>
-  <a href="#verification"><img alt="Parity 35/35 + 249/249" src="https://img.shields.io/badge/parity-35%2F35%20%2B%20249%2F249-2ea043?style=flat-square"></a>
-  <a href="#verification"><img alt="302 tests passing" src="https://img.shields.io/badge/tests-302%20passing-2ea043?style=flat-square"></a>
-  <a href="#why-it-is-safe-to-run"><img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-30363d?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-30363d?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-00ffb2?labelColor=000000"></a>
+  <a href="#install"><img alt="Go 1.26" src="https://img.shields.io/badge/go-1.26-00ffb2?labelColor=000000"></a>
+  <a href="#verification"><img alt="Parity 35/35 + 249/249" src="https://img.shields.io/badge/parity-35%2F35%20%2B%20249%2F249-00ffb2?labelColor=000000"></a>
+  <a href="#verification"><img alt="302 tests passing" src="https://img.shields.io/badge/tests-302%20passing-00ffb2?labelColor=000000"></a>
 </p>
 
-<h1 align="center">OwnScout</h1>
+An autonomous agent says it is done and hands you a packet: files touched, line
+ranges, expected content hashes. But files change and branches move, so a hash
+that was correct five minutes ago is now a lie. **OwnScout** is a small,
+deterministic CLI that answers one question — *is this evidence still current in
+this working tree, right now?* It validates the packet against a strict
+contract, re-hashes the cited content, checks a dependency graph of work items,
+and writes an append-only audit ledger. It never trusts the producer's own
+claims.
 
-<p align="center"><strong>Know whether the evidence is still true — before you trust the work.</strong></p>
-
-An autonomous agent says it is done. It hands you a packet: files touched, line
-ranges, expected content hashes. But files change. Branches move. A hash that was
-correct five minutes ago is now a lie.
-
-**OwnScout** is a small, deterministic CLI that answers one question: *is this
-evidence still current in this working tree, right now?* It validates the packet
-against a strict contract, re-hashes the cited content, checks a dependency graph
-of work items, and writes an append-only audit ledger. It never trusts the
-producer's own claims.
-
-## Contents
-
-- [What it does](#what-it-does)
-- [Install](#install)
-- [Usage](#usage)
-- [The JSON contract](#the-json-contract)
-- [Exit codes](#exit-codes)
-- [Why it is safe to run](#why-it-is-safe-to-run)
-- [Language ports](#language-ports)
-- [Verification](#verification)
-- [Project layout](#project-layout)
-
-## What it does
-
-| Command | Question it answers |
-|---|---|
-| `ownscout doctor` | Is this installation healthy and what version is it? |
-| `ownscout contract validate --packet p.json` | Is this packet well-formed and internally consistent? |
-| `ownscout evidence verify --repo R --packet p.json` | Is the cited content still byte-identical in `R`? |
-| `ownscout node verify --repo R --packet p.json --envelope e.json --ledger L [--relocate]` | Does the whole dependency graph check out, and what is the audit trail? |
-| `ownscout node bind --packet p.json` | What is this packet's canonical binding digest, for `packet_binding_sha256`? |
-| `ownscout ledger verify --ledger L` | Is the ledger's hash chain intact, read-only? |
-| `ownscout ledger rotate --ledger L` | Archive a validated ledger at its rotation point, named by its chain tip. |
-
-Packet decoding is deliberately strict on every command — one shared decoder,
-not a lenient front door and a strict back door: unknown fields are rejected,
-duplicate keys are rejected, field names are exact case, trailing JSON is
-rejected, and there is a 1 MiB input limit. There is no compatibility
-normalisation and no silent hash repair. **Fix the packet, do not ask the
-tool to reinterpret it.**
+<p align="center">
+  <img src="docs/assets/hero.gif" alt="ownscout validating a packet, failing evidence that moved to lines 4-5, and verifying the ledger chain" width="100%">
+</p>
 
 ## Install
 
@@ -77,6 +40,22 @@ go build -ldflags "-X ownscout/internal/cli.version=v0.1.0" -o bin/ownscout ./cm
 ```
 
 ## Usage
+
+| Command | Question it answers |
+|---|---|
+| `ownscout doctor` | Is this installation healthy and what version is it? |
+| `ownscout contract validate --packet p.json` | Is this packet well-formed and internally consistent? |
+| `ownscout evidence verify --repo R --packet p.json` | Is the cited content still byte-identical in `R`? |
+| `ownscout node verify --repo R --packet p.json --envelope e.json --ledger L [--relocate]` | Does the whole dependency graph check out, and what is the audit trail? |
+| `ownscout node bind --packet p.json` | What is this packet's canonical binding digest, for `packet_binding_sha256`? |
+| `ownscout ledger verify --ledger L` | Is the ledger's hash chain intact, read-only? |
+| `ownscout ledger rotate --ledger L` | Archive a validated ledger at its rotation point, named by its chain tip. |
+
+Every command decodes packets through one shared strict decoder — no lenient
+front door and strict back door: unknown fields are rejected, duplicate keys are
+rejected, field names are exact case, trailing JSON is rejected, and there is a
+1 MiB input limit. There is no compatibility normalisation and no silent hash
+repair. **Fix the packet, do not ask the tool to reinterpret it.**
 
 ```bash
 # Validate the packet contract alone.
@@ -106,30 +85,6 @@ ownscout ledger rotate --ledger /path/to/ownscout-ledger.jsonl
 Add `--json` to any validation command for a single machine-readable line.
 Use it in scripts and agents; omit it when a person is diagnosing a failure.
 
-The ledger is capped at 1 MiB so `Open` stays a bounded whole-file validation.
-A full ledger is a rotation point, not a failure: `ledger rotate` archives it as
-`<ledger>.<first 8 of the chain tip>` and the next `node verify` starts a fresh
-hash chain; `ledger verify` audits each file independently. `node verify` names
-this path when it fires (`ledger is full`), and `ledger rotate` refuses to
-overwrite an archive that already exists.
-
-### When the evidence moved
-
-A line range is a fragile way to cite code: insert a few lines above it and a
-packet that was true five minutes ago now fails. `--relocate` searches the file
-for a window of the same line count whose content hash matches the recorded one,
-and names where it now lives:
-
-```
-- evidence "evidence-1" ("src/lib.rs"): content hash mismatch: expected a1b2…, got 9f8e…; content relocates to lines 140-150 (shift +40; nearest matching window)
-```
-
-It distinguishes three honest outcomes - the content moved, the content is not
-in this file, or the search stopped at its budget - and it **never changes the
-verdict**. A moved span still fails and the command still exits `1`, because
-content that is no longer at the cited location is not current evidence. With
-`--relocate` the failure simply tells you where to look.
-
 ### The safe workflow
 
 Validate first, verify evidence second, and consume the packet only when both
@@ -146,9 +101,22 @@ else
 fi
 ```
 
-## The JSON contract
+### When the evidence moved
 
-Every result has the same five fields, in this order:
+A line range is a fragile way to cite code: insert a few lines above it and a
+packet that was true five minutes ago now fails. `--relocate` searches the file
+for a window of the same line count whose content hash matches the recorded one,
+and names where it now lives. It distinguishes three honest outcomes — the
+content moved, the content is not in this file, or the search stopped at its
+budget — and it **never changes the verdict**: a moved span still fails, because
+content that is no longer at the cited location is not current evidence. With
+`--relocate` the failure simply tells you where to look. The worked example is
+in [docs/EXPERIENCE.md](docs/EXPERIENCE.md#when-the-evidence-moved).
+
+### Result shape
+
+Every result has the same five fields, in this order. This is the `--json` line
+for a packet whose budget counters contradict its evidence, pretty-printed:
 
 ```json
 {
@@ -156,17 +124,17 @@ Every result has the same five fields, in this order:
   "ok": false,
   "summary": "packet is invalid (2 violation(s))",
   "details": [
-    "required_field: evidence: required field is missing",
-    "evidence: evidence: complete packet requires at least one evidence entry"
+    "budget: budget.used_evidence: used evidence exceeds max_evidence",
+    "budget: budget.used_bytes: used bytes exceeds max_bytes"
   ],
   "next_action": "Fix the listed packet fields, then run contract validation again."
 }
 ```
 
-Violation ordering is part of the contract. Fixing the first item in
-`details` is always the right next move.
+Violation ordering is part of the contract. Fixing the first item in `details`
+is always the right next move.
 
-## Exit codes
+### Exit codes
 
 | Code | Meaning |
 |---|---|
@@ -177,9 +145,30 @@ Violation ordering is part of the contract. Fixing the first item in
 A `1` after `node verify` means *the graph did not pass*, but the results
 were still recorded — the ledger is audit history, never an authorisation.
 
-## Why it is safe to run
+## How it works
 
-OwnScout is designed to be boring in exactly the ways that matter:
+Three checks run in order, and each can stop the pipeline:
+
+1. **Contract.** The packet is validated as packet-v1: required fields, exact
+   case, outcome-to-action consistency, budget counters within limits, and at
+   least one evidence entry for a complete packet. See
+   [specs/packet-v1.md](specs/packet-v1.md).
+2. **Evidence.** Every cited span is re-read from the working tree and re-hashed
+   with SHA-256. A mismatch fails closed; nothing is repaired or reinterpreted.
+3. **Graph.** `node verify` validates node-envelope-v1, evaluates the work
+   items in deterministic order, and appends one record per run — including
+   failed and blocked results.
+
+Only the last step writes anything, and only to the explicit `--ledger` file,
+which must live outside the repository. The ledger is capped at 1 MiB so
+opening it stays a bounded whole-file validation. A full ledger is a rotation
+point, not a failure: `ledger rotate` archives it as
+`<ledger>.<first 8 of the chain tip>` and the next `node verify` starts a fresh
+hash chain, while `ledger verify` audits each file independently. The full
+semantics are in
+[docs/EXPERIENCE.md](docs/EXPERIENCE.md#ledger-guidance).
+
+### Trust boundary
 
 - **No network.** Nothing is fetched, phoned home, or uploaded.
 - **No daemon.** It runs, it exits.
@@ -194,7 +183,16 @@ OwnScout is designed to be boring in exactly the ways that matter:
   <img src="docs/assets/trust-boundary.svg" alt="Trust boundary: the repository is read and re-hashed, the process then exits, and the single append-only ledger write lands outside the repository" width="100%">
 </p>
 
-## Language ports
+## Development
+
+Run the reference check before anything else: it runs `go vet ./...`, the Go
+test suite, and the corpus and documentation freshness checks.
+
+```bash
+make gate                       # the definition of done
+```
+
+### Language ports
 
 This repository is also a study in **trace equivalence across languages**. The
 Go implementation in `internal/` is the specification; three independent,
@@ -225,7 +223,7 @@ status is [docs/PORTS.md](docs/PORTS.md). Design notes: [docs/DECISION.md](docs/
 records the v0 decision, and [docs/DELTADB.md](docs/DELTADB.md) maps OwnScout's
 primitives to the DeltaDB ones it borrows from.
 
-## Verification
+### Verification
 
 A port is only interesting if a passing grade means something. Here is how
 equivalence is established.
@@ -267,7 +265,7 @@ spec/parity/status.sh           # compact per-port status
 python3 spec/parity/fuzz.py --candidate ports/zig/zig-out/bin/ownscout --iterations 300
 ```
 
-## Project layout
+### Project layout
 
 ```
 cmd/ownscout/        CLI entry point
@@ -285,7 +283,7 @@ spec/
   parity/            the recorded trace corpora, replay harness, verifier, fuzzer
 specs/               packet-v1 and node-envelope-v1 documents
 docs/
-  assets/            the visuals used in this README
+  assets/            the banner, hero GIF and diagrams used in this README
 ```
 
 ## License
