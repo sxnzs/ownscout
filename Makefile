@@ -68,7 +68,7 @@ verify-ports:
 COVDIR ?= /tmp/ownscout-cov
 COVREF ?= /tmp/ownscout-cover
 
-# <file:line:func> entries that the corpus cannot reach, each justified:
+# <file:func> entries that the corpus cannot reach, each justified:
 #   VerifyPacket      a Go-level wrapper around VerifyPacketWithOptions. The CLI
 #                     (the only thing the corpora drive) never calls it; the
 #                     unit tests and benchmarks do. No case can call a Go API.
@@ -77,8 +77,8 @@ COVREF ?= /tmp/ownscout-cover
 #                     another error. Nothing wraps it, so errors.As matches the
 #                     concrete type directly. It stays so a future wrapper keeps
 #                     working, and internal/ledger tests it.
-COVER_EXEMPT ?= ownscout/internal/evidence/evidence.go:52:VerifyPacket \
-                ownscout/internal/ledger/ledger.go:267:*ValidationError.Unwrap
+COVER_EXEMPT ?= ownscout/internal/evidence/evidence.go:VerifyPacket \
+                ownscout/internal/ledger/ledger.go:*ValidationError.Unwrap
 
 coverage:
 	rm -rf $(COVDIR) && mkdir -p $(COVDIR)
@@ -88,10 +88,11 @@ coverage:
 	$(GO) tool covdata percent -i=$(COVDIR)
 	@$(GO) tool covdata func -i=$(COVDIR) | awk '$$1 ~ /^ownscout/ && $$NF == "0.0%" { print $$1 $$2 }' > $(COVDIR)/dead.txt
 	@printf '%s\n' $(COVER_EXEMPT) > $(COVDIR)/exempt.txt
+	@awk 'NR == FNR { ok[$$0] = 1; next } { k = $$0; sub(/:[0-9]+:/, ":", k); print > ((k in ok) ? "$(COVDIR)/justified.txt" : "$(COVDIR)/unexplained.txt") }' $(COVDIR)/exempt.txt $(COVDIR)/dead.txt
+	@touch $(COVDIR)/justified.txt $(COVDIR)/unexplained.txt
 	@echo "--- never executed, exempt and justified ---"
-	@grep -Fxf $(COVDIR)/exempt.txt $(COVDIR)/dead.txt | sed 's/^/  /' || true
+	@sed 's/^/  /' $(COVDIR)/justified.txt
 	@echo "--- never executed, UNEXPLAINED ---"
-	@grep -vFxf $(COVDIR)/exempt.txt $(COVDIR)/dead.txt > $(COVDIR)/unexplained.txt || true
 	@if [ -s $(COVDIR)/unexplained.txt ]; then \
 		sed 's/^/  /' $(COVDIR)/unexplained.txt; \
 		echo "coverage: unexplained never-executed function: add a corpus case, delete the code, or add it to COVER_EXEMPT with a reason"; \
