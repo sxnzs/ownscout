@@ -1,0 +1,49 @@
+name: Mirror main to GitLab
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: vars.GITLAB_MIRROR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Push main without rewriting GitLab history
+        env:
+          GITLAB_MIRROR_TOKEN: ${{ secrets.GITLAB_MIRROR_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GITLAB_MIRROR_TOKEN" ]]; then
+            echo 'Configure the GITLAB_MIRROR_TOKEN repository secret before enabling mirroring.' >&2
+            exit 1
+          fi
+          askpass="$RUNNER_TEMP/gitlab-askpass"
+          trap 'rm -f "$askpass"' EXIT
+          umask 077
+          cat > "$askpass" <<'SCRIPT'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' oauth2 ;;
+            *Password*) printf '%s\n' "$GITLAB_MIRROR_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SCRIPT
+          chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git push https://gitlab.com/sxanz/ownscout.git HEAD:refs/heads/main
