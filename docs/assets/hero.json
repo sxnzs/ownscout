@@ -1,0 +1,39 @@
+{
+  "name": "ownscout",
+  "tag": "local-first evidence verification",
+  "title": "ownscout",
+  "timing": { "typeMs": 24, "lineMs": 70, "afterCmdMs": 200, "endHoldMs": 1400 },
+  "script": [
+    { "type": "cmd", "text": "ownscout contract validate --packet packet.json" },
+    { "type": "out", "text": "OK: packet is valid", "cls": "ok" },
+    {
+      "type": "stream",
+      "lines": [
+        "  - outcome: complete",
+        "  - default action: autonomous_proceed",
+        "Next action: Run evidence verification before consuming this packet."
+      ]
+    },
+    { "type": "gap" },
+    { "type": "cmd", "text": "ownscout evidence verify --repo repo --packet packet.json --relocate" },
+    {
+      "type": "stream",
+      "lines": [
+        "ERROR: evidence verification failed (1 issue(s))",
+        "  - evidence \"evidence-1\" (\"drift.txt\"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)",
+        "Next action: Refresh or correct the listed evidence, then verify again."
+      ]
+    },
+    { "type": "gap" },
+    { "type": "cmd", "text": "ownscout ledger verify --ledger ledger.jsonl" },
+    { "type": "out", "text": "OK: ledger is intact", "cls": "ok" },
+    {
+      "type": "stream",
+      "lines": [
+        "  - 1 record(s), tip 445d5a11a25eab1f654e136c50eafd57a7d9490dbb484b46e00b05183c08f673",
+        "Next action: The ledger chain is intact."
+      ]
+    },
+    { "type": "done" }
+  ]
+}

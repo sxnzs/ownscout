@@ -31,6 +31,26 @@ fi
 Use `--json` for automation. Omit it for human diagnosis: the default output
 is plain text and includes the next action.
 
+## When the evidence moved
+
+A line range is a fragile way to cite code: insert a few lines above it and a
+packet that was true five minutes ago now fails. `--relocate` searches the file
+for a window of the same line count whose content hash matches the recorded one,
+and names where that content now lives:
+
+```text
+ERROR: evidence verification failed (1 issue(s))
+  - evidence "evidence-1" ("drift.txt"): content hash mismatch: expected sha256:7ed8ee7798b69d1242b20dcb57745742fd8cfcf018e86139750ff1d677b374c4, got c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8; content relocates to lines 4-5 (shift +3; nearest matching window)
+Next action: Refresh or correct the listed evidence, then verify again.
+```
+
+The search distinguishes three honest outcomes: the content moved, the content
+is not in this file, or the search stopped at its byte budget. A span that no
+longer fits the file reports its invalid line range instead. In every case the
+verdict does not change - a moved span still fails and the command still exits
+`1`, because content that is no longer at the cited location is not current
+evidence. The flag only says where to look.
+
 ## UX rules
 
 - Behavior is safe and local-only: no daemon, network access, or repository
