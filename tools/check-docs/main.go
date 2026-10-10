@@ -27,6 +27,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"ownscout/internal/toolcounts"
 )
 
 // Which corpus count a capture group must equal.
@@ -231,7 +233,7 @@ func evaluate(root string, e expectation, base, edge, mutants int) ([]failure, e
 			case edgeValue:
 				want, name = strconv.Itoa(edge), "edge"
 			case mutationValue:
-				want, name = countWord(mutants), "mutation"
+				want, name = toolcounts.CountWord(mutants), "mutation"
 			}
 			got := text[start:end]
 			if !strings.EqualFold(got, want) {
@@ -316,15 +318,6 @@ func mutationCount(root string) (int, error) {
 		return 0, fmt.Errorf("PORT.md: the mutation table has no mutation rows")
 	}
 	return mutations, nil
-}
-
-// countWord spells small counts, so a document can say "four".
-func countWord(n int) string {
-	words := []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
-	if n >= 0 && n < len(words) {
-		return words[n]
-	}
-	return strconv.Itoa(n)
 }
 
 // languageTestCounts reads the per-language test counts out of the parity

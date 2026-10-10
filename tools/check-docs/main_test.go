@@ -142,3 +142,44 @@ func TestCorpusCountsFailsOnAMissingCorpus(t *testing.T) {
 		t.Fatal("expected an error when the corpus is missing")
 	}
 }
+
+// The mutation count is spelled out in prose, so the expectation must compare
+// against the shared number word - and, once the count passes ten, against the
+// digits fallback. A stale or wrong word fails; the right one passes.
+func TestEvaluateChecksTheSpelledMutationCount(t *testing.T) {
+	e := expectation{
+		file:  "PROSE.md",
+		label: "mutation count",
+		re:    regexp.MustCompile(`([A-Za-z]+)\s+deliberately broken reference builds`),
+		want:  []int{mutationValue},
+	}
+
+	root := t.TempDir()
+	writeFile(t, root, "PROSE.md", "Four deliberately broken reference builds:\n")
+	failures, err := evaluate(root, e, 31, 247, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected the spelled count to pass, got %v", failures)
+	}
+
+	writeFile(t, root, "PROSE.md", "Three deliberately broken reference builds:\n")
+	failures, err = evaluate(root, e, 31, 247, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failures) != 1 || !strings.Contains(failures[0].detail, `expected "four"`) {
+		t.Fatalf("expected a wrong-word failure naming \"four\", got %v", failures)
+	}
+
+	// Beyond ten the expectation falls back to digits.
+	writeFile(t, root, "PROSE.md", "Twelve deliberately broken reference builds:\n")
+	failures, err = evaluate(root, e, 31, 247, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failures) != 1 || !strings.Contains(failures[0].detail, `expected "12"`) {
+		t.Fatalf("expected a digits-fallback failure naming \"12\", got %v", failures)
+	}
+}

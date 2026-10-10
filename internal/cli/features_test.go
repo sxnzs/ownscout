@@ -41,11 +41,17 @@ func TestNodeBindUsesStrictPacketBoundary(t *testing.T) {
 }
 
 func TestNodeBindDecodeAndContractFailures(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	code, output := runTest(t, "node", "bind", "--packet", missing, "--json")
+	if code != 2 || !strings.Contains(output, "packet could not be loaded") {
+		t.Fatalf("missing packet: code=%d output=%q", code, output)
+	}
+
 	malformed := filepath.Join(t.TempDir(), "malformed.json")
 	if err := os.WriteFile(malformed, []byte(`{"packet_id":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	code, output := runTest(t, "node", "bind", "--packet", malformed, "--json")
+	code, output = runTest(t, "node", "bind", "--packet", malformed, "--json")
 	if code != 2 || !strings.Contains(output, `"command":"node bind"`) || !strings.Contains(output, "packet could not be decoded") {
 		t.Fatalf("decode failure: code=%d output=%q", code, output)
 	}

@@ -29,13 +29,15 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
+
+	"ownscout/internal/toolcounts"
 )
 
 const (
@@ -326,9 +328,9 @@ func build(dir string) (string, error) {
 
 // replay runs one corpus and reports the number of passing cases.
 //
-// --verbose makes the harness print one "ok   <name>" line per passing case.
-// Counting those lines is exact; counting the mismatch blocks is not, because a
-// single failing case can emit several.
+// Both corpora are replayed through replayCorpus, which reads the harness's
+// machine-readable totals; see there for how a caught mutation is told apart
+// from an infrastructure failure.
 func replay(root, bin string) (base, baseTotal, edge, edgeTotal int, err error) {
 	base, baseTotal, err = replayCorpus(root, bin, "")
 	if err != nil {
@@ -342,28 +344,61 @@ func replay(root, bin string) (base, baseTotal, edge, edgeTotal int, err error) 
 }
 
 func replayCorpus(root, bin, corpus string) (passed, total int, err error) {
-	args := []string{"spec/parity/harness.py", "--bin", bin, "--verbose"}
+	args := []string{"spec/parity/harness.py", "--bin", bin, "--json"}
 	if corpus != "" {
 		args = append(args, "--corpus", corpus)
 	}
 	cmd := exec.Command("python3", args...)
 	cmd.Dir = root
-	out, _ := cmd.Output() // a nonzero exit is expected: mutations must fail cases
-	passed = 0
-	total = -1
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "ok   ") {
-			passed++
-			continue
+	out, runErr := cmd.Output()
+	exit := 0
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			return 0, 0, fmt.Errorf("harness did not run for %s: %w", corpusLabel(corpus), runErr)
 		}
-		if strings.HasPrefix(line, "harness: ") {
-			if n, err := parseSummary(line); err == nil {
-				total = n
-			}
-		}
+		exit = exitErr.ExitCode()
 	}
-	if total < 0 {
-		return 0, 0, fmt.Errorf("harness produced no summary line for %s", corpusLabel(corpus))
+	return parseHarnessTotals(exit, out, corpusLabel(corpus))
+}
+
+// harnessTotals is the machine-readable report the harness prints with --json.
+type harnessTotals struct {
+	Passed *int `json:"passed"`
+	Total  *int `json:"total"`
+	Failed *int `json:"failed"`
+}
+
+// parseHarnessTotals turns one harness run into a corpus score.
+//
+// The exit code separates the two reasons a run can stop short. Exit 0 means
+// every case passed and exit 1 means at least one failed - the expected outcome
+// for a mutant, and a real measurement either way. Any other exit code is
+// infrastructure trouble (a missing binary, a crash), and an unparseable or
+// nonsensical report is treated the same: returning an error here is what stops
+// a broken harness from being scored as "the corpus caught this bug".
+func parseHarnessTotals(exit int, out []byte, label string) (passed, total int, err error) {
+	if exit != 0 && exit != 1 {
+		return 0, 0, fmt.Errorf("harness infrastructure error (exit %d) for %s: %s",
+			exit, label, strings.TrimSpace(string(out)))
+	}
+	var totals harnessTotals
+	if err := json.Unmarshal(out, &totals); err != nil {
+		return 0, 0, fmt.Errorf("harness totals for %s: %w", label, err)
+	}
+	if totals.Total == nil || totals.Passed == nil || totals.Failed == nil {
+		return 0, 0, fmt.Errorf("harness totals for %s: missing required count", label)
+	}
+	passed, total = *totals.Passed, *totals.Total
+	if total <= 0 {
+		return 0, 0, fmt.Errorf("harness totals for %s: total %d", label, total)
+	}
+	if passed < 0 || passed > total {
+		return 0, 0, fmt.Errorf("harness totals for %s: passed %d out of total %d",
+			label, passed, total)
+	}
+	if *totals.Failed != total-passed || (exit == 0) != (passed == total) {
+		return 0, 0, fmt.Errorf("harness totals for %s: counts disagree with failures or exit %d", label, exit)
 	}
 	return passed, total, nil
 }
@@ -375,19 +410,6 @@ func corpusLabel(corpus string) string {
 	return filepath.Base(corpus)
 }
 
-// parseSummary reads "harness: 12/31 cases passed".
-func parseSummary(line string) (int, error) {
-	fields := strings.Fields(strings.TrimPrefix(line, "harness: "))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("empty summary")
-	}
-	parts := strings.SplitN(fields[0], "/", 2)
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("malformed case count %q", fields[0])
-	}
-	return strconv.Atoi(parts[1])
-}
-
 // renderRegion builds the governed text: the intro sentence, the table, and
 // nothing else. Everything else in that section is hand-written prose and stays
 // that way.
@@ -396,7 +418,7 @@ func renderRegion(res result) string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s%s deliberately broken reference builds:\n\n", governedStart, countWord(len(mutations)))
+	fmt.Fprintf(&b, "%s%s deliberately broken reference builds:\n\n", governedStart, toolcounts.CountWord(len(mutations)))
 	// The measured rows are emitted in mutation order, then the reference,
 	// matching the order a reader expects: bugs first, baseline last.
 	rows := append([]row{}, res.rows[1:]...)
@@ -407,15 +429,6 @@ func renderRegion(res result) string {
 		fmt.Fprintf(&b, "| %s | %d/%d | %d/%d |\n", r.label, r.base, res.baseTotal, r.edge, res.edgeTotal)
 	}
 	return b.String()
-}
-
-// countWord spells small counts, so the sentence reads "five ... builds".
-func countWord(n int) string {
-	words := []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
-	if n >= 0 && n < len(words) {
-		return words[n]
-	}
-	return strconv.Itoa(n)
 }
 
 // region bounds in PORT.md: the intro line and the contiguous table under it.

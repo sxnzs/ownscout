@@ -109,17 +109,6 @@ func TestApplyMutationRefusesAmbiguousAnchors(t *testing.T) {
 	}
 }
 
-// A score equal to the corpus total is the signal that a mutation is invisible.
-// Turning the count into words is what the prose in five files depends on.
-func TestCountWord(t *testing.T) {
-	cases := map[int]string{0: "zero", 1: "one", 4: "four", 10: "ten", 11: "11", 247: "247"}
-	for n, want := range cases {
-		if got := countWord(n); got != want {
-			t.Errorf("countWord(%d) = %q, want %q", n, got, want)
-		}
-	}
-}
-
 func TestRenderRegion(t *testing.T) {
 	res := result{
 		baseTotal: 31,
@@ -153,18 +142,45 @@ func TestRenderRegion(t *testing.T) {
 	}
 }
 
-func TestParseSummary(t *testing.T) {
-	got, err := parseSummary("harness: 12/31 cases passed")
-	if err != nil {
-		t.Fatalf("parseSummary: %v", err)
+func TestParseHarnessTotals(t *testing.T) {
+	// Exit 0 (all passed) and exit 1 (a mutant failing cases) both carry a
+	// usable score.
+	for _, tc := range []struct {
+		exit, passed int
+		report       string
+	}{
+		{0, 31, `{"total":31,"passed":31,"failed":0}`},
+		{1, 12, `{"total":31,"passed":12,"failed":19}`},
+	} {
+		passed, total, err := parseHarnessTotals(tc.exit, []byte(tc.report), "the base corpus")
+		if err != nil {
+			t.Fatalf("exit %d: parseHarnessTotals: %v", tc.exit, err)
+		}
+		if passed != tc.passed || total != 31 {
+			t.Errorf("exit %d: got %d/%d, want %d/31", tc.exit, passed, total, tc.passed)
+		}
 	}
-	// The denominator is the corpus size; the numerator is the score.
-	if got != 31 {
-		t.Errorf("parseSummary returned %d, want the denominator 31", got)
-	}
-	for _, bad := range []string{"harness:", "harness: nonsense", "harness: 12 cases passed"} {
-		if _, err := parseSummary(bad); err == nil {
-			t.Errorf("parseSummary(%q) accepted a malformed summary", bad)
+
+	// Anything else is infrastructure, not a caught mutation.
+	for _, tc := range []struct {
+		name string
+		exit int
+		out  []byte
+	}{
+		{"crash", 2, []byte("harness: binary is missing")},
+		{"unparseable", 1, []byte("harness: 12/31 cases passed")},
+		{"empty", 1, nil},
+		{"zero total", 1, []byte(`{"total":0,"passed":0}`)},
+		{"passed over total", 1, []byte(`{"total":3,"passed":4}`)},
+		{"negative passed", 1, []byte(`{"total":3,"passed":-1}`)},
+		{"success with failures", 0, []byte(`{"total":3,"passed":2,"failed":1}`)},
+		{"failure with all passed", 1, []byte(`{"total":3,"passed":3,"failed":0}`)},
+		{"inconsistent failed", 1, []byte(`{"total":3,"passed":2,"failed":2}`)},
+		{"missing failed", 0, []byte(`{"total":3,"passed":3}`)},
+		{"missing passed", 1, []byte(`{"total":3,"failed":3}`)},
+	} {
+		if _, _, err := parseHarnessTotals(tc.exit, tc.out, "the base corpus"); err == nil {
+			t.Errorf("%s: parseHarnessTotals accepted bad input", tc.name)
 		}
 	}
 }

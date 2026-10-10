@@ -1,7 +1,7 @@
 GO ?= go
 REF ?= spec/parity/reference-ownscout
 
-.PHONY: build gate test corpus corpus-check docs-check mutants mutants-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
+.PHONY: build gate test harness-test corpus corpus-check docs-check mutants mutants-check reference fuzz fuzz-sweep coverage verify-ports ports ports-test
 
 build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
@@ -9,6 +9,10 @@ build:
 test:
 	$(GO) vet ./...
 	$(GO) test ./...
+	$(MAKE) harness-test
+
+harness-test:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s spec/parity -p '*test*.py'
 
 corpus:
 	$(GO) run ./tools/gen-corpus

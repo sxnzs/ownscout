@@ -112,15 +112,14 @@ func runNodeBind(args []string, out io.Writer) int {
 		return usageFailureWithJSON(out, "missing required --packet value", "ownscout node bind --help", jsonOutput)
 	}
 
-	packetBytes, err := readBounded(packetPath, "packet", nodepacket.MaxInputBytes)
+	packet, violations, err := loadPacket(packetPath)
 	if err != nil {
 		return result(out, jsonOutput, commandError("node bind", "packet could not be loaded", err.Error(), "Provide a readable packet file with --packet <file>."), 2)
 	}
-	packet, violations := nodepacket.DecodeValid(packetBytes)
+	if isDecodeFailure(violations) {
+		return result(out, jsonOutput, commandError("node bind", "packet could not be decoded", "strict packet decoding failed", "Provide one valid packet-v1 JSON object with --packet <file>."), 2)
+	}
 	if len(violations) != 0 {
-		if len(violations) == 1 && violations[0].Rule == nodepacket.RuleDecode {
-			return result(out, jsonOutput, commandError("node bind", "packet could not be decoded", "strict packet decoding failed", "Provide one valid packet-v1 JSON object with --packet <file>."), 2)
-		}
 		return result(out, jsonOutput, resultData{
 			Command:    "node bind",
 			OK:         false,
@@ -251,7 +250,7 @@ func verifyNodeEnvelope(repoPath, packetPath, envelopePath, ledgerPath string, r
 
 	packet, violations := nodepacket.DecodeValid(packetBytes)
 	if len(violations) != 0 {
-		if len(violations) == 1 && violations[0].Rule == nodepacket.RuleDecode {
+		if isDecodeFailure(violations) {
 			return nodeError("packet could not be decoded", "strict packet decoding failed", "Provide one valid packet-v1 JSON object with --packet <file>."), 2
 		}
 		return resultData{

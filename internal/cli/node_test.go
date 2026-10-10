@@ -91,6 +91,46 @@ func TestNodeVerifyInvalidPacketContractIsExitTwo(t *testing.T) {
 	}
 }
 
+func TestNodeVerifyInvalidInputPrecedence(t *testing.T) {
+	// Each case makes two inputs bad and pins which stage reports first.
+	// Reads run before either decode: packet load beats envelope load,
+	// envelope load beats packet decode, packet decode and contract
+	// violations beat envelope parse, and envelope parse beats the
+	// repository check.
+	validPacket, validEnvelope, ledgerPath := writeNodeFixture(t, false)
+	malformed := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(malformed, []byte(`{"packet_id":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	violating := writePacketVariant(t, func(raw map[string]json.RawMessage) {
+		raw["outcome"] = json.RawMessage(`"impossible"`)
+	})
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	repo := filepath.Join("testdata", "repo")
+
+	tests := []struct {
+		name, packet, envelope, repoPath, want string
+	}{
+		{"packet load before envelope load", missing, missing, repo, "packet could not be loaded"},
+		{"envelope load before packet decode", malformed, missing, repo, "envelope could not be loaded"},
+		{"packet decode before envelope parse", malformed, malformed, repo, "packet could not be decoded"},
+		{"contract violations before envelope parse", violating, malformed, repo, "packet contract failed"},
+		{"envelope parse before repository check", validPacket, malformed, missing, "envelope could not be parsed"},
+		{"repository check before ledger open", validPacket, validEnvelope, missing, "repository could not be checked"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, output := runTest(t, "node", "verify", "--repo", tt.repoPath, "--packet", tt.packet, "--envelope", tt.envelope, "--ledger", ledgerPath)
+			if code != 2 || !strings.Contains(output, tt.want) {
+				t.Fatalf("code=%d output=%q, want %q", code, output, tt.want)
+			}
+		})
+	}
+	if _, err := os.Stat(ledgerPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected inputs created ledger: err=%v", err)
+	}
+}
+
 func TestNodeVerifyFailedAndBlockedResultsAreAppendedInOrder(t *testing.T) {
 	packetPath, _, ledgerPath := writeNodeFixture(t, true)
 	packetBytes, err := os.ReadFile(packetPath)

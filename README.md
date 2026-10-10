@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-00ffb2?labelColor=000000"></a>
   <a href="#verification"><img alt="Parity 35/35 + 249/249" src="https://img.shields.io/badge/parity-35%2F35%20%2B%20249%2F249-00ffb2?labelColor=000000"></a>
-  <a href="#verification"><img alt="302 tests passing" src="https://img.shields.io/badge/tests-302%20passing-00ffb2?labelColor=000000"></a>
+  <a href="#verification"><img alt="305 tests passing" src="https://img.shields.io/badge/tests-305%20passing-00ffb2?labelColor=000000"></a>
 </p>
 
 An autonomous agent says it is done and hands you a packet: files touched, line
