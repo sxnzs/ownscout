@@ -46,13 +46,71 @@ func TestDoctor(t *testing.T) {
 	}
 }
 
+// TestInvalidUsage pins the exact usage failures and help text, including
+// branches the recorded trace corpus never executes (found with `make coverage`).
+// Expected output is written out literally so the pins hold the contract rather
+// than echo the code.
 func TestInvalidUsage(t *testing.T) {
-	cases := [][]string{{"nope"}, {"contract", "validate"}, {"contract", "validate", "--packet", "x", "--wat"}, {"evidence", "verify", "--repo", "x"}}
-	for _, args := range cases {
-		code, output := runTest(t, args...)
-		if code != 2 || !strings.Contains(output, "Next action:") {
-			t.Fatalf("args %v: code=%d output=%q", args, code, output)
-		}
+	emptyLedger := filepath.Join(t.TempDir(), "ledger.jsonl")
+	if err := os.WriteFile(emptyLedger, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	usage := func(message, next string) string {
+		return "error: " + message + "\nNext action: run '" + next + "'.\n"
+	}
+	usageJSON := func(message, next string) string {
+		return `{"command":"usage","ok":false,"summary":"` + message + `","details":["usage: ` + next + `"],"next_action":"Run '` + next + `'."}` + "\n"
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"unknown command", []string{"nope"}, 2,
+			usage("unknown command 'nope'", "ownscout --help")},
+		{"contract validate missing packet", []string{"contract", "validate"}, 2,
+			usage("missing required --packet <file>", "ownscout contract validate --help")},
+		{"contract validate unknown flag", []string{"contract", "validate", "--packet", "x", "--wat"}, 2,
+			usage("unknown flag or argument '--wat'", "ownscout contract validate --help")},
+		{"evidence verify missing packet", []string{"evidence", "verify", "--repo", "x"}, 2,
+			usage("both --repo <dir> and --packet <file> are required", "ownscout evidence verify --help")},
+		{"doctor extra argument", []string{"doctor", "x"}, 2,
+			usage("doctor does not accept arguments", "ownscout doctor --help")},
+		{"version extra argument", []string{"version", "x"}, 2,
+			usage("version does not accept arguments", "ownscout version --help")},
+		{"doctor help", []string{"doctor", "--help"}, 0,
+			"Usage: ownscout doctor\n\nChecks that the local CLI is ready.\n\nNext action: run this command without additional arguments.\n"},
+		{"version help", []string{"version", "--help"}, 0,
+			"Usage: ownscout version\n\nPrints the OwnScout version.\n"},
+		{"node bind unknown flag", []string{"node", "bind", "--bogus"}, 2,
+			usage("unknown flag or argument '--bogus'", "ownscout node bind --help")},
+		{"evidence verify unknown flag", []string{"evidence", "verify", "--bogus"}, 2,
+			usage("unknown flag or argument '--bogus'", "ownscout evidence verify --help")},
+		{"ledger verify unknown flag", []string{"ledger", "verify", "--bogus"}, 2,
+			usage("unknown flag or argument '--bogus'", "ownscout ledger verify --help")},
+		{"ledger verify missing ledger", []string{"ledger", "verify"}, 2,
+			usage("missing required --ledger value", "ownscout ledger verify --help")},
+		{"ledger rotate unknown flag", []string{"ledger", "rotate", "--bogus"}, 2,
+			usage("unknown flag or argument '--bogus'", "ownscout ledger rotate --help")},
+		{"ledger rotate missing ledger", []string{"ledger", "rotate"}, 2,
+			usage("missing required --ledger value", "ownscout ledger rotate --help")},
+		{"ledger verify unknown flag as JSON", []string{"ledger", "verify", "--bogus", "--json"}, 2,
+			usageJSON("unknown flag or argument '--bogus'", "ownscout ledger verify --help")},
+		{"ledger rotate missing ledger as JSON", []string{"ledger", "rotate", "--json"}, 2,
+			usageJSON("missing required --ledger value", "ownscout ledger rotate --help")},
+		{"ledger verify empty ledger", []string{"ledger", "verify", "--ledger", emptyLedger}, 0,
+			"OK: ledger is intact\n  - 0 record(s), tip none\nNext action: The ledger chain is intact.\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, got := runTest(t, tc.args...)
+			if code != tc.code || got != tc.want {
+				t.Fatalf("args %v:\n code=%d want %d\n got  %q\n want %q", tc.args, code, tc.code, got, tc.want)
+			}
+		})
 	}
 }
 

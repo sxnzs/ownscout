@@ -1,6 +1,6 @@
 # Zed CRDT text primitives: how a reference survives edits
 
-Source: `/Users/sainzs/Code/reference/zed` at commit `5a9b9558db01a6b906cec2fb70a797affdc58cdd` ("Use proper editions (#63733)"). Read-only inspection; nothing in that checkout was modified. All paths in this report are relative to that checkout root.
+Source: `~/Code/reference/zed` at commit `5a9b9558db01a6b906cec2fb70a797affdc58cdd` ("Use proper editions (#63733)"). Read-only inspection; nothing in that checkout was modified. All paths in this report are relative to that checkout root.
 
 ---
 

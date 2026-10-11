@@ -7,6 +7,7 @@ build:
 	$(GO) build -o bin/ownscout ./cmd/ownscout
 
 test:
+	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	$(GO) vet ./...
 	$(GO) test ./...
 	$(MAKE) harness-test

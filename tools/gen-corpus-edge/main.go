@@ -842,7 +842,7 @@ func run() error {
 		}},
 		{"dup-node-id", func() (string, error) {
 			end := strings.LastIndex(seedLine, "]")
-			result := seedLine[resultsAt+len("\"node_results\":["):end]
+			result := seedLine[resultsAt+len("\"node_results\":[") : end]
 			return seedLine[:resultsAt] + "\"node_results\":[" + result + "," + result + seedLine[end:] + "\n", nil
 		}},
 	}

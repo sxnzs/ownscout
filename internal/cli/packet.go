@@ -54,8 +54,6 @@ func readBounded(path, kind string, limit int) ([]byte, error) {
 	return data, nil
 }
 
-
-
 func packetViolationDetails(violations []contract.Violation) []string {
 	if len(violations) == 0 {
 		return nil

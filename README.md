@@ -21,6 +21,16 @@ claims.
   <img src="docs/assets/hero.gif" alt="ownscout validating a packet, failing evidence that moved to lines 4-5, and verifying the ledger chain" width="100%">
 </p>
 
+## Portfolio role
+
+OwnScout is the flagship of the **Verifiable Agents** initiative. It owns the
+small deterministic verification contract. `droid-tune` supplies empirical
+agent-performance evidence, `codeatlas` explores local cited context, and
+`harness-research` preserves broader experiments. The Go/Zig work in
+`contrib/prime-agent` is the initiative's upstream-port lane. Those repositories
+remain separate evidence and research surfaces rather than being folded into
+this binary without a demonstrated protocol need.
+
 ## Install
 
 OwnScout is a single static binary with no runtime dependencies.
