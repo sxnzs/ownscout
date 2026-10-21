@@ -46,4 +46,4 @@ jobs:
           SCRIPT
           chmod 700 "$askpass"
           GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-            git push https://gitlab.com/sxanz/ownscout.git HEAD:refs/heads/main
+            git push https://github.com/sxnzs/ownscout.git HEAD:refs/heads/main
