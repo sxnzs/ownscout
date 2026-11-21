@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The one command that decides whether work is done. Runs locally and in CI.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+ran=0
+run() { echo "==> $*"; "$@"; ran=1; }
+
+if [ -f go.mod ]; then
+  run make gate
+  run go build ./...
+  run make mutants-check
+  run make coverage
+fi
+
+if [ -d ports ]; then
+  run make ports
+  run spec/parity/verify-all.sh
+fi
+
+if [ "$ran" -eq 0 ]; then
+  echo "verify: no stack detected, so nothing was checked" >&2
+  exit 1
+fi
+echo "verify: ok"

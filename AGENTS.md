@@ -1,12 +1,29 @@
-# AGENTS.md
+# Working in this repo
 
-- Purpose: local-first evidence-verification CLI. The Go implementation in `internal/` is the spec; the three ports under `ports/` replay the recorded trace corpus byte-for-byte.
-- Definition of done: run `make gate` for reference changes; run `spec/parity/verify-all.sh` for port work; keep the repository `npm`-free.
-- Gotcha: any CLI stdout or error-string change requires `make corpus` and committing the regenerated corpus, or corpus-check fails.
-- Audit lanes beyond the gate: `make coverage` replays both corpora against an instrumented build and lists never-executed functions (how `isPathPrefix` was found); `make fuzz-sweep` mutates packet/envelope/ledger fixtures across seeds and diffs reference vs ports; `make mutants` re-measures the mutation table in `spec/parity/PORT.md` and `make mutants-check` fails when it is stale. CI runs coverage and mutants-check in the reference job and the fuzz sweep in the fuzz job.
-- Gotcha: never hand-edit the mutation table in `spec/parity/PORT.md`; run `make mutants`. Adding a mutation means editing the list in `tools/mutants/main.go`, and then the spelled-out count in `docs/PORTS.md`, `README.md` and `ports/README.md` must become the next word - `make docs-check` will say so. To show the corpus still has teeth, add a mutation to that list and see its row drop below the totals.
-- Gotcha: `spec/parity/` is protected; `verify-all.sh` fails if a port lane modifies anything outside `ports/`.
-- Gotcha: every command decodes packets through `internal/nodepacket` (strict: exact field names, duplicate keys rejected, 1 MiB cap). The former lenient `encoding/json` path on contract/evidence was removed by the decoder unification; `plans/json-case-fold-divergence.md` records the retired asymmetry for history.
-- Gotcha: the ledger is capped at 1 MiB (bounded whole-file validation in `Open`). A full ledger is a rotation point: `mv` it aside and the next append starts a fresh hash chain; `ledger verify` audits each file independently. `node verify` surfaces this as `ledger is full` via `ledger.FullError`.
-- Gotcha: `verify-port.sh`'s protected-paths check flags ANY untracked or modified file outside `ports/` — including scratch dirs. Keep probes and scratch out of the tree: a gitignored path, or `mktemp -d`. Do not use `/tmp` for a probe that touches a ledger — on macOS `/tmp` is itself a symlink and the ledger hardening permits only `/var` among system symlinks, so a ledger path under `/tmp` is rejected as a symlinked ancestor and the probe silently measures the wrong thing.
-- Multiple agents may work in this repository concurrently. Keep commits scoped and leave other agents' in-flight work uncommitted.
+## Before you edit
+- For anything larger than a small fix, write a short spec first: goal, files touched, how we will know it works. Wait for my OK.
+- Read the code and `git log` before trusting docs or your memory of a tool.
+
+## While you work
+- Build at low or medium effort. Switch to high for debugging, security-sensitive code, and final verification.
+- Higher effort finds missed edge cases. It does not fix a wrong spec. If the approach looks wrong, go back to the spec.
+- Do not add lint-disable or type-ignore comments. If a check is wrong, stop and tell me.
+- Leave touched code cleaner: no dead code, no comments that restate the code.
+
+## Done means
+- `./scripts/verify` exits 0, and CI is green on the pushed commit. Never tell me something works without that.
+- Never weaken, skip, or delete a check or test to get to green.
+- Commit and push as you go, in small commits.
+
+## When I correct you
+- Append one line to `.corrections` naming the class of mistake, not the instance.
+- If that class is already listed, do not add another line. Propose a lint rule, type, or compiler check that makes it impossible; once I approve, add it to `scripts/verify`.
+- Do not add rules to this file. It stays under 30 lines.
+
+## Repo facts
+- The Go reference in `internal/` is the spec; ports under `ports/` replay the corpus byte for byte. Keep the repo `npm`-free.
+- Any CLI stdout or error-string change needs `make corpus` and the regenerated corpus committed.
+- Never hand-edit the mutation table in `spec/parity/PORT.md`; run `make mutants` (new mutations go in `tools/mutants/main.go`).
+- `spec/parity/` is protected: port lanes fail on any untracked or modified file outside `ports/`. Keep scratch in `mktemp -d`, never `/tmp` (symlinked; ledger paths there are rejected).
+- Packets decode only through `internal/nodepacket` (strict, 1 MiB cap); the ledger is capped at 1 MiB and a full ledger is a rotation point.
+- Other agents may work here concurrently: keep commits scoped.
