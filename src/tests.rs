@@ -106,7 +106,11 @@ fn packet_decode_rejects_strict_json_errors() {
         br#"{"freshness":[]}"#.as_slice(),
         br#"{"evidence":[{"evidence_id":1}]}"#.as_slice(),
     ] {
-        assert!(packet::decode_strict(input).is_err(), "accepted {:?}", input);
+        assert!(
+            packet::decode_strict(input).is_err(),
+            "accepted {:?}",
+            input
+        );
     }
     assert!(packet::decode_strict(b"null").is_err());
     assert!(packet::decode_strict(&vec![b' '; (1 << 20) + 1]).is_err());
@@ -125,7 +129,11 @@ fn packet_decode_is_strict_everywhere() {
         br#"{"packet_id":"\uD800"}"#.as_slice(),
         b"{\"packet_id\":\"\xff\"}".as_slice(),
     ] {
-        assert!(packet::decode_strict(input).is_err(), "accepted {:?}", input);
+        assert!(
+            packet::decode_strict(input).is_err(),
+            "accepted {:?}",
+            input
+        );
     }
     assert_eq!(
         packet::decode_strict(br#"{"packet_id":"p"}"#)
@@ -358,7 +366,10 @@ fn node_validation_checks_every_identifier_field() {
     for (value, expected) in [
         ("env%lope-1", "is not a valid identifier"),
         ("-env-1", "is not a valid identifier"),
-        ("e".repeat(129).as_str(), "1-128 ASCII identifier characters"),
+        (
+            "e".repeat(129).as_str(),
+            "1-128 ASCII identifier characters",
+        ),
         ("", "1-128 ASCII identifier characters"),
     ] {
         let mut e = envelope(&p, vec![one_node("a")]);
@@ -540,7 +551,10 @@ fn ledger_verify_rejects_a_line_over_the_scanner_bound() {
         "--json".into(),
     ]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains("read line: bufio.Scanner: token too long"), "{out}");
+    assert!(
+        out.contains("read line: bufio.Scanner: token too long"),
+        "{out}"
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -769,7 +783,10 @@ fn cli_help_covers_ledger_and_node_bind() {
         "{out}"
     );
     let (out, _) = cli::run(&["node".into(), "bind".into(), "--help".into()]);
-    assert!(out.contains("Computes the canonical packet binding"), "{out}");
+    assert!(
+        out.contains("Computes the canonical packet binding"),
+        "{out}"
+    );
     let (out, _) = cli::run(&["ledger".into(), "verify".into(), "--help".into()]);
     assert!(out.contains("Replays the SHA-256 ledger chain"), "{out}");
     let (out, code) = cli::run(&["ledger".into()]);

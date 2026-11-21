@@ -205,7 +205,7 @@ pub fn canonical_packet(p: &Packet) -> Vec<u8> {
         o += "null";
     }
     let pr = &p.provenance;
-    o += &format!(",\"provenance\":{{");
+    o += ",\"provenance\":{";
     let mut first = true;
     for (k, v) in [
         ("collector", &pr.collector),

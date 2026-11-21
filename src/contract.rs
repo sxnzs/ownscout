@@ -168,7 +168,7 @@ pub fn validate(p: &Packet) -> Vec<Violation> {
     }
     // The reference runs this even when the field is absent or null
     // (internal/contract/contract.go:351-353).
-    if p.outcome == "complete" && p.evidence.as_ref().map_or(true, |es| es.is_empty()) {
+    if p.outcome == "complete" && p.evidence.as_ref().is_none_or(|es| es.is_empty()) {
         v.push(Violation {
             rule: "evidence",
             field: "evidence".into(),

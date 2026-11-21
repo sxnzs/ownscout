@@ -118,9 +118,7 @@ fn one(root: &Path, e: &Evidence, options: &Options) -> Verification {
     if e.line_start < 1 || e.line_end < e.line_start || e.line_end as usize > line_count {
         r.message = format!(
             "invalid line range {}-{} for {} line(s)",
-            e.line_start,
-            e.line_end,
-            line_count
+            e.line_start, e.line_end, line_count
         );
         r.message += &location_clause(
             &data,
@@ -137,7 +135,12 @@ fn one(root: &Path, e: &Evidence, options: &Options) -> Verification {
         return r;
     };
     let mut selected: Vec<u8> = Vec::new();
-    append_selected_lines(&data, e.line_start as usize, e.line_end as usize, &mut selected);
+    append_selected_lines(
+        &data,
+        e.line_start as usize,
+        e.line_end as usize,
+        &mut selected,
+    );
     r.actual_hash = sha256::hex(&sha256::digest(&selected));
     if r.actual_hash != expected {
         r.message = format!(
@@ -352,15 +355,14 @@ fn resolve_anchor(
         let candidates = [low, high];
         // At distance zero the two directions coincide; probe the origin once.
         let count = if distance == 0 { 1 } else { 2 };
-        for index in 0..count {
-            let candidate = candidates[index];
+        for candidate in candidates.iter().copied().take(count) {
             if candidate < 1 || candidate > valid_starts {
                 continue;
             }
             let last_line = (candidate + extent - 1) as usize;
-            let cost =
-                (content_end(data, starts, last_line) - starts[(candidate - 1) as usize]) as u64
-                    + extent as u64;
+            let cost = (content_end(data, starts, last_line) - starts[(candidate - 1) as usize])
+                as u64
+                + extent as u64;
             if used + cost > RELOCATE_BYTE_BUDGET {
                 return Relocation {
                     found: false,
@@ -607,7 +609,14 @@ mod tests {
             ""
         );
         assert_eq!(
-            location_clause(data, total, 1, 2, &"ab".repeat(32), &Options { relocate: false }),
+            location_clause(
+                data,
+                total,
+                1,
+                2,
+                &"ab".repeat(32),
+                &Options { relocate: false }
+            ),
             ""
         );
         // An extent below one describes no window at all.

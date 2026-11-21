@@ -167,7 +167,12 @@ fn read_bounded(path: &str, kind: &str) -> Result<Vec<u8>, String> {
             if e.kind() == std::io::ErrorKind::NotFound {
                 return Err(format!("{} file {} does not exist", kind, quoted));
             }
-            return Err(format!("open {} {}: {}", kind, quoted, ledger::go_errno(&e)));
+            return Err(format!(
+                "open {} {}: {}",
+                kind,
+                quoted,
+                ledger::go_errno(&e)
+            ));
         }
     };
     let mut data = Vec::new();
@@ -391,7 +396,11 @@ fn evidence_issues(report: &evidence::Report) -> Vec<String> {
 
 fn ledger_command(args: &[String]) -> (String, i32) {
     if args.len() < 2 {
-        return usage_result(false, "a ledger subcommand is required", "ownscout ledger --help");
+        return usage_result(
+            false,
+            "a ledger subcommand is required",
+            "ownscout ledger --help",
+        );
     }
     let json = args.iter().any(|a| a == "--json");
     match args[1].as_str() {
@@ -406,11 +415,7 @@ fn ledger_command(args: &[String]) -> (String, i32) {
 }
 
 // parse_ledger_flag parses the shared "--ledger <file> [--json]" shape.
-fn parse_ledger_flag(
-    args: &[String],
-    json: bool,
-    help: &str,
-) -> Result<String, (String, i32)> {
+fn parse_ledger_flag(args: &[String], json: bool, help: &str) -> Result<String, (String, i32)> {
     let mut ledger_path = None;
     let mut i = 0;
     while i < args.len() {
@@ -535,7 +540,11 @@ fn ledger_rotate_command(args: &[String], json: bool) -> (String, i32) {
 
 fn node_command(args: &[String]) -> (String, i32) {
     if args.len() < 2 {
-        return usage_result(false, "a node subcommand is required", "ownscout node --help");
+        return usage_result(
+            false,
+            "a node subcommand is required",
+            "ownscout node --help",
+        );
     }
     let json = args.iter().any(|a| a == "--json");
     match args[1].as_str() {
@@ -559,7 +568,11 @@ fn node_bind_command(args: &[String], json: bool) -> (String, i32) {
         }
         if args[i] == "--packet" {
             if i + 1 >= args.len() || args[i + 1].starts_with('-') {
-                return usage_result(json, "--packet requires a value", "ownscout node bind --help");
+                return usage_result(
+                    json,
+                    "--packet requires a value",
+                    "ownscout node bind --help",
+                );
             }
             packet_path = Some(args[i + 1].clone());
             i += 2;

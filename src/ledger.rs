@@ -2,15 +2,15 @@ use crate::{
     json::{object, unique_object, Value},
     sha256,
 };
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 #[cfg(unix)]
 unsafe extern "C" {
@@ -85,7 +85,8 @@ pub fn open(path: &str, repo: &str) -> Result<Store, String> {
     let mut f = options
         .open(&full)
         .map_err(|e| format!("open ledger {:?}: {}", full.display(), e))?;
-    lock_exclusive(&f).map_err(|e| format!("lock ledger {:?}: {}", full.display(), go_errno(&e)))?;
+    lock_exclusive(&f)
+        .map_err(|e| format!("lock ledger {:?}: {}", full.display(), go_errno(&e)))?;
     reject_opened_file(&full, &resolved, &repo, expected.as_ref(), &parent_meta, &f)?;
     let lock = LedgerLock::new(&f);
     let mut data = Vec::new();
@@ -431,12 +432,18 @@ fn reject_opened_file(
     {
         use std::os::unix::fs::MetadataExt;
         if opened.nlink() != 1 {
-            return Err(format!("ledger {:?} must have link count 1", path.display()));
+            return Err(format!(
+                "ledger {:?} must have link count 1",
+                path.display()
+            ));
         }
     }
     let resolved_now = resolve_ledger_path(path);
     if resolved_now != expected_resolved {
-        return Err(format!("ledger path {:?} changed while opening", path.display()));
+        return Err(format!(
+            "ledger path {:?} changed while opening",
+            path.display()
+        ));
     }
     if inside(resolved_repo, &resolved_now) {
         return Err(format!(
@@ -543,12 +550,11 @@ pub fn rotate(path: &str) -> Result<(Summary, String), VerifyError> {
     options.read(true).write(true);
     #[cfg(unix)]
     options.custom_flags(nofollow_flag());
-    let mut file = options.open(&ledger_path).map_err(|e| {
-        VerifyError::Read(format!("open ledger {}: {}", quoted, go_errno(&e)))
-    })?;
-    lock_exclusive(&file).map_err(|e| {
-        VerifyError::Read(format!("lock ledger {}: {}", quoted, go_errno(&e)))
-    })?;
+    let mut file = options
+        .open(&ledger_path)
+        .map_err(|e| VerifyError::Read(format!("open ledger {}: {}", quoted, go_errno(&e))))?;
+    lock_exclusive(&file)
+        .map_err(|e| VerifyError::Read(format!("lock ledger {}: {}", quoted, go_errno(&e))))?;
     let _lock = LedgerLock::new(&file);
 
     let mut data = Vec::new();
@@ -638,9 +644,9 @@ impl LedgerLock {
     fn new(file: &File) -> Self {
         #[cfg(unix)]
         {
-            return Self {
+            Self {
                 fd: file.as_raw_fd(),
-            };
+            }
         }
         #[cfg(not(unix))]
         {
@@ -664,9 +670,7 @@ fn abs_clean(path: &str) -> PathBuf {
     let joined = if p.is_absolute() {
         p.to_path_buf()
     } else {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(p)
+        std::env::current_dir().unwrap_or_default().join(p)
     };
     let mut out = PathBuf::new();
     for c in joined.components() {
@@ -832,7 +836,12 @@ fn validate_node_result(result: &NodeResult) -> Result<(), String> {
     validate_ledger_identifier(&result.node_id).map_err(|e| format!("node_id: {}", e))?;
     match result.status.as_str() {
         "evidence_current" | "failed" | "blocked" => {}
-        other => return Err(format!("status {} is invalid", crate::packet::go_quote(other))),
+        other => {
+            return Err(format!(
+                "status {} is invalid",
+                crate::packet::go_quote(other)
+            ))
+        }
     }
     if [&result.node_id, &result.status, &result.reason]
         .iter()
@@ -1073,8 +1082,7 @@ impl<'a> GoDec<'a> {
                                     String::from_utf8_lossy(&self.data[escape..self.pos])
                                 ));
                             }
-                            let value =
-                                digits.iter().fold(0u32, |acc, d| acc * 16 + hex_digit(*d));
+                            let value = digits.iter().fold(0u32, |acc, d| acc * 16 + hex_digit(*d));
                             out.push(char::from_u32(value).unwrap_or('\u{FFFD}'));
                         }
                         _ => {

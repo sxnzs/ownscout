@@ -6,7 +6,7 @@ pub fn digest(data: &[u8]) -> [u8; 32] {
     let bit_len = (data.len() as u64) * 8;
     let mut msg = data.to_vec();
     msg.push(0x80);
-    while (msg.len() + 8) % 64 != 0 {
+    while !(msg.len() + 8).is_multiple_of(64) {
         msg.push(0);
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
