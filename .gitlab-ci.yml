@@ -1,81 +1,15 @@
-# GitLab CI for OwnScout.
-#
-# Mirrors .github/workflows/ci.yml. The Go reference is the specification; the
-# TypeScript, Rust and Zig ports must reproduce its stdout, exit codes and
-# ledger bytes exactly, so this pipeline builds all three and replays the
-# recorded corpora.
-#
-# Status: authored but not yet exercised on a GitLab runner. Every remote
-# dependency below was checked by hand: the Zig 0.16.0 linux tarball, rustup,
-# and the golang:1.26-bookworm / node:24-bookworm image tags all resolve, and
-# the Zig archive unpacks to zig-x86_64-linux-0.16.0/ as the symlink expects.
-
+# GitLab CI for OwnScout. Mirrors .github/workflows/verify.yml.
 stages:
-  - reference
-  - ports
+  - verify
 
 default:
   interruptible: true
 
-variables:
-  ZIG_VERSION: "0.16.0"
-  GO_VERSION: "1.26.0"
-
-reference:
-  stage: reference
-  image: golang:1.26-bookworm
-  script:
-    - go vet ./...
-    - go test ./...
-    - go build -o bin/ownscout ./cmd/ownscout
-    - make corpus-check
-    - make docs-check
-    # Re-measures the mutation table in spec/parity/PORT.md instead of trusting
-    # it; that table is why a passing harness is evidence rather than a
-    # formality, and it was hand-transcribed until now.
-    - make mutants-check
-    # Fails when a function under corpus replay is never executed and is not on
-    # the justified exemption list in the Makefile.
-    - make coverage
-
-ports:
-  stage: ports
-  image: node:24-bookworm
+verify:
+  stage: verify
+  image: rust:1-bookworm
   before_script:
-    - apt-get update -qq
-    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential
-    # Rust stable via rustup.
-    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-    # Zig, pinned to the version the ports target.
-    - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
-    - tar -C /opt -xf /tmp/zig.tar.xz
-    - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+    - rustup component add clippy rustfmt
+    - cargo fetch --locked
   script:
-    - . "$HOME/.cargo/env"
-    - node --version && cargo --version && zig version && python3 --version
-    - make ports
-    - spec/parity/verify-all.sh
-
-# The corpora pin behaviours that have been seen; the fuzzer explores inputs no
-# case names. A single seed is not a verification strategy: seven divergence
-# classes were reachable only at seeds the other jobs did not run. This sweep is
-# the thing that would have caught every one of them.
-fuzz:
-  stage: ports
-  image: node:24-bookworm
-  before_script:
-    - apt-get update -qq
-    - apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git make python3 build-essential
-    # Go from the official tarball: bookworm's golang-go is 1.19 and the module
-    # requires 1.26, so apt would silently build the wrong toolchain.
-    - curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
-    - tar -C /usr/local -xzf /tmp/go.tar.gz
-    - ln -sf /usr/local/go/bin/go /usr/local/bin/go
-    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-    - curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
-    - tar -C /opt -xf /tmp/zig.tar.xz
-    - ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
-  script:
-    - . "$HOME/.cargo/env"
-    - go version && node --version && cargo --version && zig version
-    - make fuzz-sweep
+    - ./scripts/verify
