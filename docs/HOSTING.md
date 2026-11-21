@@ -6,18 +6,17 @@ options and the student programs that offset their cost.
 
 ## Continuous integration
 
-Two pipelines are provided and should stay in sync:
+Two pipelines run the same gate and should stay in sync:
 
 | File | Forge |
 |---|---|
-| `.github/workflows/ci.yml` | GitHub Actions |
+| `.github/workflows/verify.yml` | GitHub Actions |
 | `.gitlab-ci.yml` | GitLab CI |
 
-Both build the Go reference, build all three ports, run
-`spec/parity/verify-all.sh`, and sweep fuzz seeds with `make fuzz-sweep`. The
-sweep is a separate job because it is slower and because a single seed is not a
-verification strategy: several divergence classes were reachable only at seeds
-the recorded corpus never exercised.
+Both call `./scripts/verify`, which runs the formatting check, clippy with
+warnings denied, the Rust tests, and a release build, then replays both corpora
+against `target/release/ownscout`. The replay is the verification strategy: a
+failing case names the exact bytes that diverged.
 
 ## Where to host
 

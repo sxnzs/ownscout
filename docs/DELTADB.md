@@ -1,8 +1,8 @@
 # OwnScout and DeltaDB primitives
 
 OwnScout does not copy DeltaDB's implementation. It applies the useful
-primitive ideas to a local evidence verifier: make work addressable, preserve
-ancestry, keep references tied to content, and make the audit readable without
+primitive ideas to a local evidence verifier: keep work addressable, preserve
+ancestry, keep references tied to content, and keep the audit readable without
 the checkout that produced it.
 
 This note records which of those ideas are actually implemented, and which are
@@ -21,7 +21,7 @@ assumed.
 
 ## The implemented audit primitive
 
-`ledger.Verify(path)` is the library boundary for a read-only audit. It bounds
+`ledger::verify` is the library boundary for a read-only audit. It bounds
 input at the same 1 MiB ledger limit as append, requires a regular file, reuses
 the same replay rule as `Open`, and returns the length and stable hash of the
 trusted prefix together with the first failure as a fixed rule and line, without
@@ -51,11 +51,11 @@ hang the audit.
 ## Deliberately deferred
 
 Packet ancestry (`prev_packet_hash`) remains outside the current packet-v1
-contract. Adding it would change the wire contract and every independent port;
-it should be proposed as a new version rather than smuggled into v1.
+contract. Adding it would change the wire contract and every corpus case; it
+should be proposed as a new version rather than smuggled into v1.
 
 A ledger query that reports whether a *sequence* of packet bindings appears in
 the trusted prefix is also not implemented. `ledger verify` answers "is this
 chain intact" and stops there; a sequence query would add a flag, its own
-validation rules, corpus cases and three port implementations, so it belongs in
-its own change rather than in the audit primitive's introduction.
+validation rules and corpus cases, so it belongs in its own change rather than
+in the audit primitive's introduction.

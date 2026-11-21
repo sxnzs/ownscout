@@ -18,8 +18,8 @@ Validate first, verify evidence second, and consume only after both commands
 return exit code `0`:
 
 ```bash
-if bin/ownscout contract validate --packet packet.json --json && \
-   bin/ownscout evidence verify --repo /path/to/repo --packet packet.json --json; then
+if target/release/ownscout contract validate --packet packet.json --json && \
+   target/release/ownscout evidence verify --repo /path/to/repo --packet packet.json --json; then
   # Consume packet.json here.
   :
 else

@@ -21,9 +21,8 @@
 - Do not add rules to this file. It stays under 30 lines.
 
 ## Repo facts
-- The Go reference in `internal/` is the spec; ports under `ports/` replay the corpus byte for byte. Keep the repo `npm`-free.
-- Any CLI stdout or error-string change needs `make corpus` and the regenerated corpus committed.
-- Never hand-edit the mutation table in `spec/parity/PORT.md`; run `make mutants` (new mutations go in `tools/mutants/main.go`).
-- `spec/parity/` is protected: port lanes fail on any untracked or modified file outside `ports/`. Keep scratch in `mktemp -d`, never `/tmp` (symlinked; ledger paths there are rejected).
-- Packets decode only through `internal/nodepacket` (strict, 1 MiB cap); the ledger is capped at 1 MiB and a full ledger is a rotation point.
-- Other agents may work here concurrently: keep commits scoped.
+- OwnScout is one Rust crate at the repo root; `spec/parity/corpus*.json` and `fixtures/` are the frozen behaviour spec the harness replays byte for byte.
+- Any CLI stdout or error-string change must update the corpus JSON in the same commit, and that corpus edit needs my review.
+- Keep scratch in `mktemp -d`, never `/tmp` (symlinked on macOS; ledger paths there are rejected).
+- Packets decode strictly (exact field names, duplicate keys rejected, 1 MiB cap); the ledger is capped at 1 MiB and a full ledger is a rotation point.
+- No `npm`. Other agents may work here concurrently: keep commits scoped.

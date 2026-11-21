@@ -4,6 +4,10 @@
 
 Build an isolated Go CLI, not an MCP server or daemon.
 
+Historical note: the Go reference and the TypeScript and Zig ports were removed
+on 2026-11-21. OwnScout is now a single Rust crate; the decision record below is
+kept as written.
+
 ## Why
 
 - Go produces a fast static binary and has excellent local DX.
